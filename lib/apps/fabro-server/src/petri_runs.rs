@@ -258,7 +258,6 @@ mod tests {
                     exit.notified().await;
                     let code = *sync::lock(&code);
                     Ok(WorkerExit {
-                        success: code == Some(0),
                         code,
                         detail: "test worker ended without a terminal event".to_string(),
                     })

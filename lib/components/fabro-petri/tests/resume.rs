@@ -141,10 +141,10 @@ fn resume_request(
         runtime,
         no_questions(Arc::new(Silent)),
     );
-    request.execution = match request.execution {
-        Execution::Start(graphs) => Execution::Resume(graphs),
-        resume @ Execution::Resume(_) => resume,
+    let Execution::Start(graphs) = request.execution else {
+        unreachable!("run_request builds a start");
     };
+    request.execution = Execution::Resume(graphs);
     request
 }
 

@@ -40,8 +40,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use anyhow::Context as _;
 use fabro_config::{
-    EnvironmentImageLayer, EnvironmentLayer, Home, MergeMap, SettingsLayer, Storage,
+    EnvironmentImageLayer, EnvironmentLayer, Home, MergeMap, RunScratch, SettingsLayer, Storage,
 };
 use fabro_interview::ControlInterviewer;
 use fabro_petri::artifacts::StoreArtifactWriter;
@@ -605,7 +606,7 @@ pub(crate) async fn reconcile_on_startup(
             run_state.spec.graph_source.clone().unwrap_or_default(),
             RunStatus::Runnable,
             run_id.created_at(),
-            scratch_root(state, run_id),
+            run_scratch(state, run_id).root().to_path_buf(),
             mode,
         ),
     );
@@ -750,8 +751,7 @@ async fn relaunch(state: &Arc<AppState>, run_id: RunId) -> anyhow::Result<Relaun
     };
     let mut start_requested = RunLifecycleRecord::new(RunLifecycleKind::StartRequested);
     start_requested.source = Some("resume".to_string());
-    let mut runnable = run_records::transition(RunLifecycleKind::Runnable, RunStatus::Runnable);
-    runnable.source = Some(<&'static str>::from(RunRunnableSource::StartRequested).to_string());
+    let runnable = run_records::runnable(RunRunnableSource::StartRequested);
     for record in [start_requested, runnable] {
         run_records::lifecycle(state, run_id, record).await?;
     }
@@ -772,18 +772,11 @@ const WORKER_STOP_PATIENCE: Duration = Duration::from_secs(10);
 pub(crate) async fn stop_previous_worker(state: &AppState, run_id: RunId) -> anyhow::Result<()> {
     #[cfg(unix)]
     {
-        let path = Storage::new(state.server_storage_dir())
-            .run_scratch(&run_id)
-            .worker_lock_path();
-        let holder = fabro_proc::stop_lock_holder(&path, WORKER_STOP_PATIENCE)
+        let path = run_scratch(state, run_id).worker_lock_path();
+        let stopped = fabro_proc::stop_lock_holder(&path, WORKER_STOP_PATIENCE)
             .await
-            .map_err(|err| {
-                anyhow::Error::new(err).context(format!(
-                    "stopping the run's previous worker ({})",
-                    path.display()
-                ))
-            })?;
-        if let fabro_proc::LockHolder::Stopped { pid } = holder {
+            .with_context(|| format!("stopping the run's previous worker ({})", path.display()))?;
+        if let Some(pid) = stopped {
             warn!(
                 run_id = %run_id,
                 pid,
@@ -796,12 +789,9 @@ pub(crate) async fn stop_previous_worker(state: &AppState, run_id: RunId) -> any
     Ok(())
 }
 
-/// The run's scratch root: its worker's run directory.
-fn scratch_root(state: &AppState, run_id: RunId) -> std::path::PathBuf {
-    Storage::new(state.server_storage_dir())
-        .run_scratch(&run_id)
-        .root()
-        .to_path_buf()
+/// The run's scratch: its worker's run directory and worker lock.
+fn run_scratch(state: &AppState, run_id: RunId) -> RunScratch {
+    Storage::new(state.server_storage_dir()).run_scratch(&run_id)
 }
 
 /// The failed status, its message, and the `failed` lifecycle record for it.
@@ -979,10 +969,7 @@ mod tests {
     async fn in_flight_run() -> (Arc<AppState>, RunId, SettlingLogs, Arc<RecordingLogs>) {
         let state = TestAppStateBuilder::new().in_process_execution().build();
         let run_id = RunId::new();
-        let run_dir = Storage::new(state.server_storage_dir())
-            .run_scratch(&run_id)
-            .root()
-            .to_path_buf();
+        let run_dir = super::run_scratch(&state, run_id).root().to_path_buf();
         state.runs.lock().expect("runs lock poisoned").insert(
             run_id,
             super::super::managed_run(

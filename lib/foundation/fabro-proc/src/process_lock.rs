@@ -69,37 +69,29 @@ impl ProcessLock {
     }
 }
 
-/// What [`stop_lock_holder`] found.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LockHolder {
-    /// No other process held the lock.
-    None,
-    /// This process held the lock. It was killed, with its process group,
-    /// and the lock is free: it is gone.
-    Stopped { pid: u32 },
-}
-
 /// Stop the process that holds the lock on the file at `path`, if another
 /// process does, and wait up to `patience` for the lock to be free. The
 /// holder and its process group get `SIGKILL`: a holder that could handle
 /// a signal could also keep running. A missing file has no holder.
 ///
-/// `Err` when the lock is still held after `patience`.
-pub async fn stop_lock_holder(path: &Path, patience: Duration) -> io::Result<LockHolder> {
+/// `Ok(Some(pid))` names the holder that was stopped: it is gone and the
+/// lock is free. `Ok(None)` when no other process held the lock. `Err`
+/// when the lock is still held after `patience`.
+pub async fn stop_lock_holder(path: &Path, patience: Duration) -> io::Result<Option<u32>> {
     let file = match OpenOptions::new().read(true).write(true).open(path).await {
         Ok(file) => file.into_std().await,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(LockHolder::None),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
     let Some(pid) = holder(&file)? else {
-        return Ok(LockHolder::None);
+        return Ok(None);
     };
     signal::sigkill_process_group(pid);
     signal::sigkill(pid);
     let deadline = Instant::now() + patience;
     loop {
         match holder(&file)? {
-            None => return Ok(LockHolder::Stopped { pid }),
+            None => return Ok(Some(pid)),
             Some(_) if Instant::now() >= deadline => {
                 return Err(io::Error::other(format!(
                     "process {pid} still holds {} after SIGKILL",
@@ -210,7 +202,7 @@ mod tests {
             stop_lock_holder(&path, Duration::from_secs(1))
                 .await
                 .expect("the check runs"),
-            LockHolder::None
+            None
         );
         drop(
             ProcessLock::try_hold(&path)
@@ -222,7 +214,7 @@ mod tests {
             stop_lock_holder(&path, Duration::from_secs(1))
                 .await
                 .expect("the check runs"),
-            LockHolder::None
+            None
         );
     }
 
@@ -250,7 +242,7 @@ mod tests {
             .await
             .expect("the holder is stopped");
 
-        assert_eq!(found, LockHolder::Stopped { pid });
+        assert_eq!(found, Some(pid));
         let status = holder.wait().await.expect("the holder is reaped");
         assert!(!status.success(), "the holder was killed: {status}");
         assert!(

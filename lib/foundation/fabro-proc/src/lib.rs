@@ -25,7 +25,7 @@ pub use pre_exec::pre_exec_setpgid;
 #[cfg(unix)]
 pub use pre_exec::pre_exec_setsid;
 #[cfg(unix)]
-pub use process_lock::{LockHolder, ProcessLock, stop_lock_holder};
+pub use process_lock::{ProcessLock, stop_lock_holder};
 pub use signal::{process_exists, process_group_alive, process_running, process_running_strict};
 #[cfg(unix)]
 pub use signal::{

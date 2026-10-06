@@ -62,13 +62,17 @@ pub(crate) struct StartedWorker {
 
 #[derive(Debug)]
 pub(crate) struct WorkerExit {
-    pub(crate) success: bool,
     /// The worker's exit code; `None` when a signal ended it.
-    pub(crate) code:    Option<i32>,
-    pub(crate) detail:  String,
+    pub(crate) code:   Option<i32>,
+    pub(crate) detail: String,
 }
 
 impl WorkerExit {
+    /// Whether the worker exited with status zero.
+    pub(crate) fn succeeded(&self) -> bool {
+        self.code == Some(0)
+    }
+
     /// Whether the worker ended the run's lifetime and not the run: its
     /// store failed, and the run resumes ([`ExitClass::Interrupted`]).
     pub(crate) fn interrupted(&self) -> bool {
@@ -147,9 +151,8 @@ impl WorkerRuntime for LocalWorkerRuntime {
         let wait: BoxFuture<'static, Result<WorkerExit>> = Box::pin(async move {
             let status = child.wait().await.context("worker wait failed")?;
             Ok(WorkerExit {
-                success: status.success(),
-                code:    status.code(),
-                detail:  status.to_string(),
+                code:   status.code(),
+                detail: status.to_string(),
             })
         });
 

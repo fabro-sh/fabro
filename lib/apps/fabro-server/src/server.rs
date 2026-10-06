@@ -4341,8 +4341,11 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
 
     let mut runs = state.runs.lock().expect("runs lock poisoned");
     if let Some(managed_run) = runs.get_mut(&run_id) {
-        managed_run.status =
-            status_after_worker_exit(managed_run.status, final_state.status, worker_exit.success);
+        managed_run.status = status_after_worker_exit(
+            managed_run.status,
+            final_state.status,
+            worker_exit.succeeded(),
+        );
         managed_run.error = final_state
             .conclusion
             .as_ref()

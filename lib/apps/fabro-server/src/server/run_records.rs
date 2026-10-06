@@ -16,7 +16,7 @@ use fabro_store::RunProjection;
 use fabro_store::platform_records::{
     PlatformRecord, RunLifecycleKind, RunLifecycleRecord, StoredPlatformRecord,
 };
-use fabro_types::{FailureReason, RunId, RunStatus, SuccessReason};
+use fabro_types::{FailureReason, RunId, RunRunnableSource, RunStatus, SuccessReason};
 
 use super::AppState;
 use crate::error::ApiError;
@@ -52,6 +52,14 @@ pub(crate) async fn lifecycle(
 #[must_use]
 pub(crate) fn transition(kind: RunLifecycleKind, status: RunStatus) -> RunLifecycleRecord {
     RunLifecycleRecord::new(kind).with_status(status)
+}
+
+/// The runnable transition, with what made the run runnable.
+#[must_use]
+pub(crate) fn runnable(source: RunRunnableSource) -> RunLifecycleRecord {
+    let mut record = transition(RunLifecycleKind::Runnable, RunStatus::Runnable);
+    record.source = Some(<&'static str>::from(source).to_string());
+    record
 }
 
 /// The run failed for `reason`, with `message` as the failure's detail.

@@ -316,14 +316,14 @@ pub async fn run(request: RunRequest) -> Result<RunOutcome, RunError> {
         }
         Execution::Resume(graphs) => {
             info!(run_id = %request.run_id, backend = %backend, "Resuming Petri run");
-            let resumed = Box::pin(host::resume_configured(
+            let outcome = Box::pin(host::resume_configured(
                 &runtime,
                 Vec::new(),
                 observers.clone(),
                 wiring(),
             ))
             .await;
-            match resumed {
+            match outcome {
                 // A crash cut the run's creation short: nothing beyond its
                 // start is stored, so it starts again from its admitted
                 // graphs, and Petri takes the stored prefix over.
@@ -334,7 +334,7 @@ pub async fn run(request: RunRequest) -> Result<RunOutcome, RunError> {
                     );
                     start(&runtime, graphs, observers, wiring()).await
                 }
-                resumed => resumed,
+                outcome => outcome,
             }
         }
     };

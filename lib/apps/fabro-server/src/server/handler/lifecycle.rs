@@ -153,7 +153,7 @@ pub(super) async fn queue_run(
     let next = if approval_required {
         run_records::transition(RunLifecycleKind::Pending, next_status)
     } else {
-        runnable(RunRunnableSource::StartRequested)
+        run_records::runnable(RunRunnableSource::StartRequested)
     };
     for record in [start_requested, next] {
         if let Err(err) = run_records::lifecycle(state, id, record).await {
@@ -213,7 +213,7 @@ async fn approve_run(
 
     for record in [
         RunLifecycleRecord::new(RunLifecycleKind::Approved),
-        runnable(RunRunnableSource::Approved),
+        run_records::runnable(RunRunnableSource::Approved),
     ] {
         if let Err(err) = run_records::lifecycle(state.as_ref(), id, record).await {
             return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
@@ -1070,13 +1070,6 @@ async fn run_archive_action(
 
 async fn archive_status_response(state: &AppState, id: RunId) -> Response {
     run_response(state, id, StatusCode::OK).await
-}
-
-/// The runnable transition, with what made the run runnable.
-fn runnable(source: RunRunnableSource) -> RunLifecycleRecord {
-    let mut record = run_records::transition(RunLifecycleKind::Runnable, RunStatus::Runnable);
-    record.source = Some(<&'static str>::from(source).to_string());
-    record
 }
 
 /// Persist a synchronous pause/unpause transition: record it and mirror the
