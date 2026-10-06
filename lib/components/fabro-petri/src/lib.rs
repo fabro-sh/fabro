@@ -85,6 +85,7 @@ pub mod run_store;
 pub mod runtime;
 pub mod secrets;
 pub mod source;
+pub mod stage_credentials;
 #[cfg(feature = "test-support")]
 pub mod test_support;
 pub mod workspace;

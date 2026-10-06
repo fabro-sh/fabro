@@ -1990,7 +1990,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-api"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "chrono",
  "fabro-automation",
@@ -2016,7 +2016,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-auth"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2041,7 +2041,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-automation"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2062,11 +2062,11 @@ dependencies = [
 
 [[package]]
 name = "fabro-build-support"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 
 [[package]]
 name = "fabro-checkpoint"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "fabro-config",
  "fabro-types",
@@ -2074,7 +2074,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-cli"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -2170,7 +2170,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-client"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2199,7 +2199,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-config"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2228,7 +2228,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-db"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2241,7 +2241,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-dev"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -2260,7 +2260,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-dot"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "fabro-template",
  "fabro-types",
@@ -2272,7 +2272,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-dump"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2286,7 +2286,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-environment"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2308,7 +2308,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-github"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2333,7 +2333,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-graphviz"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "fabro-dot",
@@ -2343,7 +2343,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-http"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "fabro-static",
  "http 1.4.0",
@@ -2353,7 +2353,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-install"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "fabro-config",
@@ -2370,7 +2370,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-interview"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "async-trait",
  "fabro-types",
@@ -2382,7 +2382,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-llm"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2407,7 +2407,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-macros"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "clap",
  "fabro-options-metadata",
@@ -2418,7 +2418,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-manifest"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2447,7 +2447,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-mcp-server"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "fabro-client",
@@ -2467,7 +2467,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-mcp-store"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "chrono",
  "fabro-db",
@@ -2485,7 +2485,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-oauth"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2507,7 +2507,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-options-metadata"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2515,7 +2515,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-petri"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2526,6 +2526,7 @@ dependencies = [
  "fabro-checkpoint",
  "fabro-client",
  "fabro-db",
+ "fabro-github",
  "fabro-http",
  "fabro-interview",
  "fabro-llm",
@@ -2543,6 +2544,7 @@ dependencies = [
  "lithos-llm",
  "object_store",
  "pebble-coding-agent",
+ "percent-encoding",
  "petri-attractor-steps",
  "petri-execution",
  "petri-frontend-attractor",
@@ -2556,6 +2558,7 @@ dependencies = [
  "sandbox-driver-host",
  "serde",
  "serde_json",
+ "smol_str",
  "sqlx",
  "tempfile",
  "thiserror 2.0.18",
@@ -2566,7 +2569,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-proc"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "libc",
  "tempfile",
@@ -2578,7 +2581,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-redact"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "aho-corasick",
  "pebble-coding-agent",
@@ -2595,7 +2598,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-server"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2690,7 +2693,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-slack"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "fabro-http",
  "fabro-interview",
@@ -2711,18 +2714,18 @@ dependencies = [
 
 [[package]]
 name = "fabro-spa"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "rust-embed",
 ]
 
 [[package]]
 name = "fabro-static"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 
 [[package]]
 name = "fabro-store"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -2750,7 +2753,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-telemetry"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -2776,7 +2779,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-template"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "fabro-types",
@@ -2790,7 +2793,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-test"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -2815,7 +2818,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-tool"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2839,7 +2842,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-tracker"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2853,7 +2856,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-types"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "chrono",
  "clap",
@@ -2880,7 +2883,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-util"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "console 0.15.11",
@@ -2903,7 +2906,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-variable"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2920,7 +2923,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-vault"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2939,7 +2942,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-workflow"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2984,7 +2987,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-workflow-version"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "fabro-config",
  "fabro-dot",
@@ -5161,7 +5164,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 [[package]]
 name = "petri-attractor-steps"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#91d1b77b3927cb3fefcc4a412fdf89ce04857277"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#e46845bd0139dd04e9e795d3201b5b9b4b8b1026"
 dependencies = [
  "async-trait",
  "globset",
@@ -5192,7 +5195,7 @@ dependencies = [
 [[package]]
 name = "petri-driver"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#91d1b77b3927cb3fefcc4a412fdf89ce04857277"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#e46845bd0139dd04e9e795d3201b5b9b4b8b1026"
 dependencies = [
  "async-trait",
  "getrandom 0.3.4",
@@ -5212,7 +5215,7 @@ dependencies = [
 [[package]]
 name = "petri-engine"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#91d1b77b3927cb3fefcc4a412fdf89ce04857277"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#e46845bd0139dd04e9e795d3201b5b9b4b8b1026"
 dependencies = [
  "petri-ir",
  "serde",
@@ -5224,7 +5227,7 @@ dependencies = [
 [[package]]
 name = "petri-execution"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#91d1b77b3927cb3fefcc4a412fdf89ce04857277"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#e46845bd0139dd04e9e795d3201b5b9b4b8b1026"
 dependencies = [
  "async-trait",
  "petri-driver",
@@ -5248,7 +5251,7 @@ dependencies = [
 [[package]]
 name = "petri-executor"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#91d1b77b3927cb3fefcc4a412fdf89ce04857277"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#e46845bd0139dd04e9e795d3201b5b9b4b8b1026"
 dependencies = [
  "async-trait",
  "libc",
@@ -5263,7 +5266,7 @@ dependencies = [
 [[package]]
 name = "petri-executor-sandbox"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#91d1b77b3927cb3fefcc4a412fdf89ce04857277"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#e46845bd0139dd04e9e795d3201b5b9b4b8b1026"
 dependencies = [
  "async-trait",
  "petri-executor",
@@ -5285,7 +5288,7 @@ dependencies = [
 [[package]]
 name = "petri-frontend"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#91d1b77b3927cb3fefcc4a412fdf89ce04857277"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#e46845bd0139dd04e9e795d3201b5b9b4b8b1026"
 dependencies = [
  "marked-yaml",
  "petri-ir",
@@ -5299,7 +5302,7 @@ dependencies = [
 [[package]]
 name = "petri-frontend-attractor"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#91d1b77b3927cb3fefcc4a412fdf89ce04857277"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#e46845bd0139dd04e9e795d3201b5b9b4b8b1026"
 dependencies = [
  "minijinja",
  "petri-frontend",
@@ -5316,7 +5319,7 @@ dependencies = [
 [[package]]
 name = "petri-frontend-fabro"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#91d1b77b3927cb3fefcc4a412fdf89ce04857277"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#e46845bd0139dd04e9e795d3201b5b9b4b8b1026"
 dependencies = [
  "petri-frontend",
  "petri-frontend-attractor",
@@ -5332,7 +5335,7 @@ dependencies = [
 [[package]]
 name = "petri-frontend-native"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#91d1b77b3927cb3fefcc4a412fdf89ce04857277"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#e46845bd0139dd04e9e795d3201b5b9b4b8b1026"
 dependencies = [
  "petri-frontend",
  "petri-ir",
@@ -5343,7 +5346,7 @@ dependencies = [
 [[package]]
 name = "petri-ir"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#91d1b77b3927cb3fefcc4a412fdf89ce04857277"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#e46845bd0139dd04e9e795d3201b5b9b4b8b1026"
 dependencies = [
  "regex",
  "serde",
@@ -5356,7 +5359,7 @@ dependencies = [
 [[package]]
 name = "petri-runtime"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#91d1b77b3927cb3fefcc4a412fdf89ce04857277"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#e46845bd0139dd04e9e795d3201b5b9b4b8b1026"
 dependencies = [
  "async-trait",
  "petri-driver",
@@ -5377,7 +5380,7 @@ dependencies = [
 [[package]]
 name = "petri-steps"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#91d1b77b3927cb3fefcc4a412fdf89ce04857277"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#e46845bd0139dd04e9e795d3201b5b9b4b8b1026"
 dependencies = [
  "async-trait",
  "petri-executor",
@@ -5393,7 +5396,7 @@ dependencies = [
 [[package]]
 name = "petri-store"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#91d1b77b3927cb3fefcc4a412fdf89ce04857277"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#e46845bd0139dd04e9e795d3201b5b9b4b8b1026"
 dependencies = [
  "async-trait",
  "getrandom 0.3.4",
@@ -5408,7 +5411,7 @@ dependencies = [
 [[package]]
 name = "petri-testkit"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#91d1b77b3927cb3fefcc4a412fdf89ce04857277"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#e46845bd0139dd04e9e795d3201b5b9b4b8b1026"
 dependencies = [
  "async-trait",
  "petri-driver",
@@ -5424,6 +5427,7 @@ dependencies = [
  "serde_json",
  "smol_str",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -7896,7 +7900,7 @@ dependencies = [
 
 [[package]]
 name = "twin-github"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 dependencies = [
  "axum",
  "base64",

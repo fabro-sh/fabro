@@ -10,7 +10,7 @@ resolver = "2"
 
 [workspace.package]
 edition = "2021"
-version = "0.375.0-nightly.0"
+version = "0.378.0-nightly.0"
 license = "MIT"
 
 [workspace.dependencies]
@@ -70,6 +70,7 @@ jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 hkdf = "0.12"
 hmac = "0.12"
 sha2 = "0.10"
+smol_str = "0.3"
 hex = "0.4"
 insta = "1"
 fabro-test = { path = "lib/foundation/fabro-test" }
