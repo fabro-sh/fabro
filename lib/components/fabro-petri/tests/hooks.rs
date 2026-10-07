@@ -1459,6 +1459,10 @@ async fn assert_shallow_fork(checkpoint_index: usize) {
     })
     .await
     .expect("the fork is seeded");
+    assert!(
+        forked.inspection().await.required_finalization,
+        "a publishing fork inherits its required finalization declaration"
+    );
     assert_eq!(
         seeded.start.expect("the selected checkpoint").sha,
         *checkpoint_sha

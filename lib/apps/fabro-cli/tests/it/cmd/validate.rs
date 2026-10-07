@@ -263,6 +263,12 @@ fn bare_fabro_with_unbound_inputs_in_template_partial_validates_structurally_wit
     // The include error names the partial relative to the run's working
     // directory, so the `../` run is as long as that directory is deep.
     let mut filters = context.filters();
+    // A checkout outside the user home can be rendered through a relative
+    // path (including macOS's /tmp alias), rather than its canonical root.
+    filters.push((
+        r#"(?:\.\./)+[^"\s]*?/test/(templated_unbound_partial/)"#.to_string(),
+        "[UP][FIXTURES]/$1".to_string(),
+    ));
     filters.push((
         r"(\.\./)*\.\.\[FIXTURES\]".to_string(),
         "[UP][FIXTURES]".to_string(),
@@ -333,6 +339,10 @@ fn validate_reports_missing_template_dependency() {
     let mut cmd = context.validate();
     cmd.arg(fixture("templates/missing_dependency/workflow.fabro"));
     let mut filters = context.filters();
+    filters.push((
+        r"(?:\.\./)+[^`\s]*?/test/(templates/missing_dependency/)".to_string(),
+        "[FIXTURES]/$1".to_string(),
+    ));
     filters.push((
         r"(?:\.\./)*\.\.\[FIXTURES\]/".to_string(),
         "[FIXTURES]/".to_string(),
