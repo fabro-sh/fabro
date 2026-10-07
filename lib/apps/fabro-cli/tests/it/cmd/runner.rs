@@ -699,11 +699,12 @@ fn runner_reports_malformed_run_state_without_prefetching_events() {
     );
     state_mock.assert();
     events_mock.assert_calls(0);
+    let stderr = output_stderr(&output);
     assert!(
-        output_stderr(&output).contains("Invalid Response Payload"),
-        "{}",
-        output_stderr(&output)
+        stderr.contains("server response did not match the schema this CLI expects"),
+        "{stderr}"
     );
+    assert!(stderr.contains("missing field `spec`"), "{stderr}");
 }
 
 #[test]
