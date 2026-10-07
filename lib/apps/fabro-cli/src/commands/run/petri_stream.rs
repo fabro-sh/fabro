@@ -1307,10 +1307,10 @@ mod tests {
         assert_eq!(exit_code_of(&finished), Some(1));
         let mut state = PrettyState::default();
         let line = format_pretty(&finished, &Styles::new(false), &mut state).unwrap();
-        insta::assert_snapshot!(line, @r###"
-        12:43:08 ✗ FAILED 0s
-        12:43:08    the push was rejected
-        "###);
+        insta::assert_snapshot!(line, @"
+        04:43:08 ✗ FAILED 0ms
+        04:43:08    the push was rejected
+        ");
     }
 
     #[test]

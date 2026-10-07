@@ -3515,13 +3515,70 @@ async fn fail_run_before_execution(
     reason: FailureReason,
     message: String,
 ) {
-    if let Err(err) =
-        run_records::lifecycle(state, run_id, run_records::failed(reason, message.clone())).await
-    {
-        error!(run_id = %run_id, error = %err, "Failed to persist run failure status");
-    }
+    persist_run_failure(state, run_id, reason, message).await;
+}
 
-    fail_managed_run(state, run_id, reason, message);
+/// Record a host failure only while no terminal result is committed. This
+/// also handles a worker wait/launch error racing its durable Petri finish.
+pub(crate) async fn persist_run_failure(
+    state: &Arc<AppState>,
+    run_id: RunId,
+    reason: FailureReason,
+    message: String,
+) {
+    match run_records::projection(state, run_id).await {
+        Ok(Some(projection)) if projection.status.is_terminal() => {
+            let failure = projection
+                .conclusion
+                .as_ref()
+                .and_then(|conclusion| conclusion.failure.as_ref())
+                .map(|failure| failure.detail.message.clone());
+            settle_managed_run_at_finish(state, run_id, projection.status, failure);
+        }
+        Ok(Some(_)) => {
+            match run_records::lifecycle(
+                state,
+                run_id,
+                run_records::failed(reason, message.clone()),
+            )
+            .await
+            {
+                Ok(_) => match run_records::projection(state, run_id).await {
+                    Ok(Some(committed)) if committed.status.is_terminal() => {
+                        let failure = committed
+                            .conclusion
+                            .as_ref()
+                            .and_then(|conclusion| conclusion.failure.as_ref())
+                            .map(|failure| failure.detail.message.clone());
+                        settle_managed_run_at_finish(state, run_id, committed.status, failure);
+                    }
+                    Ok(_) => {
+                        error!(run_id = %run_id, "Stored host failure has no terminal projection");
+                    }
+                    Err(err) => {
+                        error!(run_id = %run_id, error = %err, "Failed to read the committed host failure");
+                    }
+                },
+                Err(err) => {
+                    error!(run_id = %run_id, error = %err, "Failed to persist run failure status");
+                }
+            }
+        }
+        Ok(None) => {
+            error!(run_id = %run_id, "Run missing when recording a host failure");
+        }
+        Err(err) => {
+            error!(run_id = %run_id, error = %err, "Failed to read the committed run result");
+        }
+    }
+    // Resource cleanup is operational; it cannot substitute for a committed
+    // outcome if storage is unavailable.
+    let mut runs = state.runs.lock().expect("runs lock poisoned");
+    if let Some(managed_run) = runs.get_mut(&run_id) {
+        clear_live_run_state(managed_run);
+    }
+    drop(runs);
+    cleanup_worker_control_bus_for_run(state, run_id);
     state.scheduler_notify.notify_one();
 }
 
@@ -3777,26 +3834,13 @@ async fn fail_worker_launch(state: &Arc<AppState>, run_id: RunId, err: anyhow::E
             None
         }
     };
-    let launch_message = format!("Failed to spawn worker: {err}");
     let (error, reason) = failure_honoring_pending_cancel(pending_control, || {
         (
             WorkflowError::engine_with_anyhow("Failed to spawn worker", err),
             FailureReason::LaunchFailed,
         )
     });
-    let message = if reason == FailureReason::Cancelled {
-        "Run cancelled before worker launch completed".to_string()
-    } else {
-        launch_message
-    };
-    let _ = run_records::lifecycle(
-        state,
-        run_id,
-        run_records::failed(reason, error.to_string()),
-    )
-    .await;
-    fail_managed_run(state, run_id, reason, message);
-    state.scheduler_notify.notify_one();
+    persist_run_failure(state, run_id, reason, error.to_string()).await;
 }
 
 /// A worker that exited without recording the run's end left it failed,
@@ -4257,15 +4301,17 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         Err(err) => {
             tracing::error!(run_id = %run_id, error = %err, "Failed while waiting on worker");
             let message = format!("Worker wait failed: {err}");
+            let superseded = {
+                let runs = state.runs.lock().expect("runs lock poisoned");
+                runs.get(&run_id)
+                    .is_some_and(|run| run.worker_ref.as_ref() != Some(&worker_ref))
+            };
+            if superseded {
+                return;
+            }
             state.worker_runtime.force_stop(&worker_ref).await;
-            let _ = run_records::lifecycle(
-                &state,
-                run_id,
-                run_records::failed(FailureReason::Terminated, message.clone()),
-            )
-            .await;
-            fail_managed_run(&state, run_id, FailureReason::Terminated, message);
-            state.scheduler_notify.notify_one();
+            state.petri_runs.worker_exited(run_id);
+            persist_run_failure(&state, run_id, FailureReason::Terminated, message).await;
             return;
         }
     };

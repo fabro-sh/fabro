@@ -53,16 +53,18 @@
 //!
 //! # Operation identities
 //!
-//! Every external effect here is keyed on `(run key, execution, DecisionId,
-//! effect kind)` from the hook context and deduplicated on retry: the
-//! checkpoint's key is the attempt's decision in its execution, effect
+//! Checkpoint and artifact effects are keyed on `(run key, execution,
+//! DecisionId, effect kind)` from the hook context and deduplicated on retry:
+//! the checkpoint's key is the attempt's decision in its execution, effect
 //! `checkpoint`; an artifact's is the same decision, effect `artifact`, with
 //! the file's path and content digest as the identity within it. A
 //! re-dispatched attempt whose commit already landed reuses it when the
 //! workspace still sits on it unchanged (see [`RunWorkspaces::commit`]); a
 //! reissued routing decision finds the record, or the commit by its
 //! trailers, and writes nothing twice; a file already collected under the
-//! same path and digest is not collected again.
+//! same path and digest is not collected again. Publication keeps the
+//! publisher's reconciliation policy; required finalization adds no independent
+//! effect ledger or guarantee of deduplication across every external crash.
 //!
 //! # Where the workspace is
 //!

@@ -150,7 +150,7 @@ pub enum RunStatus {
 #[derive(Clone, Debug)]
 pub struct RunOutcome {
     pub status:         RunStatus,
-    /// The root invocation's failure message, when it failed.
+    /// Required-finalization failure detail, or the root execution's failure.
     pub failure:        Option<String>,
     /// Whether the record is whole: the run recorded its finish and every
     /// log replays byte for byte.
@@ -409,8 +409,9 @@ pub async fn outcome_of(store: &dyn RunStore, run_id: &str) -> Result<RunOutcome
 
 /// How Fabro reports what [`run`] returned. A cancelled run is a failure
 /// with the cancelled reason, as the legacy executor reports one; a failed
-/// store interrupted the run; every other shortfall is a workflow error
-/// whose message says what the record, or the host, said.
+/// store interrupted the run; a publication rejection keeps its
+/// publish_failed reason. Other shortfalls are workflow errors whose message
+/// says what the record, or the host, said.
 #[must_use]
 pub fn conclusion(result: &Result<RunOutcome, RunError>) -> Conclusion {
     match result {
