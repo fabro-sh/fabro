@@ -486,8 +486,7 @@ export function debugRowSearchText(row: DebugRow): string {
 
 /**
  * The edge a stage's firing took, from its `route.applied` record:
- * `derived.target` is the node Petri resolved, `kind` says whether the edge
- * was followed or jumped to.
+ * `derived.target` is the node Petri resolved.
  */
 export function findPetriEdgeForStage(
   stream: PetriStream,
@@ -499,14 +498,11 @@ export function findPetriEdgeForStage(
     if (petriStageLabel(item) !== stageLabel) continue;
     const target = getString(getObject(derived(item), "target"), "name");
     if (!target) continue;
-    const body = petriBody(item);
-    const kind = getString(body, "kind") ?? "edge";
     latest = {
       fromNode: getString(subjectNode(item), "name") ?? stageLabel,
       toNode: target,
-      reason: kind === "jump" ? "jump" : "condition",
+      reason: "condition",
       condition: matchedCondition(item) ?? null,
-      isJump: kind === "jump",
     };
   }
   return latest;
