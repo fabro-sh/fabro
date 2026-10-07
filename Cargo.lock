@@ -3377,7 +3377,7 @@ dependencies = [
 [[package]]
 name = "graphviz-sys"
 version = "0.1.0"
-source = "git+https://github.com/fabro-sh/graphviz-sys#2b8248bab1c822715a0805385208e1d0d98d23d9"
+source = "git+https://github.com/fabro-sh/graphviz-sys#e6ed96592b8b9af8ebc3744a601d3829e5ab3b3c"
 dependencies = [
  "cc",
 ]
