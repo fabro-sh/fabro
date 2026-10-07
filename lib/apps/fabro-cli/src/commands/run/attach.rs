@@ -205,7 +205,8 @@ struct AttachOptions {
 
 /// Attach to a Petri run: replay its stream through the progress renderer,
 /// then follow it live from the last `stream_seq` seen. A question on the
-/// stream is asked at the terminal and answered through the questions API.
+/// stream is asked at the terminal and answered through the questions API
+/// when approval is manual. Auto-approved runs leave answers to the engine.
 /// When the server ends the stream before the run's terminal record, the
 /// attach reconnects from its cursor, so no item is missed or repeated.
 async fn attach_petri_run_with_client(
@@ -317,6 +318,11 @@ async fn handle_pending_petri_interview(
     styles: &'static Styles,
     printer: Printer,
 ) -> Result<Option<ExitCode>> {
+    // The engine answers every question in auto-approval mode. Keep following
+    // its stream instead of polling for a question the CLI must not answer.
+    if opts.auto_approve {
+        return Ok(None);
+    }
     let Some(question) = client.list_run_questions(run_id).await?.into_iter().next() else {
         return Ok(None);
     };
@@ -1026,5 +1032,86 @@ mod tests {
 
         cancel_mock.assert();
         state_mock.assert();
+    }
+
+    async fn attach_with_unavailable_question_api(
+        approval: ApprovalMode,
+    ) -> (Result<ExitCode>, usize) {
+        let run_id = fabro_types::fixtures::RUN_1;
+        let server = MockServer::start_async().await;
+        let mut state = terminal_run_state_response(run_id);
+        state["status"] = serde_json::json!({"kind": "running"});
+        state["spec"]["settings"]["run"]["execution"]["approval"] =
+            serde_json::to_value(approval).unwrap();
+        server.mock(|when, then| {
+            when.method("GET")
+                .path(format!("/api/v1/runs/{run_id}/state"));
+            then.status(200).json_body(state);
+        });
+        server.mock(|when, then| {
+            when.method("GET")
+                .path(format!("/api/v1/runs/{run_id}/events"));
+            then.status(200).json_body(serde_json::json!({
+                "data": [],
+                "meta": {"has_more": false, "total": 0},
+                "event_contract_version": 1
+            }));
+        });
+        let terminal = fabro_types::RunStreamItem {
+            run_id,
+            stream_seq: 1,
+            kind: fabro_types::RunStreamItemKind::Platform,
+            id: "1".to_string(),
+            recorded_at: 0,
+            item: serde_json::json!({
+                "record": {
+                    "kind": "run.lifecycle",
+                    "transition": "succeeded",
+                    "status": {"kind": "succeeded", "reason": "completed"}
+                }
+            }),
+        };
+        server.mock(|when, then| {
+            when.method("GET")
+                .path(format!("/api/v1/runs/{run_id}/attach"));
+            then.status(200)
+                .header("content-type", "text/event-stream")
+                .body(format!(
+                    "data: {}\n\n",
+                    serde_json::to_string(&terminal).unwrap()
+                ));
+        });
+        let questions = server.mock(|when, then| {
+            when.method("GET").path(format!("/api/v1/runs/{run_id}/questions"));
+            then.status(503).json_body(serde_json::json!({
+                "errors": [{"status": "503", "title": "Unavailable", "detail": "questions unavailable"}]
+            }));
+        });
+        let client = server_client::Client::new_no_proxy(&server.base_url()).unwrap();
+        let result = attach_run_with_client(
+            &client,
+            &run_id,
+            false,
+            no_color_styles(),
+            false,
+            false,
+            Printer::Default,
+        )
+        .await;
+        (result, questions.calls())
+    }
+
+    #[tokio::test]
+    async fn auto_approved_attach_follows_completion_without_querying_questions() {
+        let (result, calls) = attach_with_unavailable_question_api(ApprovalMode::Auto).await;
+        assert_eq!(result.unwrap(), ExitCode::SUCCESS);
+        assert_eq!(calls, 0);
+    }
+
+    #[tokio::test]
+    async fn prompted_attach_preserves_question_api_errors() {
+        let (result, calls) = attach_with_unavailable_question_api(ApprovalMode::Prompt).await;
+        assert_eq!(result.unwrap_err().to_string(), "questions unavailable");
+        assert_eq!(calls, 1);
     }
 }
