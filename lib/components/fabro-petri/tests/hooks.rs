@@ -1262,14 +1262,22 @@ async fn published_run(
     let (origin, _) = upstream(&harness.run_dir.with_file_name("upstream"), 2).await;
     harness.source = Some(file_source(&origin, "main", Some(1)));
     harness.publisher = Some(Arc::clone(publisher) as Arc<dyn RunPublisher>);
-    let workflow = workflow(
-        &format!("  edit [shape=parallelogram, {attributes}]"),
-        "  start -> edit -> exit",
-    );
     let outcome = harness
-        .run_on(SandboxProviderKind::LOCAL, &workflow, SETTINGS)
+        .run_on(
+            SandboxProviderKind::LOCAL,
+            &published_workflow(attributes),
+            SETTINGS,
+        )
         .await;
     (harness, outcome)
+}
+
+/// The workflow [`published_run`] runs: one command stage with `attributes`.
+fn published_workflow(attributes: &str) -> String {
+    workflow(
+        &format!("  edit [shape=parallelogram, {attributes}]"),
+        "  start -> edit -> exit",
+    )
 }
 
 /// A successful run hands its publisher the run branch, the commit it ends
@@ -1308,7 +1316,8 @@ async fn a_successful_run_is_published_with_its_branch_head_and_patch() {
 #[tokio::test]
 async fn a_failed_publication_fails_the_run() {
     let publisher = RecordingPublisher::new(Some("the push was rejected"));
-    let (harness, outcome) = published_run("script=\"echo edited >> README.md\"", &publisher).await;
+    let attributes = "script=\"echo edited >> README.md\"";
+    let (harness, outcome) = published_run(attributes, &publisher).await;
     assert_eq!(outcome.status, RunStatus::Failed, "{outcome:?}");
     assert!(outcome.publish_failed);
     assert_eq!(outcome.failure.as_deref(), Some("the push was rejected"));
@@ -1324,7 +1333,12 @@ async fn a_failed_publication_fails_the_run() {
     assert_eq!(stored.failure, outcome.failure);
     assert!(stored.publish_failed);
     let resumed = harness
-        .execute_on(SandboxProviderKind::LOCAL, "", SETTINGS, true)
+        .execute_on(
+            SandboxProviderKind::LOCAL,
+            &published_workflow(attributes),
+            SETTINGS,
+            true,
+        )
         .await;
     assert_eq!(resumed.status, outcome.status);
     assert_eq!(resumed.failure, outcome.failure);

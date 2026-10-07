@@ -574,13 +574,25 @@ mod tests {
         transition: RunLifecycleKind,
         status: RunStatus,
     ) {
+        let response = append_lifecycle_as_worker(app, run_id, token, transition, status).await;
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    /// Append one lifecycle record as the run's worker, and return the
+    /// server's response whatever it is.
+    async fn append_lifecycle_as_worker(
+        app: &axum::Router,
+        run_id: RunId,
+        token: &str,
+        transition: RunLifecycleKind,
+        status: RunStatus,
+    ) -> axum::response::Response {
         let record =
             PlatformRecord::RunLifecycle(RunLifecycleRecord::new(transition).with_status(status));
         let body = json!({
             "record": serde_json::to_value(&record).expect("the record encodes"),
         });
-        let response = app
-            .clone()
+        app.clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -591,8 +603,7 @@ mod tests {
                     .expect("the append request builds"),
             )
             .await
-            .expect("the append request completes");
-        assert_eq!(response.status(), StatusCode::OK);
+            .expect("the append request completes")
     }
 
     /// Petri's own finish of the run, stored the way its worker stores it:

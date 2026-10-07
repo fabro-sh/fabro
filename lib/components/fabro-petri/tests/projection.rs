@@ -1449,7 +1449,7 @@ async fn required_finalization_projects_only_the_committed_overall_result() {
         }
         finalizer.release.add_permits(1);
         let report = task.await.unwrap();
-        assert_eq!(report.execution_status, PetriRunStatus::Success);
+        assert_eq!(report.state.folded_status(), PetriRunStatus::Success);
         assert_eq!(
             report.status,
             if rejection.is_some() {

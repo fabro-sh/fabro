@@ -20,14 +20,13 @@ Both HTTP and in-process worker transports store the finish before settling
 managed status. A rejected append cannot settle the run. The later platform
 terminal lifecycle record acknowledges the same outcome; it cannot replace a
 terminal result or conclusion. Early worker failures without a Petri finish
-still end through their committed platform lifecycle record. Worker generation,
-run scope and lease ownership checks remain required for every worker write.
+still end through their committed platform lifecycle record. Run scope,
+authorization and lease ownership checks remain required for every worker write.
 
 ## Recovery and stored history
 
-This integration pins Petri revision
-`0198e66f6619e147e461c52c138497863d851969`, coordinator format 9 and event
-contract 6. Petri retains its strict stored-format policy: version-8 coordinator
+This integration requires a Petri with required run finalization (coordinator
+format 9) and event contract 6. Petri retains its strict stored-format policy: version-8 coordinator
 logs cannot resume, inspect or replay with this engine. Fabro does not rewrite
 source history or relax that policy. Existing materialized views and stream
 rows remain stored; a projector replay failure holds Petri positions and reports
