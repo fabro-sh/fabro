@@ -223,31 +223,30 @@ Install seeds a `default` environment into SQLite. It is a normal persisted envi
 | `labels` | Warning; ignored | Warning; ignored | Daytona labels |
 | `lifecycle.auto_stop` | Warning; ignored | Warning; ignored | Daytona auto-stop |
 | `env` | Process environment overlay | Container environment | Sandbox environment |
-| `cwd` | Server-side command working directory | Warning; ignored | Warning; ignored |
+| `cwd` | Does not override the managed run workspace | Warning; ignored | Warning; ignored |
 
 ## Local
 
-`local` runs tools directly in the resolved working directory. It offers no filesystem or network isolation, so use it only for trusted workflows.
+`local` runs tools on the Fabro host, in a workspace under the run's directory. It offers no filesystem or network isolation, so use it only for trusted workflows.
 
-Create a server-managed local-provider environment through the environments API when you need a host `cwd`.
+Use a folder target to select an existing source directory on the Fabro host.
 
 A version-backed run intent can submit
-`{ "kind": "folder", "path": "/absolute/server/path" }` to run in an existing
+`{ "kind": "folder", "path": "/absolute/server/path" }` to start from an existing
 server directory. Fabro accepts this target only with a Local environment,
 resolves symlinks and `..`, requires an existing directory, and persists the
 canonical UTF-8 path. The target path takes precedence over the environment's
-`cwd`. Because the run executes in place with the Local provider's unrestricted
+`cwd`. Because the Local provider has unrestricted
 host access, use folder targets only in trusted single-tenant deployments.
-Docker and Daytona always reject folder targets. This does not add Local Git
-cloning or Local scratch workspaces for the `none` target. Local folder runs
-execute in place without Fabro Git checkpoints: retries retain the canonical
+Docker and Daytona always reject folder targets. Local environments do not
+support the `none` target. Local folder runs
+work in a clone of the folder's committed `HEAD` (see
+[Checkpoints](/execution/checkpoints)): retries retain the canonical
 folder target, but fork and rewind are unavailable for these runs.
 
-When `cwd` is set, local runs execute commands from that absolute server-side
-path. When it is unset, Fabro keeps same-host compatibility by using the
-submitted source directory only if that path exists on the server. If neither is
-available, the run fails before execution with a remediation to configure
-`cwd`.
+The folder target identifies the source repository, while commands run in the
+managed workspace under the run's directory. Setting an environment's `cwd`
+does not make a folder-target run execute in place.
 
 Fabro hard-errors if a local environment asks for blocked or CIDR-restricted networking because the provider cannot enforce it.
 
