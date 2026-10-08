@@ -72,6 +72,8 @@ pub struct TestRunRecords {
     pub blobs: Vec<Vec<u8>>,
 }
 
+/// Run the command fixture to completion and return its logs and graph blobs,
+/// with the finalizer rejecting the run when `rejection` names a failure.
 pub async fn test_run_records(
     run_id: fabro_types::RunId,
     rejection: Option<&str>,

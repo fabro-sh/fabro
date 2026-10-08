@@ -1634,10 +1634,19 @@ impl ExecutionHooks for FabroHooks {
                     )
                 })?;
                 publisher.publish(&publication).await.map_err(|message| {
-                    warn!(run_id = %self.run_id, error = %message, "the run's publication failed");
+                    warn!(
+                        run_id = %self.run_id,
+                        error = %message,
+                        "the run's publication failed"
+                    );
                     projection::publish_failure(message)
                 })?;
-                info!(run_id = %self.run_id, branch = publication.run_branch, sha = publication.head_sha, "run published");
+                info!(
+                    run_id = %self.run_id,
+                    branch = publication.run_branch,
+                    sha = publication.head_sha,
+                    "run published"
+                );
             }
         }
         if self.inner.requires_run_finalization() {
@@ -1651,7 +1660,11 @@ impl ExecutionHooks for FabroHooks {
         // has already run in finalize_run, before Petri commits its outcome.
         if !self.requires_run_finalization() {
             if let Err(error) = self.record_run_diff().await {
-                warn!(run_id = %self.run_id, error = %error.render(), "the run's diff was not recorded");
+                warn!(
+                    run_id = %self.run_id,
+                    error = %error.render(),
+                    "the run's diff was not recorded"
+                );
             }
         }
         self.inner.run_finished(context, finished).await

@@ -23,7 +23,7 @@ use fabro_api::types::{
     PetriReleaseRequest, WriteBlobResponse,
 };
 use fabro_petri::petri::{Access, Digest, LogId, OwnerId, Record, StoreError};
-use fabro_petri::projection::finished_run_result;
+use fabro_petri::projection;
 use fabro_petri::run_store::{log_id_text, parse_log_id};
 use fabro_store::{PlatformRecord, PlatformRecordKind, StagePosition, StoredPlatformRecord};
 use fabro_types::BlobHash;
@@ -160,7 +160,9 @@ async fn append_records(
     match writer.append(&log, &records).await {
         Ok(()) => {
             if log == LogId::Coordinator {
-                if let Some((status, failure)) = records.iter().find_map(finished_run_result) {
+                if let Some((status, failure)) =
+                    records.iter().find_map(projection::finished_run_result)
+                {
                     settle_managed_run_at_finish(&state, id, status, failure);
                 }
             }

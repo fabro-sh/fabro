@@ -14,7 +14,7 @@
 //! run of any length on a live token.
 //!
 //! Publication runs in Fabro's required `finalize_run` hook, after the last
-//! stage and before the run's terminal record, as the legacy publish step did:
+//! stage and before the run's terminal record:
 //! the final checkpoint is pushed from inside the sandbox to the run
 //! branch on GitHub, and, when the run changed files and its settings ask
 //! for one, a pull request is opened and recorded. A failure fails the run
