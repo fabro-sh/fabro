@@ -13,6 +13,7 @@ use petri_store::{Access, LogId, MemoryRunStore, Record, RunKey, RunStore as _};
 use tokio::fs;
 use tokio::sync::{Notify, Semaphore};
 
+use crate::projection;
 use crate::providers::{self, SandboxProviderConfig};
 
 /// A deterministic finalizer gate for testing the committed boundary.
@@ -50,7 +51,7 @@ impl ExecutionHooks for TestFinalizer {
             .expect("the gate stays open")
             .forget();
         self.rejection.as_ref().map_or(Ok(()), |message| {
-            Err(FinalizationFailure::new("publish_failed", message.clone()))
+            Err(projection::publish_failure(message.clone()))
         })
     }
 }

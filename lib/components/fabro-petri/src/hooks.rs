@@ -120,6 +120,7 @@ use crate::checkpoint::{
 };
 use crate::fork::{self, ForkError};
 use crate::platform_records::{PlatformRecordError, PlatformRecords};
+use crate::projection;
 use crate::recovery::{self, Plan, RecoveryError, RestoreTarget};
 use crate::source::RunSource;
 use crate::workspace::{self, WorkspaceLookup, WorkspaceLookupError};
@@ -1620,7 +1621,7 @@ impl ExecutionHooks for FabroHooks {
                 let message = error.render();
                 warn!(run_id = %self.run_id, error = %message, "the run's diff was not recorded");
                 if self.publisher.is_some() && finished.status == RunStatus::Success {
-                    return Err(FinalizationFailure::new("publish_failed", message));
+                    return Err(projection::publish_failure(message));
                 }
                 None
             }
@@ -1628,14 +1629,13 @@ impl ExecutionHooks for FabroHooks {
         if let Some(publisher) = &self.publisher {
             if finished.status == RunStatus::Success {
                 let publication = publication.ok_or_else(|| {
-                    FinalizationFailure::new(
-                        "publish_failed",
+                    projection::publish_failure(
                         "the run has no recorded branch and checkpoint to publish",
                     )
                 })?;
                 publisher.publish(&publication).await.map_err(|message| {
                     warn!(run_id = %self.run_id, error = %message, "the run's publication failed");
-                    FinalizationFailure::new("publish_failed", message)
+                    projection::publish_failure(message)
                 })?;
                 info!(run_id = %self.run_id, branch = publication.run_branch, sha = publication.head_sha, "run published");
             }

@@ -84,6 +84,7 @@ use crate::admission::AdmittedGraphs;
 use crate::blobs::{Blobs, RunBlobs};
 use crate::controls::RunControls;
 use crate::hooks::{FabroHooks, HooksSpec};
+use crate::projection;
 use crate::runtime::RuntimeSpec;
 use crate::secrets::SharedSecrets;
 
@@ -556,7 +557,7 @@ fn outcome(
     let publish_failed = inspection
         .finalization_failure
         .as_ref()
-        .is_some_and(|failure| failure.code == "publish_failed");
+        .is_some_and(projection::is_publish_failure);
     let failure = inspection
         .finalization_failure
         .map(|failure| failure.message)

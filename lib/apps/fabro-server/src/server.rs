@@ -3505,17 +3505,8 @@ async fn reject_run_if_sandbox_provider_disabled(
         return false;
     };
     tracing::warn!(run_id = %run_id, error = %error, "Sandbox provider disabled by server policy");
-    fail_run_before_execution(state, run_id, FailureReason::LaunchFailed, error).await;
+    persist_run_failure(state, run_id, FailureReason::LaunchFailed, error).await;
     true
-}
-
-async fn fail_run_before_execution(
-    state: &Arc<AppState>,
-    run_id: RunId,
-    reason: FailureReason,
-    message: String,
-) {
-    persist_run_failure(state, run_id, reason, message).await;
 }
 
 /// Record a host failure only while no terminal result is committed. This
@@ -3526,50 +3517,8 @@ pub(crate) async fn persist_run_failure(
     reason: FailureReason,
     message: String,
 ) {
-    match run_records::projection(state, run_id).await {
-        Ok(Some(projection)) if projection.status.is_terminal() => {
-            let failure = projection
-                .conclusion
-                .as_ref()
-                .and_then(|conclusion| conclusion.failure.as_ref())
-                .map(|failure| failure.detail.message.clone());
-            settle_managed_run_at_finish(state, run_id, projection.status, failure);
-        }
-        Ok(Some(_)) => {
-            match run_records::lifecycle(
-                state,
-                run_id,
-                run_records::failed(reason, message.clone()),
-            )
-            .await
-            {
-                Ok(_) => match run_records::projection(state, run_id).await {
-                    Ok(Some(committed)) if committed.status.is_terminal() => {
-                        let failure = committed
-                            .conclusion
-                            .as_ref()
-                            .and_then(|conclusion| conclusion.failure.as_ref())
-                            .map(|failure| failure.detail.message.clone());
-                        settle_managed_run_at_finish(state, run_id, committed.status, failure);
-                    }
-                    Ok(_) => {
-                        error!(run_id = %run_id, "Stored host failure has no terminal projection");
-                    }
-                    Err(err) => {
-                        error!(run_id = %run_id, error = %err, "Failed to read the committed host failure");
-                    }
-                },
-                Err(err) => {
-                    error!(run_id = %run_id, error = %err, "Failed to persist run failure status");
-                }
-            }
-        }
-        Ok(None) => {
-            error!(run_id = %run_id, "Run missing when recording a host failure");
-        }
-        Err(err) => {
-            error!(run_id = %run_id, error = %err, "Failed to read the committed run result");
-        }
+    if let Err(err) = commit_host_failure(state, run_id, reason, message).await {
+        error!(run_id = %run_id, error = %err, "Failed to record a host failure");
     }
     // Resource cleanup is operational; it cannot substitute for a committed
     // outcome if storage is unavailable.
@@ -3580,6 +3529,41 @@ pub(crate) async fn persist_run_failure(
     drop(runs);
     cleanup_worker_control_bus_for_run(state, run_id);
     state.scheduler_notify.notify_one();
+}
+
+/// Append the host failure unless the run already ended, then settle the
+/// managed run on whichever terminal result the store committed.
+async fn commit_host_failure(
+    state: &AppState,
+    run_id: RunId,
+    reason: FailureReason,
+    message: String,
+) -> anyhow::Result<()> {
+    let mut committed = run_records::projection(state, run_id)
+        .await?
+        .context("the run is missing")?;
+    if !committed.status.is_terminal() {
+        run_records::lifecycle(state, run_id, run_records::failed(reason, message)).await?;
+        // The append waited for the projector, so the stored projection
+        // already folds it, or the finish that won the race.
+        committed = state
+            .stores
+            .run_summaries
+            .load_petri_projection(&run_id)
+            .await?
+            .context("the run is missing")?;
+        anyhow::ensure!(
+            committed.status.is_terminal(),
+            "the stored host failure has no terminal projection"
+        );
+    }
+    let failure = committed
+        .conclusion
+        .as_ref()
+        .and_then(|conclusion| conclusion.failure.as_ref())
+        .map(|failure| failure.detail.message.clone());
+    settle_managed_run_at_finish(state, run_id, committed.status, failure);
+    Ok(())
 }
 
 fn managed_run(
@@ -4241,7 +4225,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
     let github_app_private_key = match state.vault_secret(EnvVars::GITHUB_APP_PRIVATE_KEY).await {
         Ok(value) => value,
         Err(err) => {
-            fail_run_before_execution(
+            persist_run_failure(
                 &state,
                 run_id,
                 FailureReason::WorkflowError,

@@ -40,10 +40,12 @@ use chrono::{DateTime, TimeZone as _, Utc};
 use fabro_store::StagePosition;
 use fabro_store::platform_records::StoredPlatformRecord;
 use fabro_types::{
-    RunControlAction, RunDiff, RunId, RunProjection, RunStatus, StageId, StageProjection,
+    FailureReason, RunControlAction, RunDiff, RunId, RunProjection, RunStatus, StageId,
+    StageProjection,
 };
 use petri_execution::events::{NodeRef, RunEvent, Subject};
 use petri_execution::{CoordinatorEvent, CoordinatorRecord, ExecutionId};
+use petri_runtime::ir::FinalizationFailure;
 use petri_store::Record;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use serde_json::Value;
@@ -369,13 +371,17 @@ pub fn run_id_of(key: &str) -> Option<RunId> {
     key.parse().ok()
 }
 
-/// The status the view gives the run at Petri's own finish, when the
-/// stored record is the coordinator log's `run.finished`: the view reports
-/// the run ended from the moment that record is stored, ahead of Fabro's
-/// terminal lifecycle record. `None` for any other record.
+/// The required-finalization failure Fabro's hooks record when the run's
+/// publication fails; its code is [`FailureReason::PublishFailed`]'s.
 #[must_use]
-pub fn finished_run_status(record: &Record) -> Option<RunStatus> {
-    finished_run_result(record).map(|(status, _)| status)
+pub fn publish_failure(message: impl Into<String>) -> FinalizationFailure {
+    FinalizationFailure::new(<&'static str>::from(FailureReason::PublishFailed), message)
+}
+
+/// Whether a required-finalization failure is the run's failed publication.
+#[must_use]
+pub fn is_publish_failure(failure: &FinalizationFailure) -> bool {
+    failure.code == <&'static str>::from(FailureReason::PublishFailed)
 }
 
 /// The committed overall status and required-finalization failure message.
@@ -423,10 +429,11 @@ mod tests {
     #[test]
     fn a_finish_record_names_the_status_the_view_ends_the_run_on() {
         let finished = |status: &str| {
-            finished_run_status(&coordinator_record(&serde_json::json!({
+            finished_run_result(&coordinator_record(&serde_json::json!({
                 "event": "run.finished",
                 "status": status,
             })))
+            .map(|(status, _)| status)
         };
         assert_eq!(
             finished("success"),
@@ -447,13 +454,13 @@ mod tests {
             })
         );
         assert_eq!(
-            finished_run_status(&coordinator_record(&serde_json::json!({
+            finished_run_result(&coordinator_record(&serde_json::json!({
                 "event": "run.paused",
             }))),
             None
         );
         assert_eq!(
-            finished_run_status(&Record {
+            finished_run_result(&Record {
                 seq:         3,
                 recorded_at: 1_000,
                 record:      serde_json::json!({"event": "run.finished", "status": "success"}),

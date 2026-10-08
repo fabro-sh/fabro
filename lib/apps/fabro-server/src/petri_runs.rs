@@ -1170,12 +1170,13 @@ mod tests {
             assert_public_result(&state, &app, run_id, expected, rejection).await;
             // A host error arriving after cleanup must neither append a
             // competing terminal record nor replace the useful failure.
-            let platform_count: i64 =
-                sqlx::query_scalar("SELECT COUNT(*) FROM platform_records WHERE run_id = ?")
-                    .bind(run_id.to_string())
-                    .fetch_one(&state.stores.run_summaries.pool())
-                    .await
-                    .unwrap();
+            let platform_count = fabro_petri::test_support::stored_platform_records(
+                &state.stores.run_summaries.pool(),
+                run_id,
+            )
+            .await
+            .unwrap()
+            .len();
             crate::server::persist_run_failure(
                 &state,
                 run_id,
@@ -1184,12 +1185,13 @@ mod tests {
             )
             .await;
             assert_public_result(&state, &app, run_id, expected, rejection).await;
-            let after_count: i64 =
-                sqlx::query_scalar("SELECT COUNT(*) FROM platform_records WHERE run_id = ?")
-                    .bind(run_id.to_string())
-                    .fetch_one(&state.stores.run_summaries.pool())
-                    .await
-                    .unwrap();
+            let after_count = fabro_petri::test_support::stored_platform_records(
+                &state.stores.run_summaries.pool(),
+                run_id,
+            )
+            .await
+            .unwrap()
+            .len();
             assert_eq!(after_count, platform_count);
             let (rebuilt, _, _) = fabro_petri::test_support::rebuild(
                 &state.db_pool,

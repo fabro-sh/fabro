@@ -239,8 +239,7 @@ pub(super) fn finished_status(
             reason: FailureReason::Cancelled,
         },
         _ => RunStatus::Failed {
-            reason: if finalization_failure.is_some_and(|failure| failure.code == "publish_failed")
-            {
+            reason: if finalization_failure.is_some_and(super::is_publish_failure) {
                 FailureReason::PublishFailed
             } else {
                 FailureReason::WorkflowError

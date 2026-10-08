@@ -39,7 +39,7 @@ use fabro_workflow::operations::{StageLabel, StageLabels};
 use petri_execution::host::{self, ForkOptions, ForkOrigin, ForkPosition, HostError};
 use petri_execution::inspect::{self, InspectError};
 use petri_execution::{
-    Access, CoordinatorEvent, ExecutionId, InvocationId, RunKey, RunStore,
+    Access, CoordinatorEvent, ExecutionId, InvocationId, RunKey, RunLogs, RunStore,
     StoreError as CoordinatorStoreError,
 };
 use petri_runtime::RunOptions;
@@ -132,7 +132,13 @@ pub async fn check(
         .open(&RunKey::new(source.to_string()), Access::Read)
         .await
         .map_err(ForkError::Open)?;
-    let state = host::stored_state(&*logs).await.map_err(ForkError::Seed)?;
+    check_logs(&*logs, &position).await.map(|_| ())
+}
+
+/// [`check`] over the source's opened logs. Returns whether the source
+/// requires run finalization, which the fork inherits.
+async fn check_logs(logs: &dyn RunLogs, position: &ForkPosition) -> Result<bool, ForkError> {
+    let state = host::stored_state(logs).await.map_err(ForkError::Seed)?;
     let Some(execution) = state.executions.get(&position.execution) else {
         return Err(ForkError::Refused(format!(
             "the source run has no execution {}",
@@ -147,7 +153,7 @@ pub async fn check(
             position.execution
         )));
     }
-    let inspection = inspect::inspect_run(&*logs)
+    let inspection = inspect::inspect_run(logs)
         .await
         .map_err(ForkError::Inspect)?;
     if inspection
@@ -167,7 +173,7 @@ pub async fn check(
             "the terminal checkpoint has no remaining work to acquire a sandbox; select an earlier checkpoint or retry the workflow from the start".to_string(),
         ));
     }
-    Ok(())
+    Ok(state.required_finalization)
 }
 
 /// Declaration-only hooks used while copying a fork's records. The fork
@@ -198,7 +204,6 @@ impl ExecutionHooks for ForkFinalizationRequirement {
 /// Seed the fork: Petri's records, the kept checkpoints and the run branch. The
 /// new run must not exist in the store yet.
 pub async fn fork(request: ForkRequest) -> Result<Forked, ForkError> {
-    check(request.store.as_ref(), request.source, request.position).await?;
     let source_key = RunKey::new(request.source.to_string());
     let fork_key = RunKey::new(request.fork.to_string());
     let source_logs = request
@@ -207,10 +212,7 @@ pub async fn fork(request: ForkRequest) -> Result<Forked, ForkError> {
         .await
         .map_err(ForkError::Open)?;
 
-    let required = host::stored_state(&*source_logs)
-        .await
-        .map_err(ForkError::Seed)?
-        .required_finalization;
+    let required = check_logs(&*source_logs, &request.position).await?;
     let mut options = RunOptions::new(&request.fork_run_dir);
     options.run_key = Some(fork_key.clone());
     // A fork only copies records and acquires no sandbox, so it needs no

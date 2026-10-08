@@ -549,13 +549,7 @@ pub(crate) async fn execute(state: Arc<AppState>, run_id: RunId) {
             failed(reason, message)
         }
     };
-    match run_records::lifecycle(&state, run_id, record).await {
-        Ok(_) => finish(&state, run_id, status, error),
-        Err(err) => {
-            error!(run_id = %run_id, error = %err, "Failed to persist run outcome");
-            release_live_state(&state, run_id);
-        }
-    }
+    commit_and_finish(&state, run_id, record, status, error).await;
     // The view trails the terminal record; the aggregate reads the settled
     // projection, as the worker path reads the final state at worker exit.
     state.petri_projector.settle(run_id).await;
@@ -814,10 +808,22 @@ fn failed(
 async fn fail_before_execution(state: &Arc<AppState>, run_id: RunId, message: &str) {
     error!(run_id = %run_id, error = message, "Petri run cannot start");
     let (status, error, record) = failed(FailureReason::WorkflowError, message.to_string());
+    commit_and_finish(state, run_id, record, status, error).await;
+}
+
+/// Append the run's terminal record, then finish the run. An append that
+/// fails only releases the live state: it commits no terminal result.
+async fn commit_and_finish(
+    state: &Arc<AppState>,
+    run_id: RunId,
+    record: RunLifecycleRecord,
+    status: RunStatus,
+    error: Option<String>,
+) {
     match run_records::lifecycle(state, run_id, record).await {
         Ok(_) => finish(state, run_id, status, error),
         Err(err) => {
-            error!(run_id = %run_id, error = %err, "Failed to persist run failure status");
+            error!(run_id = %run_id, error = %err, "Failed to persist run outcome");
             release_live_state(state, run_id);
         }
     }
@@ -837,10 +843,9 @@ fn finish(state: &Arc<AppState>, run_id: RunId, status: RunStatus, error: Option
                 managed_run.error = error;
             }
         }
-        clear_live_run_state(managed_run);
     }
     drop(runs);
-    state.scheduler_notify.notify_one();
+    release_live_state(state, run_id);
 }
 
 /// Release controls after an append failure without claiming a new terminal
