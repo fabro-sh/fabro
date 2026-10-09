@@ -689,8 +689,9 @@ async fn a_failed_stage_is_committed_and_its_route_sees_the_files() {
 }
 
 /// A checkpoint commit that fails is fatal: the stage's outcome is recorded
-/// as `checkpoint_failed`, no route is taken, the run ends failed with the
-/// checkpoint's error, and a restart reports it failed without resuming.
+/// as `checkpoint_failed`, no route is taken, the run's committed finish
+/// fails it with the checkpoint's error, and a restart reports it failed
+/// without resuming.
 #[tokio::test]
 async fn a_failed_checkpoint_ends_the_run_with_no_route() {
     let harness = Harness::new().await;
@@ -713,6 +714,16 @@ async fn a_failed_checkpoint_ends_the_run_with_no_route() {
     );
 
     let inspection = harness.inspection().await;
+    let committed = inspection
+        .finalization_failure
+        .clone()
+        .expect("the finish commits the checkpoint failure");
+    assert_eq!(committed.code, CHECKPOINT_FAILED_CLASS);
+    let stored = engine::outcome_of(&*harness.store, &harness.run_id.to_string())
+        .await
+        .expect("the finished run reads back");
+    assert_eq!(stored.status, RunStatus::Failed, "{stored:?}");
+    assert_eq!(stored.failure, outcome.failure);
     let attempts: Vec<_> = inspection
         .executions
         .iter()
@@ -1357,6 +1368,27 @@ async fn a_failed_run_is_not_published() {
     assert_eq!(outcome.status, RunStatus::Failed, "{outcome:?}");
     assert!(!outcome.publish_failed);
     assert!(publisher.published.lock().unwrap().is_empty());
+}
+
+/// A run whose checkpoint failed is never published, and its committed
+/// failure is the checkpoint's, not a publication's.
+#[tokio::test]
+async fn a_run_whose_checkpoint_failed_is_not_published() {
+    let publisher = RecordingPublisher::new(None);
+    let (harness, outcome) = published_run(
+        "script=\"rm -rf .git && echo garbage > .git && echo wrecked > out.txt\"",
+        &publisher,
+    )
+    .await;
+    assert_eq!(outcome.status, RunStatus::Failed, "{outcome:?}");
+    assert!(!outcome.publish_failed);
+    assert!(publisher.published.lock().unwrap().is_empty());
+    let failure = harness
+        .inspection()
+        .await
+        .finalization_failure
+        .expect("the finish commits the checkpoint failure");
+    assert_eq!(failure.code, CHECKPOINT_FAILED_CLASS);
 }
 
 struct OriginPublisher {

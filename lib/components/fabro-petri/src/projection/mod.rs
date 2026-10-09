@@ -51,6 +51,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use serde_json::Value;
 use tracing::debug;
 
+use crate::checkpoint::CHECKPOINT_FAILED_CLASS;
+
 /// One item the projector hands the fold, with its delivery sequence.
 pub enum Item<'a> {
     Petri(&'a RunEvent),
@@ -384,6 +386,20 @@ pub fn is_publish_failure(failure: &FinalizationFailure) -> bool {
     failure.code == <&'static str>::from(FailureReason::PublishFailed)
 }
 
+/// The required-finalization failure Fabro's hooks record when a checkpoint
+/// failed during the run. The failed checkpoint cancelled the run, so Petri
+/// may record it as cancelled; Fabro reports it as a workflow failure.
+#[must_use]
+pub fn checkpoint_failure(message: impl Into<String>) -> FinalizationFailure {
+    FinalizationFailure::new(CHECKPOINT_FAILED_CLASS, message)
+}
+
+/// Whether a required-finalization failure is a failed checkpoint.
+#[must_use]
+pub fn is_checkpoint_failure(failure: &FinalizationFailure) -> bool {
+    failure.code == CHECKPOINT_FAILED_CLASS
+}
+
 /// The committed overall status and required-finalization failure message.
 /// Execution failure details remain in the invocation records and projection.
 #[must_use]
@@ -452,6 +468,23 @@ mod tests {
             Some(RunStatus::Failed {
                 reason: fabro_types::FailureReason::WorkflowError,
             })
+        );
+        assert_eq!(
+            finished_run_result(&coordinator_record(&serde_json::json!({
+                "event": "run.finished",
+                "status": "cancelled",
+                "finalization_failure": {
+                    "code": "checkpoint_failed",
+                    "message": "checkpoint commit of `wreck` failed",
+                },
+            }))),
+            Some((
+                RunStatus::Failed {
+                    reason: fabro_types::FailureReason::WorkflowError,
+                },
+                Some("checkpoint commit of `wreck` failed".to_string()),
+            )),
+            "a failed checkpoint's cancellation is the checkpoint's failure"
         );
         assert_eq!(
             finished_run_result(&coordinator_record(&serde_json::json!({

@@ -354,17 +354,7 @@ pub async fn run(request: RunRequest) -> Result<RunOutcome, RunError> {
         return Err(RunError::StoreFailed(message));
     }
     let inspection = inspect(request.store.as_ref(), &key).await?;
-    let mut outcome = outcome(inspection, result.err())?;
-    // A failed checkpoint cancelled the run; what Fabro reports is the
-    // checkpoint failure, not a cancellation.
-    if let Some(failure) = fabro_hooks
-        .as_ref()
-        .and_then(|hooks| hooks.checkpoint_failure())
-    {
-        outcome.status = RunStatus::Failed;
-        outcome.failure = Some(failure);
-    }
-    Ok(outcome)
+    outcome(inspection, result.err())
 }
 
 /// When Petri keeps a run's workspaces after their scope is released.
@@ -535,9 +525,16 @@ fn outcome(
     inspection: RunInspection,
     host_error: Option<HostError>,
 ) -> Result<RunOutcome, RunError> {
+    // A failed checkpoint cancelled the run; its finish records the
+    // checkpoint failure, which is what Fabro reports.
+    let checkpoint_failed = inspection
+        .finalization_failure
+        .as_ref()
+        .is_some_and(projection::is_checkpoint_failure);
     let status = match inspection.status.as_deref() {
         Some("success") => RunStatus::Success,
         Some("failed") => RunStatus::Failed,
+        Some("cancelled") if checkpoint_failed => RunStatus::Failed,
         Some("cancelled") => RunStatus::Cancelled,
         _ => {
             let mut reasons = inspection.incomplete.clone();

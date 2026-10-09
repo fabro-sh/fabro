@@ -1078,6 +1078,49 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_host_failure_is_retried_until_storage_accepts_it() {
+        let runtime = Arc::new(HeldWorkerRuntime::default());
+        let (state, app, run_id, token) = held_worker_run(&runtime).await;
+        run_to_running_as_worker(&app, run_id, &token).await;
+        let pool = state.stores.run_summaries.pool();
+        sqlx::query(
+            "CREATE TRIGGER reject_platform_record BEFORE INSERT ON platform_records \
+             BEGIN SELECT RAISE(FAIL, 'scripted append failure'); END",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let failure = tokio::spawn({
+            let state = Arc::clone(&state);
+            async move {
+                crate::server::persist_run_failure(
+                    &state,
+                    run_id,
+                    FailureReason::LaunchFailed,
+                    "worker launch failed".into(),
+                )
+                .await;
+            }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        sqlx::query("DROP TRIGGER reject_platform_record")
+            .execute(&pool)
+            .await
+            .unwrap();
+        failure.await.unwrap();
+        let failed = RunStatus::Failed {
+            reason: FailureReason::LaunchFailed,
+        };
+        let stored = crate::server::run_records::projection(&state, run_id)
+            .await
+            .unwrap()
+            .expect("the run is stored");
+        assert_eq!(stored.status, failed, "the retried failure is durable");
+        assert_eq!(state.test_managed_run_status(&run_id), Some(failed));
+        runtime.end_worker();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn required_publication_result_agrees_across_worker_api_projection_and_cleanup() {
         use fabro_petri::petri::LogId;
         use fabro_petri::test_support::finalization;

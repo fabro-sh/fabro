@@ -1109,7 +1109,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "middleware_chain": [
                 "circuit-breaker"
               ],
-              "required_finalization": false
+              "required_finalization": true
             }
           }
         }

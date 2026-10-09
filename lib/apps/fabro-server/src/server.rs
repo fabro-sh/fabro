@@ -3512,28 +3512,54 @@ async fn reject_run_if_sandbox_provider_disabled(
 /// Record a host failure only while no terminal result is committed. This
 /// also handles a worker wait/launch error racing its durable Petri finish.
 /// The managed run settles on whichever terminal result the store committed.
-/// When nothing could be committed its live state is still released, but its
-/// status is left alone: the API never reports an outcome storage lacks.
+/// A failed commit is retried, so a brief storage fault does not leave the
+/// run active. When nothing could be committed its live state is still
+/// released, but its status is left alone: the API never reports an outcome
+/// storage lacks, and the restart reconciliation fails the run.
 pub(crate) async fn persist_run_failure(
     state: &Arc<AppState>,
     run_id: RunId,
     reason: FailureReason,
     message: String,
 ) {
-    match commit_host_failure(state, run_id, reason, message).await {
-        Ok(committed) => {
-            let failure = committed
-                .conclusion
-                .as_ref()
-                .and_then(|conclusion| conclusion.failure.as_ref())
-                .map(|failure| failure.detail.message.clone());
-            settle_managed_run_at_finish(state, run_id, committed.status, failure);
+    let mut retry_delays = HOST_FAILURE_RETRY_DELAYS.iter();
+    loop {
+        match commit_host_failure(state, run_id, reason, message.clone()).await {
+            Ok(committed) => {
+                let failure = committed
+                    .conclusion
+                    .as_ref()
+                    .and_then(|conclusion| conclusion.failure.as_ref())
+                    .map(|failure| failure.detail.message.clone());
+                settle_managed_run_at_finish(state, run_id, committed.status, failure);
+                break;
+            }
+            Err(err) => {
+                let Some(delay) = retry_delays.next() else {
+                    error!(run_id = %run_id, error = %err, "Failed to record a host failure");
+                    break;
+                };
+                warn!(
+                    run_id = %run_id,
+                    error = %err,
+                    retry_in_ms = delay.as_millis(),
+                    "Failed to record a host failure; retrying"
+                );
+                sleep(*delay).await;
+            }
         }
-        Err(err) => error!(run_id = %run_id, error = %err, "Failed to record a host failure"),
     }
     release_managed_run(state, run_id);
     state.scheduler_notify.notify_one();
 }
+
+/// How long [`persist_run_failure`] waits before each retry of a failed
+/// commit.
+const HOST_FAILURE_RETRY_DELAYS: [Duration; 3] = [
+    Duration::from_millis(250),
+    Duration::from_secs(1),
+    Duration::from_secs(4),
+];
 
 /// Append the host failure unless the run already ended, and return the
 /// terminal projection the store committed: the failure, or the finish that

@@ -226,7 +226,9 @@ impl RunView {
 }
 
 /// The status Fabro gives a run at Petri's finish, by the status the finish
-/// records (`success`, `cancelled`, or a failure).
+/// records (`success`, `cancelled`, or a failure). A failed checkpoint
+/// cancels the run, but the run failed: its finish says so with the
+/// checkpoint's finalization failure.
 pub(super) fn finished_status(
     status: &str,
     finalization_failure: Option<&FinalizationFailure>,
@@ -235,9 +237,11 @@ pub(super) fn finished_status(
         "success" => RunStatus::Succeeded {
             reason: SuccessReason::Completed,
         },
-        "cancelled" => RunStatus::Failed {
-            reason: FailureReason::Cancelled,
-        },
+        "cancelled" if !finalization_failure.is_some_and(super::is_checkpoint_failure) => {
+            RunStatus::Failed {
+                reason: FailureReason::Cancelled,
+            }
+        }
         _ => RunStatus::Failed {
             reason: if finalization_failure.is_some_and(super::is_publish_failure) {
                 FailureReason::PublishFailed

@@ -1,7 +1,11 @@
 # Required run finalization
 
 Petri owns the durable run result. Fabro declares required finalization when
-its hooks have a publisher and implements it in `FabroHooks::finalize_run`.
+its hooks checkpoint or have a publisher, and implements it in
+`FabroHooks::finalize_run`. A failed checkpoint rejects with
+`checkpoint_failed` and skips publication. The checkpoint failure cancelled the
+run, so Petri may commit `cancelled`; Fabro reports that finish as a workflow
+failure with the checkpoint's message.
 For successful workflow execution this prepares the final diff, then uses the
 existing publisher to retry the push and reconcile or create the pull request.
 A preparation or publication error rejects with `publish_failed` and a rendered

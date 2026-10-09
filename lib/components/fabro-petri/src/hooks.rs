@@ -31,14 +31,15 @@
 //!   `artifact.collected` record, unless the same file with the same content
 //!   was already collected earlier in the run. A failed write is a recorded
 //!   problem on the transition, never a blocked route.
-//! - `finalize_run`: the run's diff, its run branch against its base commit, as
-//!   the `run.diff` platform record with the patch as a blob; for a successful
-//!   run, its publication ([`RunPublisher`]: the platform pushes the run branch
-//!   and opens a pull request), whose failure fails the run before its terminal
-//!   record.
-//! - `run_finished`: best-effort diff preparation for nonpublishing runs, then
-//!   the forwarded point, so the local service runs `run_complete` and
-//!   `run_failed` with the sandbox in place.
+//! - `finalize_run`, required when the run checkpoints or publishes: the run's
+//!   diff, its run branch against its base commit, as the `run.diff` platform
+//!   record with the patch as a blob; a failed checkpoint, which fails the run
+//!   and skips publication; for a successful run, its publication
+//!   ([`RunPublisher`]: the platform pushes the run branch and opens a pull
+//!   request), whose failure fails the run before its terminal record.
+//! - `run_finished`: best-effort diff preparation for runs without required
+//!   finalization, then the forwarded point, so the local service runs
+//!   `run_complete` and `run_failed` with the sandbox in place.
 //! - `scope_acquired`: a fresh run's Git target checked out into the workspace
 //!   from inside the scope ([`crate::source`]); a resumed run uses its
 //!   surviving workspace, while an explicit fork fetches the source run's
@@ -541,8 +542,8 @@ impl FabroHooks {
         }
     }
 
-    /// The checkpoint failure that ended the run, when one did: what the
-    /// engine reports the run failed with.
+    /// The checkpoint failure that ended the run, when one did: required
+    /// finalization commits it as the run's failure.
     #[must_use]
     pub fn checkpoint_failure(&self) -> Option<String> {
         sync::lock(&self.failure).clone()
@@ -1607,7 +1608,9 @@ impl ExecutionHooks for FabroHooks {
     }
 
     fn requires_run_finalization(&self) -> bool {
-        self.publisher.is_some() || self.inner.requires_run_finalization()
+        self.publisher.is_some()
+            || self.checkpoint_enabled
+            || self.inner.requires_run_finalization()
     }
 
     async fn finalize_run(
@@ -1615,11 +1618,19 @@ impl ExecutionHooks for FabroHooks {
         context: &HookContext,
         finished: RunFinished,
     ) -> Result<(), FinalizationFailure> {
-        let publication = match self.record_run_diff().await {
+        let diff = self.record_run_diff().await.map_err(|error| {
+            let message = error.render();
+            warn!(run_id = %self.run_id, error = %message, "the run's diff was not recorded");
+            message
+        });
+        // A failed checkpoint fails the run whatever its execution status,
+        // and its work is never published.
+        if let Some(message) = self.checkpoint_failure() {
+            return Err(projection::checkpoint_failure(message));
+        }
+        let publication = match diff {
             Ok(publication) => publication,
-            Err(error) => {
-                let message = error.render();
-                warn!(run_id = %self.run_id, error = %message, "the run's diff was not recorded");
+            Err(message) => {
                 if self.publisher.is_some() && finished.status == RunStatus::Success {
                     return Err(projection::publish_failure(message));
                 }
