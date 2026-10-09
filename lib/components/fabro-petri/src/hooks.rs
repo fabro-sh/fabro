@@ -31,14 +31,13 @@
 //!   `artifact.collected` record, unless the same file with the same content
 //!   was already collected earlier in the run. A failed write is a recorded
 //!   problem on the transition, never a blocked route.
-//! - `finalize_run`, required when the run checkpoints or publishes: the run's
-//!   diff, its run branch against its base commit, as the `run.diff` platform
-//!   record with the patch as a blob; a failed checkpoint, which fails the run
-//!   and skips publication; for a successful run, its publication
-//!   ([`RunPublisher`]: the platform pushes the run branch and opens a pull
-//!   request), whose failure fails the run before its terminal record.
-//! - `run_finished`: best-effort diff preparation for runs without required
-//!   finalization, then the forwarded point, so the local service runs
+//! - `finalize_run`, required for every run: the run's diff, its run branch
+//!   against its base commit, as the `run.diff` platform record with the patch
+//!   as a blob; a failed checkpoint, which fails the run and skips publication;
+//!   for a successful run, its publication ([`RunPublisher`]: the platform
+//!   pushes the run branch and opens a pull request), whose failure fails the
+//!   run before its terminal record.
+//! - `run_finished`: the forwarded point, so the local service runs
 //!   `run_complete` and `run_failed` with the sandbox in place.
 //! - `scope_acquired`: a fresh run's Git target checked out into the workspace
 //!   from inside the scope ([`crate::source`]); a resumed run uses its
@@ -1607,10 +1606,11 @@ impl ExecutionHooks for FabroHooks {
         Ok(report)
     }
 
+    /// Every Fabro run requires finalization, whether or not it publishes
+    /// or checkpoints: one path for every run, and a declaration that a
+    /// resume or a fork always matches.
     fn requires_run_finalization(&self) -> bool {
-        self.publisher.is_some()
-            || self.checkpoint_enabled
-            || self.inner.requires_run_finalization()
+        true
     }
 
     async fn finalize_run(
@@ -1667,17 +1667,8 @@ impl ExecutionHooks for FabroHooks {
     }
 
     async fn run_finished(&self, context: &HookContext, finished: RunFinished) -> Vec<Note> {
-        // Nonpublishing runs keep best-effort diff preparation. Required work
-        // has already run in finalize_run, before Petri commits its outcome.
-        if !self.requires_run_finalization() {
-            if let Err(error) = self.record_run_diff().await {
-                warn!(
-                    run_id = %self.run_id,
-                    error = %error.render(),
-                    "the run's diff was not recorded"
-                );
-            }
-        }
+        // The diff and publication already ran in finalize_run, before Petri
+        // committed the outcome.
         self.inner.run_finished(context, finished).await
     }
 

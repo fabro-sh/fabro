@@ -1,8 +1,8 @@
 # Required run finalization
 
-Petri owns the durable run result. Fabro declares required finalization when
-its hooks checkpoint or have a publisher, and implements it in
-`FabroHooks::finalize_run`. A failed checkpoint rejects with
+Petri owns the durable run result. Fabro declares required finalization for
+every run and implements it in `FabroHooks::finalize_run`, so a resume or a
+fork always matches the stored declaration. A failed checkpoint rejects with
 `checkpoint_failed` and skips publication. The checkpoint failure cancelled the
 run, so Petri may commit `cancelled`; Fabro reports that finish as a workflow
 failure with the checkpoint's message.
@@ -45,8 +45,8 @@ historical-view repair requires a separate, bounded process over preserved
 source records. No publication is invoked by projection or replay.
 
 A committed resume returns the same overall result without publishing again.
-A fork inherits the source run’s required-finalization declaration while seeding
-its records; its worker restores the actual publication hooks before resume.
+A fork declares required finalization while seeding its records, as every
+Fabro run does; its worker restores the actual publication hooks before resume.
 Unfinished recovery must restore the same finalization requirement. Petri may
 call the restored finalizer again after interruption, including a crash after
 the callback returns but before the terminal record commits. Existing GitHub

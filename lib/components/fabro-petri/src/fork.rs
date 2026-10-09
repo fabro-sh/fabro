@@ -132,12 +132,11 @@ pub async fn check(
         .open(&RunKey::new(source.to_string()), Access::Read)
         .await
         .map_err(ForkError::Open)?;
-    check_logs(&*logs, &position).await.map(|_| ())
+    check_logs(&*logs, &position).await
 }
 
-/// [`check`] over the source's opened logs. Returns whether the source
-/// requires run finalization, which the fork inherits.
-async fn check_logs(logs: &dyn RunLogs, position: &ForkPosition) -> Result<bool, ForkError> {
+/// [`check`] over the source's opened logs.
+async fn check_logs(logs: &dyn RunLogs, position: &ForkPosition) -> Result<(), ForkError> {
     let state = host::stored_state(logs).await.map_err(ForkError::Seed)?;
     let Some(execution) = state.executions.get(&position.execution) else {
         return Err(ForkError::Refused(format!(
@@ -173,20 +172,19 @@ async fn check_logs(logs: &dyn RunLogs, position: &ForkPosition) -> Result<bool,
             "the terminal checkpoint has no remaining work to acquire a sandbox; select an earlier checkpoint or retry the workflow from the start".to_string(),
         ));
     }
-    Ok(state.required_finalization)
+    Ok(())
 }
 
-/// Declaration-only hooks used while copying a fork's records. The fork
-/// inherits its source's finalization requirement; its worker installs the
-/// actual publisher before resuming. Never execute with these hooks.
-struct ForkFinalizationRequirement {
-    required: bool,
-}
+/// Declaration-only hooks used while copying a fork's records: every Fabro
+/// run requires finalization ([`crate::hooks::FabroHooks`]), so the fork's
+/// records declare it too, and its worker's hooks match them on resume.
+/// Never execute with these hooks.
+struct ForkFinalizationRequirement;
 
 #[async_trait::async_trait]
 impl ExecutionHooks for ForkFinalizationRequirement {
     fn requires_run_finalization(&self) -> bool {
-        self.required
+        true
     }
 
     async fn finalize_run(
@@ -212,14 +210,14 @@ pub async fn fork(request: ForkRequest) -> Result<Forked, ForkError> {
         .await
         .map_err(ForkError::Open)?;
 
-    let required = check_logs(&*source_logs, &request.position).await?;
+    check_logs(&*source_logs, &request.position).await?;
     let mut options = RunOptions::new(&request.fork_run_dir);
     options.run_key = Some(fork_key.clone());
     // A fork only copies records and acquires no sandbox, so it needs no
     // provider configuration.
     let runtime = providers::standard_runtime(&SandboxProviderConfig::default())
         .options(options)
-        .hooks(Arc::new(ForkFinalizationRequirement { required }))
+        .hooks(Arc::new(ForkFinalizationRequirement))
         .store(Arc::clone(&request.store));
     let forked = host::fork_from(&runtime, &*source_logs, request.position, ForkOptions {
         rerun_last: request.rerun_last,
