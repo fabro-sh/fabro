@@ -1,4 +1,4 @@
-import { useState, type ComponentType } from "react";
+import { useRef, useState, type ComponentType } from "react";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { useSWRConfig } from "swr";
 import { PlusIcon } from "@heroicons/react/20/solid";
@@ -15,13 +15,13 @@ import {
   WrenchIcon,
 } from "@heroicons/react/24/outline";
 import { FilterButton } from "../components/runs-list/filter-button";
-import type { Automation, AutomationListResponse } from "@qltysh/fabro-api-client";
+import type { Automation, AutomationListResponse, AutomationScheduleTrigger } from "@qltysh/fabro-api-client";
 import { Link, useNavigate } from "react-router";
 import { ApiError, apiData, automationsApi } from "../lib/api-client";
 import {
   RUN_TARGET_CHECKOUT_LABEL,
   UNSUPPORTED_TARGET_LABEL,
-  findScheduleTrigger,
+  findScheduleTriggers,
   gitTarget,
   hasEnabledApiTrigger,
   workflowSourceSummary,
@@ -51,6 +51,7 @@ function CreateAutomationButton() {
 }
 
 interface AutomationRow {
+  record: Automation;
   id: string;
   revision: string;
   name: string;
@@ -58,7 +59,7 @@ interface AutomationRow {
   repository: string;
   environmentId: string | null;
   workflowSource?: string;
-  schedule?: string;
+  schedules: AutomationScheduleTrigger[];
   apiEnabled: boolean;
   icon: ComponentType<{ className?: string }>;
   color: string;
@@ -93,6 +94,7 @@ function mapAutomations(result: AutomationListResponse | undefined): AutomationR
   return automations.map((a) => {
     const target = gitTarget(a.target);
     return {
+      record:     a,
       id:         a.id,
       revision:   a.revision,
       name:       a.name,
@@ -102,7 +104,7 @@ function mapAutomations(result: AutomationListResponse | undefined): AutomationR
       workflowSource: a.workflow_source
         ? workflowSourceSummary(a.workflow_source)
         : undefined,
-      schedule:   findScheduleTrigger(a)?.expression,
+      schedules:  findScheduleTriggers(a),
       apiEnabled: hasEnabledApiTrigger(a),
       icon:       slugIconMap[a.workflow] ?? CodeBracketIcon,
       color:      slugColorMap[a.workflow] ?? "var(--color-teal-500)",
@@ -122,12 +124,16 @@ function AutomationCard({
   automation,
   busy,
   running,
+  savingScheduleId,
+  onToggleSchedule,
   onRun,
   onDelete,
 }: {
   automation: AutomationRow;
   busy: boolean;
   running: boolean;
+  savingScheduleId?: string;
+  onToggleSchedule: (schedule: AutomationScheduleTrigger) => void;
   onRun: () => void;
   onDelete: () => void;
 }) {
@@ -135,46 +141,70 @@ function AutomationCard({
   const runDisabled = busy || running || !automation.apiEnabled || automation.environmentId === null;
   return (
     <div className="group flex items-center gap-4 rounded-md border border-line bg-panel/80 p-4 transition-all duration-200 hover:border-line-strong hover:bg-panel hover:shadow-lg hover:shadow-black/20">
-      <Link to={`/automations/${automation.id}`} className="flex min-w-0 flex-1 items-center gap-4">
-        <div
-          className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-panel-alt/60"
-          style={{ borderColor: `color-mix(in srgb, ${automation.color} 20%, transparent)`, color: automation.color }}
-        >
-          <Icon className="size-4" />
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-fg-2 group-hover:text-fg">{automation.name}</span>
-            <span className="font-mono text-xs text-fg-muted">{automation.workflow}</span>
-            {automation.schedule && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-teal-500/10 border border-teal-500/20 px-2 py-0.5 text-[11px] font-medium text-teal-300">
-                <ClockIcon className="size-3" />
-                {automation.schedule}
-              </span>
-            )}
+      <div className="min-w-0 flex-1">
+        <Link to={`/automations/${automation.id}`} className="flex min-w-0 items-center gap-4">
+          <div
+            className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-panel-alt/60"
+            style={{ borderColor: `color-mix(in srgb, ${automation.color} 20%, transparent)`, color: automation.color }}
+          >
+            <Icon className="size-4" />
           </div>
-          <p className="mt-1 text-xs text-fg-muted">
-            Run target · {automation.repository}
-            <span className={automation.environmentId ? "" : " text-coral"}>
-              {" · "}{automation.environmentId ?? "environment required"}
-            </span>
-          </p>
-          <p className="mt-0.5 truncate text-xs text-fg-muted">
-            Workflow source · {automation.workflowSource ?? RUN_TARGET_CHECKOUT_LABEL}
-          </p>
-        </div>
-      </Link>
 
-      {automation.schedule ? (
-        <button
-          type="button"
-          title="Pause schedule"
-          className="flex size-8 shrink-0 items-center justify-center rounded-full border border-amber/20 text-amber transition-colors hover:border-amber/50 hover:bg-amber/10 hover:text-fg"
-        >
-          <PauseIcon className="size-3.5" />
-        </button>
-      ) : (
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium text-fg-2 group-hover:text-fg">{automation.name}</span>
+              <span className="font-mono text-xs text-fg-muted">{automation.workflow}</span>
+            </div>
+            <p className="mt-1 text-xs text-fg-muted">
+              Run target · {automation.repository}
+              <span className={automation.environmentId ? "" : " text-coral"}>
+                {" · "}{automation.environmentId ?? "environment required"}
+              </span>
+            </p>
+            <p className="mt-0.5 truncate text-xs text-fg-muted">
+              Workflow source · {automation.workflowSource ?? RUN_TARGET_CHECKOUT_LABEL}
+            </p>
+          </div>
+        </Link>
+        {automation.schedules.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2 sm:pl-13">
+            {automation.schedules.map((schedule) => {
+              const saving = savingScheduleId === schedule.id;
+              const action = schedule.enabled ? "Pause" : "Resume";
+              return (
+                <div key={schedule.id} className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-md border border-line px-2 py-1 text-xs">
+                  <span className={`inline-flex min-w-0 flex-wrap items-center gap-1.5 ${schedule.enabled ? "text-teal-300" : "text-fg-3"}`}>
+                    <ClockIcon className="size-3 shrink-0" aria-hidden="true" />
+                    {automation.schedules.length > 1 && <span className="break-all">{schedule.id} ·</span>}
+                    <span>{schedule.expression}</span>
+                    {!schedule.enabled && <span>· Paused</span>}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onToggleSchedule(schedule)}
+                    disabled={busy || running || savingScheduleId !== undefined}
+                    aria-label={`${action} schedule ${schedule.id} for ${automation.name}`}
+                    aria-busy={saving}
+                    title={`${action} schedule`}
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-fg-2 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {saving ? (
+                      <ArrowPathIcon className="size-3.5 animate-spin [animation-duration:450ms] motion-reduce:animate-none" aria-hidden="true" />
+                    ) : schedule.enabled ? (
+                      <PauseIcon className="size-3.5" aria-hidden="true" />
+                    ) : (
+                      <PlayIcon className="size-3.5" />
+                    )}
+                    {saving ? "Saving…" : action}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {automation.schedules.length === 0 && (
         <button
           type="button"
           onClick={onRun}
@@ -272,6 +302,60 @@ export default function Automations() {
   const [pendingDelete, setPendingDelete] = useState<AutomationRow | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [runningId, setRunningId] = useState<string | null>(null);
+  const [savingSchedules, setSavingSchedules] = useState(new Map<string, string>());
+  const pendingScheduleUpdates = useRef(new Set<string>());
+
+  async function toggleSchedule(automation: AutomationRow, schedule: AutomationScheduleTrigger) {
+    if (pendingScheduleUpdates.current.has(automation.id)) return;
+    pendingScheduleUpdates.current.add(automation.id);
+    setSavingSchedules((pending) => new Map(pending).set(automation.id, schedule.id));
+    const enabled = !schedule.enabled;
+    const record = automation.record;
+    try {
+      const saved = await apiData(() => automationsApi.replaceAutomation(record.id, record.revision, {
+        name: record.name,
+        description: record.description,
+        environment_id: record.environment_id ?? "",
+        target: record.target,
+        workflow: record.workflow,
+        workflow_source: record.workflow_source,
+        triggers: record.triggers.map((trigger) =>
+          trigger.type === "schedule" && trigger.id === schedule.id
+            ? { ...trigger, enabled }
+            : trigger,
+        ),
+      }));
+      await mutate<AutomationListResponse>(queryKeys.automations.list(), (current = automationsQuery.data) => current && ({
+        ...current,
+        data: current.data.map((item) => item.id === saved.id ? saved : item),
+      }), { revalidate: false });
+      await mutate(queryKeys.automations.detail(saved.id), saved, { revalidate: false });
+      toast.push({ message: `Schedule “${schedule.id}” ${enabled ? "resumed" : "paused"} for “${record.name}”.` });
+    } catch (cause) {
+      const conflict = cause instanceof ApiError && cause.status === 409;
+      toast.push({
+        tone: "error",
+        message: conflict
+          ? "This automation changed since it was loaded. Reloading the latest settings; please try again."
+          : cause instanceof ApiError && cause.message
+            ? cause.message
+            : `Couldn't ${enabled ? "resume" : "pause"} the schedule. Please try again.`,
+      });
+      if (conflict) {
+        await Promise.allSettled([
+          mutate(queryKeys.automations.list()),
+          mutate(queryKeys.automations.detail(record.id)),
+        ]);
+      }
+    } finally {
+      pendingScheduleUpdates.current.delete(automation.id);
+      setSavingSchedules((pending) => {
+        const next = new Map(pending);
+        next.delete(automation.id);
+        return next;
+      });
+    }
+  }
 
   async function runAutomation(automation: AutomationRow) {
     if (runningId) return;
@@ -296,8 +380,8 @@ export default function Automations() {
   const filtered = automations.filter(
     (a) =>
       (triggerFilter === "all" ||
-        (triggerFilter === "scheduled" && a.schedule != null) ||
-        (triggerFilter === "manual" && a.schedule == null)) &&
+        (triggerFilter === "scheduled" && a.schedules.length > 0) ||
+        (triggerFilter === "manual" && a.schedules.length === 0)) &&
       (a.name.toLowerCase().includes(lowerQuery) ||
         a.workflow.toLowerCase().includes(lowerQuery) ||
         a.repository.toLowerCase().includes(lowerQuery) ||
@@ -378,8 +462,10 @@ export default function Automations() {
               <AutomationCard
                 key={automation.id}
                 automation={automation}
-                busy={deleting || (runningId !== null && runningId !== automation.id)}
+                busy={deleting || savingSchedules.has(automation.id) || (runningId !== null && runningId !== automation.id)}
                 running={runningId === automation.id}
+                savingScheduleId={savingSchedules.get(automation.id)}
+                onToggleSchedule={(schedule) => toggleSchedule(automation, schedule)}
                 onRun={() => runAutomation(automation)}
                 onDelete={() => setPendingDelete(automation)}
               />
