@@ -824,7 +824,7 @@ async fn commit_and_finish(
         Ok(_) => finish(state, run_id, status, error),
         Err(err) => {
             error!(run_id = %run_id, error = %err, "Failed to persist run outcome");
-            release_live_state(state, run_id);
+            super::release_managed_run(state, run_id);
         }
     }
 }
@@ -837,26 +837,10 @@ async fn commit_and_finish(
 fn finish(state: &Arc<AppState>, run_id: RunId, status: RunStatus, error: Option<String>) {
     let mut runs = state.runs.lock().expect("runs lock poisoned");
     if let Some(managed_run) = runs.get_mut(&run_id) {
-        if !managed_run.status.is_terminal() || managed_run.status == status {
-            managed_run.status = status;
-            if managed_run.error.is_none() {
-                managed_run.error = error;
-            }
-        }
+        managed_run.settle(status, error);
     }
     drop(runs);
-    release_live_state(state, run_id);
-}
-
-/// Release controls after an append failure without claiming a new terminal
-/// result. A Petri finish already committed remains authoritative.
-fn release_live_state(state: &Arc<AppState>, run_id: RunId) {
-    let mut runs = state.runs.lock().expect("runs lock poisoned");
-    if let Some(managed_run) = runs.get_mut(&run_id) {
-        clear_live_run_state(managed_run);
-    }
-    drop(runs);
-    state.scheduler_notify.notify_one();
+    super::release_managed_run(state, run_id);
 }
 
 /// The run store an in-process run executes over. A coordinator finish

@@ -282,6 +282,23 @@ struct ManagedRun {
 }
 
 impl ManagedRun {
+    /// Settle the run on a terminal `status`. The first terminal status
+    /// sticks: a later one that agrees only fills a missing error, and one
+    /// that disagrees is ignored. Returns whether the status was applied.
+    fn settle(&mut self, status: RunStatus, error: Option<String>) -> bool {
+        if self.status.is_terminal() {
+            if self.status == status && self.error.is_none() {
+                self.error = error;
+            }
+            return false;
+        }
+        self.status = status;
+        self.error = error;
+        self.active_steerable_stages.clear();
+        self.active_non_steerable_stages.clear();
+        true
+    }
+
     /// True if cancellation should still escalate to `worker_ref`; clears a
     /// stale escalation marker as a side effect.
     fn escalation_still_current(&mut self, worker_ref: &WorkerRef) -> bool {
@@ -3550,7 +3567,6 @@ pub(crate) async fn persist_run_failure(
         }
     }
     release_managed_run(state, run_id);
-    state.scheduler_notify.notify_one();
 }
 
 /// How long [`persist_run_failure`] waits before each retry of a failed
@@ -3649,23 +3665,22 @@ async fn durable_run_status(state: &AppState, run_id: RunId) -> anyhow::Result<O
 fn fail_managed_run(state: &Arc<AppState>, run_id: RunId, reason: FailureReason, message: String) {
     let mut runs = state.runs.lock().expect("runs lock poisoned");
     if let Some(managed_run) = runs.get_mut(&run_id) {
-        if !managed_run.status.is_terminal() {
-            managed_run.status = RunStatus::Failed { reason };
-            managed_run.error = Some(message);
-        }
+        managed_run.settle(RunStatus::Failed { reason }, Some(message));
     }
     drop(runs);
     release_managed_run(state, run_id);
 }
 
-/// Drop the run's live worker state and controls, leaving its status alone.
-fn release_managed_run(state: &AppState, run_id: RunId) {
+/// Drop the run's live worker state and controls and free its scheduler
+/// slot, leaving its status alone.
+pub(in crate::server) fn release_managed_run(state: &AppState, run_id: RunId) {
     let mut runs = state.runs.lock().expect("runs lock poisoned");
     if let Some(managed_run) = runs.get_mut(&run_id) {
         clear_live_run_state(managed_run);
     }
     drop(runs);
     cleanup_worker_control_bus_for_run(state, run_id);
+    state.scheduler_notify.notify_one();
 }
 
 /// Fold one lifecycle record of the run's stream into the in-memory run:
@@ -3680,9 +3695,8 @@ fn apply_lifecycle_to_managed_run(state: &AppState, run_id: RunId, record: &RunL
     // A settled run is immutable to the lifecycle: the follower still folds
     // the records before the terminal one after Petri's finish or the
     // worker's terminal record settled the run, and none may reopen it.
-    if managed_run.status.is_terminal()
-        && (!is_terminal_transition(record) || record.status != Some(managed_run.status))
-    {
+    // Terminal records go through [`ManagedRun::settle`].
+    if managed_run.status.is_terminal() && !is_terminal_transition(record) {
         return;
     }
     match record.transition {
@@ -3729,23 +3743,17 @@ fn apply_lifecycle_to_managed_run(state: &AppState, run_id: RunId, record: &RunL
         }
         RunLifecycleKind::Removing => managed_run.status = RunStatus::Removing,
         RunLifecycleKind::Succeeded => {
-            managed_run.status = record.status.unwrap_or(RunStatus::Succeeded {
+            let status = record.status.unwrap_or(RunStatus::Succeeded {
                 reason: SuccessReason::Completed,
             });
-            managed_run.error = None;
-            managed_run.active_steerable_stages.clear();
-            managed_run.active_non_steerable_stages.clear();
+            managed_run.settle(status, None);
             cleanup_worker_control_bus_for_run(state, run_id);
         }
         RunLifecycleKind::Failed | RunLifecycleKind::Dead => {
-            managed_run.status = record.status.unwrap_or(RunStatus::Failed {
+            let status = record.status.unwrap_or(RunStatus::Failed {
                 reason: FailureReason::WorkflowError,
             });
-            if managed_run.error.is_none() {
-                managed_run.error.clone_from(&record.reason);
-            }
-            managed_run.active_steerable_stages.clear();
-            managed_run.active_non_steerable_stages.clear();
+            managed_run.settle(status, record.reason.clone());
             cleanup_worker_control_bus_for_run(state, run_id);
         }
         RunLifecycleKind::Runnable
@@ -3776,16 +3784,9 @@ pub(in crate::server) fn settle_managed_run_at_finish(
     failure: Option<String>,
 ) {
     let mut runs = state.runs.lock().expect("runs lock poisoned");
-    let Some(managed_run) = runs.get_mut(&run_id) else {
-        return;
-    };
-    if managed_run.status.is_terminal() {
-        return;
+    if let Some(managed_run) = runs.get_mut(&run_id) {
+        managed_run.settle(status, failure);
     }
-    managed_run.status = status;
-    managed_run.error = failure;
-    managed_run.active_steerable_stages.clear();
-    managed_run.active_non_steerable_stages.clear();
 }
 
 /// Settle the in-memory run at the terminal lifecycle record its worker
@@ -4234,7 +4235,6 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                 FailureReason::WorkflowError,
                 "Run not found at launch".to_string(),
             );
-            state.scheduler_notify.notify_one();
             return;
         }
         Err(err) => {
@@ -4245,7 +4245,6 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                 FailureReason::WorkflowError,
                 format!("Failed to load run state: {err}"),
             );
-            state.scheduler_notify.notify_one();
             return;
         }
     };
@@ -4394,7 +4393,6 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                 FailureReason::WorkflowError,
                 "The run's final state is missing from the store".to_string(),
             );
-            state.scheduler_notify.notify_one();
             return;
         }
         Err(err) => {
@@ -4405,7 +4403,6 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                 FailureReason::WorkflowError,
                 format!("Failed to load final run state: {err}"),
             );
-            state.scheduler_notify.notify_one();
             return;
         }
     };

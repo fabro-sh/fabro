@@ -525,25 +525,30 @@ fn outcome(
     inspection: RunInspection,
     host_error: Option<HostError>,
 ) -> Result<RunOutcome, RunError> {
-    // A failed checkpoint cancelled the run; its finish records the
-    // checkpoint failure, which is what Fabro reports.
-    let checkpoint_failed = inspection
-        .finalization_failure
-        .as_ref()
-        .is_some_and(projection::is_checkpoint_failure);
-    let status = match inspection.status.as_deref() {
-        Some("success") => RunStatus::Success,
-        Some("failed") => RunStatus::Failed,
-        Some("cancelled") if checkpoint_failed => RunStatus::Failed,
-        Some("cancelled") => RunStatus::Cancelled,
-        _ => {
-            let mut reasons = inspection.incomplete.clone();
-            if let Some(error) = host_error {
-                reasons.push(error.to_string());
-            }
-            return Err(RunError::Unfinished(reasons));
+    let Some(recorded) = inspection
+        .status
+        .as_deref()
+        .filter(|status| matches!(*status, "success" | "failed" | "cancelled"))
+    else {
+        let mut reasons = inspection.incomplete.clone();
+        if let Some(error) = host_error {
+            reasons.push(error.to_string());
         }
+        return Err(RunError::Unfinished(reasons));
     };
+    // The projection's reading of the finish, so the worker's return and
+    // the API agree: a failed checkpoint's cancellation is a failure.
+    let (status, publish_failed) =
+        match projection::finished_status(recorded, inspection.finalization_failure.as_ref()) {
+            fabro_types::RunStatus::Succeeded { .. } => (RunStatus::Success, false),
+            fabro_types::RunStatus::Failed {
+                reason: FailureReason::Cancelled,
+            } => (RunStatus::Cancelled, false),
+            fabro_types::RunStatus::Failed { reason } => {
+                (RunStatus::Failed, reason == FailureReason::PublishFailed)
+            }
+            _ => (RunStatus::Failed, false),
+        };
     let execution_failure = inspection
         .invocations
         .iter()
@@ -551,10 +556,6 @@ fn outcome(
         .and_then(|root| root.result.as_ref())
         .and_then(|result| result.failure.as_ref())
         .map(|failure| failure.message.clone());
-    let publish_failed = inspection
-        .finalization_failure
-        .as_ref()
-        .is_some_and(projection::is_publish_failure);
     let failure = inspection
         .finalization_failure
         .map(|failure| failure.message)

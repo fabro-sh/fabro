@@ -37,6 +37,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use chrono::{DateTime, TimeZone as _, Utc};
+pub(crate) use coordinator::finished_status;
 use fabro_store::StagePosition;
 use fabro_store::platform_records::StoredPlatformRecord;
 use fabro_types::{

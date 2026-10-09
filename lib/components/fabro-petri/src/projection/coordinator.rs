@@ -229,7 +229,7 @@ impl RunView {
 /// records (`success`, `cancelled`, or a failure). A failed checkpoint
 /// cancels the run, but the run failed: its finish says so with the
 /// checkpoint's finalization failure.
-pub(super) fn finished_status(
+pub(crate) fn finished_status(
     status: &str,
     finalization_failure: Option<&FinalizationFailure>,
 ) -> RunStatus {
