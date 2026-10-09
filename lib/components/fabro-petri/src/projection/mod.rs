@@ -37,17 +37,22 @@ use std::fmt;
 use std::str::FromStr;
 
 use chrono::{DateTime, TimeZone as _, Utc};
+pub(crate) use coordinator::finished_status;
 use fabro_store::StagePosition;
 use fabro_store::platform_records::StoredPlatformRecord;
 use fabro_types::{
-    RunControlAction, RunDiff, RunId, RunProjection, RunStatus, StageId, StageProjection,
+    FailureReason, RunControlAction, RunDiff, RunId, RunProjection, RunStatus, StageId,
+    StageProjection,
 };
 use petri_execution::events::{NodeRef, RunEvent, Subject};
 use petri_execution::{CoordinatorEvent, CoordinatorRecord, ExecutionId};
+use petri_runtime::ir::FinalizationFailure;
 use petri_store::Record;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use serde_json::Value;
 use tracing::debug;
+
+use crate::checkpoint::CHECKPOINT_FAILED_CLASS;
 
 /// One item the projector hands the fold, with its delivery sequence.
 pub enum Item<'a> {
@@ -369,17 +374,46 @@ pub fn run_id_of(key: &str) -> Option<RunId> {
     key.parse().ok()
 }
 
-/// The status the view gives the run at Petri's own finish, when the
-/// stored record is the coordinator log's `run.finished`: the view reports
-/// the run ended from the moment that record is stored, ahead of Fabro's
-/// terminal lifecycle record. `None` for any other record.
+/// The required-finalization failure Fabro's hooks record when the run's
+/// publication fails; its code is [`FailureReason::PublishFailed`]'s.
 #[must_use]
-pub fn finished_run_status(record: &Record) -> Option<RunStatus> {
+pub fn publish_failure(message: impl Into<String>) -> FinalizationFailure {
+    FinalizationFailure::new(<&'static str>::from(FailureReason::PublishFailed), message)
+}
+
+/// Whether a required-finalization failure is the run's failed publication.
+#[must_use]
+pub fn is_publish_failure(failure: &FinalizationFailure) -> bool {
+    failure.code == <&'static str>::from(FailureReason::PublishFailed)
+}
+
+/// The required-finalization failure Fabro's hooks record when a checkpoint
+/// failed during the run. The failed checkpoint cancelled the run, so Petri
+/// may record it as cancelled; Fabro reports it as a workflow failure.
+#[must_use]
+pub fn checkpoint_failure(message: impl Into<String>) -> FinalizationFailure {
+    FinalizationFailure::new(CHECKPOINT_FAILED_CLASS, message)
+}
+
+/// Whether a required-finalization failure is a failed checkpoint.
+#[must_use]
+pub fn is_checkpoint_failure(failure: &FinalizationFailure) -> bool {
+    failure.code == CHECKPOINT_FAILED_CLASS
+}
+
+/// The committed overall status and required-finalization failure message.
+/// Execution failure details remain in the invocation records and projection.
+#[must_use]
+pub fn finished_run_result(record: &Record) -> Option<(RunStatus, Option<String>)> {
     let record: CoordinatorRecord = serde_json::from_value(record.record.clone()).ok()?;
     match record.body {
-        CoordinatorEvent::RunFinished { status } => {
-            Some(coordinator::finished_status(&status.to_string()))
-        }
+        CoordinatorEvent::RunFinished {
+            status,
+            finalization_failure,
+        } => Some((
+            coordinator::finished_status(&status.to_string(), finalization_failure.as_ref()),
+            finalization_failure.map(|failure| failure.message),
+        )),
         _ => None,
     }
 }
@@ -412,10 +446,11 @@ mod tests {
     #[test]
     fn a_finish_record_names_the_status_the_view_ends_the_run_on() {
         let finished = |status: &str| {
-            finished_run_status(&coordinator_record(&serde_json::json!({
+            finished_run_result(&coordinator_record(&serde_json::json!({
                 "event": "run.finished",
                 "status": status,
             })))
+            .map(|(status, _)| status)
         };
         assert_eq!(
             finished("success"),
@@ -436,13 +471,30 @@ mod tests {
             })
         );
         assert_eq!(
-            finished_run_status(&coordinator_record(&serde_json::json!({
+            finished_run_result(&coordinator_record(&serde_json::json!({
+                "event": "run.finished",
+                "status": "cancelled",
+                "finalization_failure": {
+                    "code": "checkpoint_failed",
+                    "message": "checkpoint commit of `wreck` failed",
+                },
+            }))),
+            Some((
+                RunStatus::Failed {
+                    reason: fabro_types::FailureReason::WorkflowError,
+                },
+                Some("checkpoint commit of `wreck` failed".to_string()),
+            )),
+            "a failed checkpoint's cancellation is the checkpoint's failure"
+        );
+        assert_eq!(
+            finished_run_result(&coordinator_record(&serde_json::json!({
                 "event": "run.paused",
             }))),
             None
         );
         assert_eq!(
-            finished_run_status(&Record {
+            finished_run_result(&Record {
                 seq:         3,
                 recorded_at: 1_000,
                 record:      serde_json::json!({"event": "run.finished", "status": "success"}),

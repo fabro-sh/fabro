@@ -44,8 +44,9 @@ use fabro_types::{GitIdentitySource, RunId, SandboxProviderKind};
 use object_store::local::LocalFileSystem;
 use petri_execution::inspect::{self, RunInspection};
 use petri_store::{Access, MemoryRunStore, RunKey, RunStore as _};
-use tokio::fs;
 use tokio::process::Command;
+use tokio::sync::{Notify, Semaphore};
+use tokio::{fs, time};
 use tokio_util::sync::CancellationToken;
 
 mod support;
@@ -688,8 +689,9 @@ async fn a_failed_stage_is_committed_and_its_route_sees_the_files() {
 }
 
 /// A checkpoint commit that fails is fatal: the stage's outcome is recorded
-/// as `checkpoint_failed`, no route is taken, the run ends failed with the
-/// checkpoint's error, and a restart reports it failed without resuming.
+/// as `checkpoint_failed`, no route is taken, the run's committed finish
+/// fails it with the checkpoint's error, and a restart reports it failed
+/// without resuming.
 #[tokio::test]
 async fn a_failed_checkpoint_ends_the_run_with_no_route() {
     let harness = Harness::new().await;
@@ -712,6 +714,16 @@ async fn a_failed_checkpoint_ends_the_run_with_no_route() {
     );
 
     let inspection = harness.inspection().await;
+    let committed = inspection
+        .finalization_failure
+        .clone()
+        .expect("the finish commits the checkpoint failure");
+    assert_eq!(committed.code, CHECKPOINT_FAILED_CLASS);
+    let stored = engine::outcome_of(&*harness.store, &harness.run_id.to_string())
+        .await
+        .expect("the finished run reads back");
+    assert_eq!(stored.status, RunStatus::Failed, "{stored:?}");
+    assert_eq!(stored.failure, outcome.failure);
     let attempts: Vec<_> = inspection
         .executions
         .iter()
@@ -1261,14 +1273,22 @@ async fn published_run(
     let (origin, _) = upstream(&harness.run_dir.with_file_name("upstream"), 2).await;
     harness.source = Some(file_source(&origin, "main", Some(1)));
     harness.publisher = Some(Arc::clone(publisher) as Arc<dyn RunPublisher>);
-    let workflow = workflow(
-        &format!("  edit [shape=parallelogram, {attributes}]"),
-        "  start -> edit -> exit",
-    );
     let outcome = harness
-        .run_on(SandboxProviderKind::LOCAL, &workflow, SETTINGS)
+        .run_on(
+            SandboxProviderKind::LOCAL,
+            &published_workflow(attributes),
+            SETTINGS,
+        )
         .await;
     (harness, outcome)
+}
+
+/// The workflow [`published_run`] runs: one command stage with `attributes`.
+fn published_workflow(attributes: &str) -> String {
+    workflow(
+        &format!("  edit [shape=parallelogram, {attributes}]"),
+        "  start -> edit -> exit",
+    )
 }
 
 /// A successful run hands its publisher the run branch, the commit it ends
@@ -1307,10 +1327,37 @@ async fn a_successful_run_is_published_with_its_branch_head_and_patch() {
 #[tokio::test]
 async fn a_failed_publication_fails_the_run() {
     let publisher = RecordingPublisher::new(Some("the push was rejected"));
-    let (_, outcome) = published_run("script=\"echo edited >> README.md\"", &publisher).await;
+    let attributes = "script=\"echo edited >> README.md\"";
+    let (harness, outcome) = published_run(attributes, &publisher).await;
     assert_eq!(outcome.status, RunStatus::Failed, "{outcome:?}");
     assert!(outcome.publish_failed);
     assert_eq!(outcome.failure.as_deref(), Some("the push was rejected"));
+    let inspection = harness.inspection().await;
+    assert_eq!(inspection.status.as_deref(), Some("failed"));
+    let failure = inspection.finalization_failure.expect("durable failure");
+    assert_eq!(failure.code, "publish_failed");
+    assert_eq!(failure.message, "the push was rejected");
+    let stored = engine::outcome_of(&*harness.store, &harness.run_id.to_string())
+        .await
+        .unwrap();
+    assert_eq!(stored.status, outcome.status);
+    assert_eq!(stored.failure, outcome.failure);
+    assert!(stored.publish_failed);
+    let resumed = harness
+        .execute_on(
+            SandboxProviderKind::LOCAL,
+            &published_workflow(attributes),
+            SETTINGS,
+            true,
+        )
+        .await;
+    assert_eq!(resumed.status, outcome.status);
+    assert_eq!(resumed.failure, outcome.failure);
+    assert_eq!(
+        publisher.published.lock().unwrap().len(),
+        1,
+        "committed resume does not publish twice"
+    );
 }
 
 /// A run that fails (here, at a goal gate) is not published.
@@ -1321,6 +1368,27 @@ async fn a_failed_run_is_not_published() {
     assert_eq!(outcome.status, RunStatus::Failed, "{outcome:?}");
     assert!(!outcome.publish_failed);
     assert!(publisher.published.lock().unwrap().is_empty());
+}
+
+/// A run whose checkpoint failed is never published, and its committed
+/// failure is the checkpoint's, not a publication's.
+#[tokio::test]
+async fn a_run_whose_checkpoint_failed_is_not_published() {
+    let publisher = RecordingPublisher::new(None);
+    let (harness, outcome) = published_run(
+        "script=\"rm -rf .git && echo garbage > .git && echo wrecked > out.txt\"",
+        &publisher,
+    )
+    .await;
+    assert_eq!(outcome.status, RunStatus::Failed, "{outcome:?}");
+    assert!(!outcome.publish_failed);
+    assert!(publisher.published.lock().unwrap().is_empty());
+    let failure = harness
+        .inspection()
+        .await
+        .finalization_failure
+        .expect("the finish commits the checkpoint failure");
+    assert_eq!(failure.code, CHECKPOINT_FAILED_CLASS);
 }
 
 struct OriginPublisher {
@@ -1437,6 +1505,10 @@ async fn assert_shallow_fork(checkpoint_index: usize) {
     })
     .await
     .expect("the fork is seeded");
+    assert!(
+        forked.inspection().await.required_finalization,
+        "a publishing fork inherits its required finalization declaration"
+    );
     assert_eq!(
         seeded.start.expect("the selected checkpoint").sha,
         *checkpoint_sha
@@ -1570,6 +1642,117 @@ async fn a_run_diff_failure_cannot_silently_skip_publication() {
     let outcome = harness.run(&graph, SETTINGS).await;
     assert_eq!(outcome.status, RunStatus::Failed, "{outcome:?}");
     assert!(outcome.publish_failed);
-    assert!(outcome.failure.unwrap().contains("run diff unavailable"));
+    assert!(
+        outcome
+            .failure
+            .as_ref()
+            .unwrap()
+            .contains("run diff unavailable")
+    );
+    let stored = engine::outcome_of(&*harness.store, &harness.run_id.to_string())
+        .await
+        .unwrap();
+    assert_eq!(stored.status, outcome.status);
+    assert_eq!(stored.failure, outcome.failure);
+    assert!(stored.publish_failed);
     assert!(publisher.published.lock().unwrap().is_empty());
+}
+
+struct GatedPublisher {
+    inner:   Arc<RecordingPublisher>,
+    entered: Notify,
+    release: Semaphore,
+}
+
+#[async_trait::async_trait]
+impl RunPublisher for GatedPublisher {
+    async fn push(&self, site: &Site, branch: &str, sha: &str) -> Result<(), String> {
+        self.inner.push(site, branch, sha).await
+    }
+
+    async fn publish(&self, publication: &Publication) -> Result<(), String> {
+        self.entered.notify_one();
+        self.release
+            .acquire()
+            .await
+            .expect("publication gate stays open")
+            .forget();
+        self.inner.publish(publication).await
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn required_publication_blocks_the_terminal_result_and_cleanup() {
+    for rejection in [None, Some("the push was rejected")] {
+        let publisher = Arc::new(GatedPublisher {
+            inner:   RecordingPublisher::new(rejection),
+            entered: Notify::new(),
+            release: Semaphore::new(0),
+        });
+        let mut harness = Harness::new().await;
+        harness.publisher = Some(publisher.clone());
+        let harness = Arc::new(harness);
+        let executing = harness.clone();
+        let task = tokio::spawn(async move {
+            executing
+                .run(
+                    &workflow(
+                        "edit [shape=parallelogram, script=\"echo edited >> README.md\"]",
+                        "start -> edit -> exit",
+                    ),
+                    SETTINGS,
+                )
+                .await
+        });
+        time::timeout(
+            std::time::Duration::from_secs(15),
+            publisher.entered.notified(),
+        )
+        .await
+        .expect("publication reaches the gate");
+        let pending = harness.inspection().await;
+        assert!(pending.required_finalization);
+        assert!(
+            pending.status.is_none(),
+            "no terminal result while publication waits"
+        );
+        assert!(!task.is_finished());
+        let logs = harness
+            .store
+            .open(&RunKey::new(harness.run_id.to_string()), Access::Read)
+            .await
+            .unwrap();
+        let coordinator = logs.read(&petri_store::LogId::Coordinator).await.unwrap();
+        assert!(
+            coordinator
+                .iter()
+                .all(|record| record.record["body"]["event"] != "scope.released"),
+            "scope cleanup waits for publication"
+        );
+        assert!(
+            harness.workspace_path(&harness.workspace().await).exists(),
+            "workspace is available to publication"
+        );
+        assert!(matches!(
+            engine::outcome_of(&*harness.store, &harness.run_id.to_string()).await,
+            Err(engine::RunError::Unfinished(_))
+        ));
+        publisher.release.add_permits(1);
+        let outcome = task.await.unwrap();
+        assert_eq!(
+            outcome.status,
+            if rejection.is_some() {
+                RunStatus::Failed
+            } else {
+                RunStatus::Success
+            }
+        );
+        assert_eq!(outcome.publish_failed, rejection.is_some());
+        let stored = engine::outcome_of(&*harness.store, &harness.run_id.to_string())
+            .await
+            .unwrap();
+        assert_eq!(stored.status, outcome.status);
+        assert_eq!(stored.failure, outcome.failure);
+        assert_eq!(publisher.inner.published.lock().unwrap().len(), 1);
+    }
 }

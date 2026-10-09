@@ -295,6 +295,9 @@ pub(super) async fn execute(worker: PetriWorker<'_>) -> Result<()> {
         elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         "Petri run ended"
     );
+    // The engine reads Petri's committed overall outcome, including a
+    // structured publish_failed rejection. The lifecycle acknowledges it;
+    // invocation success alone cannot decide the worker's exit.
     let (record, phase, failure) = match engine::conclusion(&result) {
         Conclusion::Interrupted { message } => {
             // The run is not over: it continues from its records in the

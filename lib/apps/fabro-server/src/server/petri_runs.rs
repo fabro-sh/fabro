@@ -22,7 +22,7 @@
 //! of the server's vault, and its blobs go to the server's blob store. Its
 //! managed run settles at Petri's own finish, as a worker's does at the
 //! worker's records endpoint: the run store it executes over settles the
-//! run before the `run.finished` record is stored ([`SettlingStore`]). No
+//! run after the `run.finished` record is stored ([`SettlingStore`]). No
 //! stage or agent event is projected either way, which is the read-side
 //! item that follows.
 //!
@@ -496,8 +496,8 @@ pub(crate) async fn execute(state: Arc<AppState>, run_id: RunId) {
         run_id: run_id.to_string(),
         run_dir: run_dir.join("petri"),
         execution,
-        // The projector's signal follows each durable append; the managed
-        // run's settle at Petri's finish precedes it.
+        // The coordinator finish is stored before managed status settles;
+        // the projector also reads only durable records.
         store: Arc::new(SettlingStore {
             inner: state
                 .petri_projector
@@ -549,13 +549,7 @@ pub(crate) async fn execute(state: Arc<AppState>, run_id: RunId) {
             failed(reason, message)
         }
     };
-    if let Err(err) = run_records::lifecycle(&state, run_id, record).await {
-        error!(run_id = %run_id, error = %err, "Failed to persist run outcome");
-    }
-    // The managed run settled at Petri's finish, ahead of the store; the
-    // terminal record refines its status and error and ends its live
-    // state, and is the settle of a run that ended without a finish.
-    finish(&state, run_id, status, error);
+    commit_and_finish(&state, run_id, record, status, error).await;
     // The view trails the terminal record; the aggregate reads the settled
     // projection, as the worker path reads the final state at worker exit.
     state.petri_projector.settle(run_id).await;
@@ -814,38 +808,43 @@ fn failed(
 async fn fail_before_execution(state: &Arc<AppState>, run_id: RunId, message: &str) {
     error!(run_id = %run_id, error = message, "Petri run cannot start");
     let (status, error, record) = failed(FailureReason::WorkflowError, message.to_string());
-    if let Err(err) = run_records::lifecycle(state, run_id, record).await {
-        error!(run_id = %run_id, error = %err, "Failed to persist run failure status");
+    commit_and_finish(state, run_id, record, status, error).await;
+}
+
+/// Append the run's terminal record, then finish the run. An append that
+/// fails only releases the live state: it commits no terminal result.
+async fn commit_and_finish(
+    state: &Arc<AppState>,
+    run_id: RunId,
+    record: RunLifecycleRecord,
+    status: RunStatus,
+    error: Option<String>,
+) {
+    match run_records::lifecycle(state, run_id, record).await {
+        Ok(_) => finish(state, run_id, status, error),
+        Err(err) => {
+            error!(run_id = %run_id, error = %err, "Failed to persist run outcome");
+            super::release_managed_run(state, run_id);
+        }
     }
-    finish(state, run_id, status, error);
 }
 
 /// Settle the managed run at its terminal record and release its
 /// scheduler slot. A run that Petri finished settled already, at the
-/// `run.finished` record ([`SettlingStore`]); this refines its status and
-/// error and ends its live state. A run deleted since is gone from the map
-/// and stays gone.
+/// `run.finished` record ([`SettlingStore`]); this preserves that status,
+/// fills any missing failure detail and ends its live state. A run deleted
+/// since is gone from the map and stays gone.
 fn finish(state: &Arc<AppState>, run_id: RunId, status: RunStatus, error: Option<String>) {
     let mut runs = state.runs.lock().expect("runs lock poisoned");
     if let Some(managed_run) = runs.get_mut(&run_id) {
-        managed_run.status = status;
-        managed_run.error = error;
-        clear_live_run_state(managed_run);
+        managed_run.settle(status, error);
     }
     drop(runs);
-    state.scheduler_notify.notify_one();
+    super::release_managed_run(state, run_id);
 }
 
-/// The run store an in-process run executes over: the projector's
-/// signalling store, whose coordinator appends settle the managed run at
-/// Petri's own finish first. The view ends the run at the `run.finished`
-/// record the moment it is stored and a pass folds it, so the managed run
-/// the delete precheck prefers must not still say running while the engine
-/// tears down: a delete in that window was refused as active. The worker's
-/// records endpoint does the same for a worker-backed run, ahead of the
-/// same store. The settle is in memory only; the terminal lifecycle record
-/// [`execute`] stores once the engine returns refines the status
-/// ([`finish`]), and stays the settle of a run that ends without a finish.
+/// The run store an in-process run executes over. A coordinator finish
+/// settles managed status only after the append succeeds, as on HTTP workers.
 struct SettlingStore {
     inner: Arc<dyn RunStore>,
     state: Arc<AppState>,
@@ -864,7 +863,7 @@ impl RunStore for SettlingStore {
 }
 
 /// One run's logs, whose coordinator appends settle the managed run at
-/// Petri's finish before the records reach the store.
+/// Petri's finish after the records reach the store.
 struct SettlingLogs {
     inner:  Arc<dyn RunLogs>,
     run_id: Option<RunId>,
@@ -878,12 +877,15 @@ impl RunLogs for SettlingLogs {
     }
 
     async fn append(&self, log: &LogId, records: &[Record]) -> Result<(), StoreError> {
+        self.inner.append(log, records).await?;
         if let Some(run_id) = self.run_id.filter(|_| *log == LogId::Coordinator) {
-            if let Some(status) = records.iter().find_map(projection::finished_run_status) {
-                super::settle_managed_run_at_finish(&self.state, run_id, status);
+            if let Some((status, failure)) =
+                records.iter().find_map(projection::finished_run_result)
+            {
+                super::settle_managed_run_at_finish(&self.state, run_id, status, failure);
             }
         }
-        self.inner.append(log, records).await
+        Ok(())
     }
 
     async fn read(&self, log: &LogId) -> Result<Vec<Record>, StoreError> {
@@ -922,6 +924,7 @@ mod tests {
         state:  Arc<AppState>,
         run_id: RunId,
         seen:   Mutex<Vec<Option<RunStatus>>>,
+        reject: std::sync::atomic::AtomicBool,
     }
 
     #[async_trait::async_trait]
@@ -933,6 +936,9 @@ mod tests {
         async fn append(&self, log: &LogId, records: &[Record]) -> Result<(), StoreError> {
             let status = self.state.test_managed_run_status(&self.run_id);
             self.seen.lock().expect("seen lock poisoned").push(status);
+            if self.reject.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(StoreError::StaleOwner);
+            }
             self.inner.append(log, records).await
         }
 
@@ -992,6 +998,7 @@ mod tests {
             state: Arc::clone(&state),
             run_id,
             seen: Mutex::new(Vec::new()),
+            reject: std::sync::atomic::AtomicBool::new(false),
         });
         let logs = SettlingLogs {
             inner:  Arc::clone(&recorder) as Arc<dyn RunLogs>,
@@ -1001,12 +1008,10 @@ mod tests {
         (state, run_id, logs, recorder)
     }
 
-    /// The in-process run settles at Petri's own finish, before the
-    /// `run.finished` record reaches the store: the view cannot report the
-    /// run ended while the managed run still says running. The records
-    /// before the finish leave the run in flight.
+    /// The in-process run settles only after its authoritative finish is
+    /// stored. Earlier records leave the run in flight.
     #[tokio::test]
-    async fn an_in_process_run_settles_before_its_finish_is_stored() {
+    async fn an_in_process_run_settles_after_its_finish_is_stored() {
         let (state, run_id, logs, recorder) = in_flight_run().await;
 
         logs.append(&LogId::Coordinator, &[coordinator_record(
@@ -1032,10 +1037,31 @@ mod tests {
         };
         assert_eq!(
             *recorder.seen.lock().expect("seen lock poisoned"),
-            vec![Some(RunStatus::Running), Some(succeeded)],
-            "the managed run settled before the finish reached the store"
+            vec![Some(RunStatus::Running), Some(RunStatus::Running)],
+            "the managed run stayed running until the finish reached the store"
         );
         assert_eq!(state.test_managed_run_status(&run_id), Some(succeeded));
+    }
+
+    #[tokio::test]
+    async fn a_rejected_in_process_finish_does_not_settle_the_run() {
+        let (state, run_id, logs, recorder) = in_flight_run().await;
+        recorder
+            .reject
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let result = logs
+            .append(&LogId::Coordinator, &[coordinator_record(
+                0,
+                &json!({"event": "run.finished", "status": "failed",
+                "finalization_failure": {"code": "publish_failed", "message": "push rejected"}}),
+            )])
+            .await;
+        assert!(matches!(result, Err(StoreError::StaleOwner)));
+        assert_eq!(
+            state.test_managed_run_status(&run_id),
+            Some(RunStatus::Running)
+        );
+        assert!(logs.read(&LogId::Coordinator).await.unwrap().is_empty());
     }
 
     /// A finish on another log than the coordinator's is not Petri's

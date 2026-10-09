@@ -574,13 +574,25 @@ mod tests {
         transition: RunLifecycleKind,
         status: RunStatus,
     ) {
+        let response = append_lifecycle_as_worker(app, run_id, token, transition, status).await;
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    /// Append one lifecycle record as the run's worker, and return the
+    /// server's response whatever it is.
+    async fn append_lifecycle_as_worker(
+        app: &axum::Router,
+        run_id: RunId,
+        token: &str,
+        transition: RunLifecycleKind,
+        status: RunStatus,
+    ) -> axum::response::Response {
         let record =
             PlatformRecord::RunLifecycle(RunLifecycleRecord::new(transition).with_status(status));
         let body = json!({
             "record": serde_json::to_value(&record).expect("the record encodes"),
         });
-        let response = app
-            .clone()
+        app.clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -591,8 +603,7 @@ mod tests {
                     .expect("the append request builds"),
             )
             .await
-            .expect("the append request completes");
-        assert_eq!(response.status(), StatusCode::OK);
+            .expect("the append request completes")
     }
 
     /// Petri's own finish of the run, stored the way its worker stores it:
@@ -939,5 +950,309 @@ mod tests {
             message.is_some_and(|message| message.contains("Worker exited before emitting")),
             "the failure names the worker's exit"
         );
+    }
+
+    async fn append_engine_records(
+        app: &axum::Router,
+        run_id: RunId,
+        token: &str,
+        owner: &str,
+        log: &fabro_petri::petri::LogId,
+        records: &[fabro_petri::petri::Record],
+    ) -> axum::response::Response {
+        let body = json!({ "owner": owner, "records": records.iter().map(|record| json!({
+            "seq": record.seq, "recorded_at": record.recorded_at, "record": record.record,
+        })).collect::<Vec<_>>() });
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(
+                        format!("/api/v1/runs/{run_id}/petri/logs/{log}/records")
+                            .replace(' ', "%20"),
+                    )
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    async fn assert_public_result(
+        state: &AppState,
+        app: &axum::Router,
+        run_id: RunId,
+        expected: RunStatus,
+        message: Option<&str>,
+    ) {
+        state.petri_projector.settle(run_id).await;
+        let mut values = Vec::new();
+        for suffix in ["", "/state"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/api/v1/runs/{run_id}{suffix}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            values.push(
+                fabro_test::expect_axum_json(
+                    response,
+                    StatusCode::OK,
+                    "GET run and state at required finalization boundary",
+                )
+                .await,
+            );
+        }
+        assert_eq!(
+            values[0]["lifecycle"]["status"],
+            serde_json::to_value(expected).unwrap(),
+            "public state: {:#?}",
+            values[1]
+        );
+        assert_eq!(values[1]["status"], serde_json::to_value(expected).unwrap());
+        assert_eq!(state.test_managed_run_status(&run_id), Some(expected));
+        if expected.is_terminal() {
+            assert_eq!(
+                values[1]["conclusion"]["failure"]["detail"]["message"].as_str(),
+                message
+            );
+            assert!(
+                values[1]["conclusion"]["stages"]
+                    .as_array()
+                    .is_some_and(|stages| !stages.is_empty())
+            );
+        } else {
+            assert!(values[1]["conclusion"].is_null());
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_rejected_platform_failure_does_not_settle_the_run() {
+        let runtime = Arc::new(HeldWorkerRuntime::default());
+        let (state, app, run_id, token) = held_worker_run(&runtime).await;
+        run_to_running_as_worker(&app, run_id, &token).await;
+        let pool = state.stores.run_summaries.pool();
+        sqlx::query(
+            "CREATE TRIGGER reject_platform_record BEFORE INSERT ON platform_records \
+             BEGIN SELECT RAISE(FAIL, 'scripted append failure'); END",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let response = append_lifecycle_as_worker(
+            &app,
+            run_id,
+            &token,
+            RunLifecycleKind::Failed,
+            RunStatus::Failed {
+                reason: FailureReason::LaunchFailed,
+            },
+        )
+        .await;
+        fabro_test::assert_axum_status(
+            response,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "rejected platform terminal append",
+        )
+        .await;
+        assert_public_result(&state, &app, run_id, RunStatus::Running, None).await;
+        crate::server::persist_run_failure(
+            &state,
+            run_id,
+            FailureReason::LaunchFailed,
+            "worker launch failed".into(),
+        )
+        .await;
+        assert_public_result(&state, &app, run_id, RunStatus::Running, None).await;
+        sqlx::query("DROP TRIGGER reject_platform_record")
+            .execute(&pool)
+            .await
+            .unwrap();
+        runtime.end_worker();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_host_failure_is_retried_until_storage_accepts_it() {
+        let runtime = Arc::new(HeldWorkerRuntime::default());
+        let (state, app, run_id, token) = held_worker_run(&runtime).await;
+        run_to_running_as_worker(&app, run_id, &token).await;
+        let pool = state.stores.run_summaries.pool();
+        sqlx::query(
+            "CREATE TRIGGER reject_platform_record BEFORE INSERT ON platform_records \
+             BEGIN SELECT RAISE(FAIL, 'scripted append failure'); END",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let failure = tokio::spawn({
+            let state = Arc::clone(&state);
+            async move {
+                crate::server::persist_run_failure(
+                    &state,
+                    run_id,
+                    FailureReason::LaunchFailed,
+                    "worker launch failed".into(),
+                )
+                .await;
+            }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        sqlx::query("DROP TRIGGER reject_platform_record")
+            .execute(&pool)
+            .await
+            .unwrap();
+        failure.await.unwrap();
+        let failed = RunStatus::Failed {
+            reason: FailureReason::LaunchFailed,
+        };
+        let stored = crate::server::run_records::projection(&state, run_id)
+            .await
+            .unwrap()
+            .expect("the run is stored");
+        assert_eq!(stored.status, failed, "the retried failure is durable");
+        assert_eq!(state.test_managed_run_status(&run_id), Some(failed));
+        runtime.end_worker();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn required_publication_result_agrees_across_worker_api_projection_and_cleanup() {
+        use fabro_petri::petri::LogId;
+        use fabro_petri::test_support::finalization;
+        for rejection in [None, Some("the push was rejected")] {
+            let runtime = Arc::new(HeldWorkerRuntime::default());
+            let (state, app, run_id, token) = held_worker_run(&runtime).await;
+            run_to_running_as_worker(&app, run_id, &token).await;
+            let fixture = finalization::test_run_records(run_id, rejection).await;
+            for bytes in fixture.blobs {
+                let response = app
+                    .clone()
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri(format!("/api/v1/runs/{run_id}/petri/blobs?owner=worker-1"))
+                            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                            .body(Body::from(bytes))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                fabro_test::assert_axum_status(response, StatusCode::OK, "worker graph blob").await;
+            }
+            let mut terminal = None;
+            for (log, mut records) in fixture.logs {
+                if log == LogId::Coordinator {
+                    let finish = records.pop().unwrap();
+                    assert_eq!(finish.record["body"]["event"], "run.finished");
+                    terminal = Some(finish);
+                }
+                let response =
+                    append_engine_records(&app, run_id, &token, "worker-1", &log, &records).await;
+                fabro_test::assert_axum_status(
+                    response,
+                    StatusCode::NO_CONTENT,
+                    "worker execution records",
+                )
+                .await;
+            }
+            assert_public_result(&state, &app, run_id, RunStatus::Running, None).await;
+            let terminal = terminal.unwrap();
+            // A rejected writer cannot settle the managed run or store its
+            // result. This exercises the same endpoint as the valid finish.
+            let response = append_engine_records(
+                &app,
+                run_id,
+                &token,
+                "superseded-worker",
+                &LogId::Coordinator,
+                std::slice::from_ref(&terminal),
+            )
+            .await;
+            fabro_test::assert_axum_status(
+                response,
+                StatusCode::CONFLICT,
+                "finish from a stale lease owner",
+            )
+            .await;
+            assert_public_result(&state, &app, run_id, RunStatus::Running, None).await;
+            let response =
+                append_engine_records(&app, run_id, &token, "worker-1", &LogId::Coordinator, &[
+                    terminal,
+                ])
+                .await;
+            fabro_test::assert_axum_status(
+                response,
+                StatusCode::NO_CONTENT,
+                "authoritative worker finish",
+            )
+            .await;
+            let expected = match rejection {
+                Some(_) => RunStatus::Failed {
+                    reason: FailureReason::PublishFailed,
+                },
+                None => RunStatus::Succeeded {
+                    reason: SuccessReason::Completed,
+                },
+            };
+            assert_public_result(&state, &app, run_id, expected, rejection).await;
+            // Worker exit after the finish, without a platform terminal
+            // acknowledgement, must preserve Petri's committed result.
+            runtime.end_worker();
+            for _ in 0..500 {
+                if concluded_runs(&app).await == 1 {
+                    break;
+                }
+                time::sleep(Duration::from_millis(10)).await;
+            }
+            assert_eq!(concluded_runs(&app).await, 1);
+            assert_public_result(&state, &app, run_id, expected, rejection).await;
+            // A host error arriving after cleanup must neither append a
+            // competing terminal record nor replace the useful failure.
+            let platform_count = fabro_petri::test_support::stored_platform_records(
+                &state.stores.run_summaries.pool(),
+                run_id,
+            )
+            .await
+            .unwrap()
+            .len();
+            crate::server::persist_run_failure(
+                &state,
+                run_id,
+                FailureReason::Terminated,
+                "worker wait failed during teardown".into(),
+            )
+            .await;
+            assert_public_result(&state, &app, run_id, expected, rejection).await;
+            let after_count = fabro_petri::test_support::stored_platform_records(
+                &state.stores.run_summaries.pool(),
+                run_id,
+            )
+            .await
+            .unwrap()
+            .len();
+            assert_eq!(after_count, platform_count);
+            let (rebuilt, _, _) = fabro_petri::test_support::rebuild(
+                &state.db_pool,
+                &state.stores.run_summaries.pool(),
+                run_id,
+            )
+            .await
+            .unwrap();
+            let rebuilt = rebuilt.unwrap();
+            assert_eq!(rebuilt.status, expected);
+            assert_eq!(
+                rebuilt
+                    .conclusion
+                    .unwrap()
+                    .failure
+                    .map(|failure| failure.detail.message),
+                rejection.map(str::to_string)
+            );
+        }
     }
 }

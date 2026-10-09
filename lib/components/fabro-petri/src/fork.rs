@@ -39,11 +39,12 @@ use fabro_workflow::operations::{StageLabel, StageLabels};
 use petri_execution::host::{self, ForkOptions, ForkOrigin, ForkPosition, HostError};
 use petri_execution::inspect::{self, InspectError};
 use petri_execution::{
-    Access, CoordinatorEvent, ExecutionId, InvocationId, RunKey, RunStore,
+    Access, CoordinatorEvent, ExecutionId, InvocationId, RunKey, RunLogs, RunStore,
     StoreError as CoordinatorStoreError,
 };
 use petri_runtime::RunOptions;
-use petri_runtime::ir::FiringId;
+use petri_runtime::driver::lifecycle::{ExecutionHooks, HookContext, RunFinished};
+use petri_runtime::ir::{FinalizationFailure, FiringId};
 use petri_store::StoreError;
 use tracing::{debug, info};
 
@@ -131,7 +132,12 @@ pub async fn check(
         .open(&RunKey::new(source.to_string()), Access::Read)
         .await
         .map_err(ForkError::Open)?;
-    let state = host::stored_state(&*logs).await.map_err(ForkError::Seed)?;
+    check_logs(&*logs, &position).await
+}
+
+/// [`check`] over the source's opened logs.
+async fn check_logs(logs: &dyn RunLogs, position: &ForkPosition) -> Result<(), ForkError> {
+    let state = host::stored_state(logs).await.map_err(ForkError::Seed)?;
     let Some(execution) = state.executions.get(&position.execution) else {
         return Err(ForkError::Refused(format!(
             "the source run has no execution {}",
@@ -146,7 +152,7 @@ pub async fn check(
             position.execution
         )));
     }
-    let inspection = inspect::inspect_run(&*logs)
+    let inspection = inspect::inspect_run(logs)
         .await
         .map_err(ForkError::Inspect)?;
     if inspection
@@ -169,10 +175,33 @@ pub async fn check(
     Ok(())
 }
 
+/// Declaration-only hooks used while copying a fork's records: every Fabro
+/// run requires finalization ([`crate::hooks::FabroHooks`]), so the fork's
+/// records declare it too, and its worker's hooks match them on resume.
+/// Never execute with these hooks.
+struct ForkFinalizationRequirement;
+
+#[async_trait::async_trait]
+impl ExecutionHooks for ForkFinalizationRequirement {
+    fn requires_run_finalization(&self) -> bool {
+        true
+    }
+
+    async fn finalize_run(
+        &self,
+        _context: &HookContext,
+        _finished: RunFinished,
+    ) -> Result<(), FinalizationFailure> {
+        Err(FinalizationFailure::new(
+            "finalization_unavailable",
+            "the fork must install its worker publication hooks before execution",
+        ))
+    }
+}
+
 /// Seed the fork: Petri's records, the kept checkpoints and the run branch. The
 /// new run must not exist in the store yet.
 pub async fn fork(request: ForkRequest) -> Result<Forked, ForkError> {
-    check(request.store.as_ref(), request.source, request.position).await?;
     let source_key = RunKey::new(request.source.to_string());
     let fork_key = RunKey::new(request.fork.to_string());
     let source_logs = request
@@ -181,12 +210,14 @@ pub async fn fork(request: ForkRequest) -> Result<Forked, ForkError> {
         .await
         .map_err(ForkError::Open)?;
 
+    check_logs(&*source_logs, &request.position).await?;
     let mut options = RunOptions::new(&request.fork_run_dir);
     options.run_key = Some(fork_key.clone());
     // A fork only copies records and acquires no sandbox, so it needs no
     // provider configuration.
     let runtime = providers::standard_runtime(&SandboxProviderConfig::default())
         .options(options)
+        .hooks(Arc::new(ForkFinalizationRequirement))
         .store(Arc::clone(&request.store));
     let forked = host::fork_from(&runtime, &*source_logs, request.position, ForkOptions {
         rerun_last: request.rerun_last,

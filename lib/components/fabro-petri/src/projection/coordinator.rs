@@ -9,6 +9,7 @@ use fabro_types::{
 };
 use petri_execution::CoordinatorEvent;
 use petri_execution::events::RunEvent;
+use petri_runtime::ir::FinalizationFailure;
 
 use super::{FiringKey, InvocationRef, RunView, apply_status, settle_control};
 
@@ -96,9 +97,16 @@ impl RunView {
                     settle_control(projection, RunControlAction::Unpause);
                 }
             }
-            CoordinatorEvent::RunFinished { status } => {
+            CoordinatorEvent::RunFinished {
+                status,
+                finalization_failure,
+            } => {
                 self.state.finished = Some(status.to_string());
-                self.conclude(status.to_string().as_str(), at);
+                self.conclude(
+                    status.to_string().as_str(),
+                    finalization_failure.as_ref(),
+                    at,
+                );
             }
             // ── Sandbox: the retention outcome (VIEWS.md "Sandbox") ─────────
             // The instance stays on `Run.sandbox`: it names what ran, and
@@ -127,18 +135,27 @@ impl RunView {
     }
 
     /// The run's conclusion, from its recorded finish and what the stages
-    /// The run's conclusion, from its recorded finish and what the stages
     /// summed to.
-    fn conclude(&mut self, status: &str, at: DateTime<Utc>) {
+    fn conclude(
+        &mut self,
+        status: &str,
+        finalization_failure: Option<&FinalizationFailure>,
+        at: DateTime<Utc>,
+    ) {
         let Some(projection) = self.projection.as_mut() else {
             return;
         };
+        if projection.status.is_terminal() {
+            return;
+        }
         let root = self
             .state
             .root
             .and_then(|root| self.state.invocations.get(&root));
-        let failure_message = root.and_then(|root| root.failure.clone());
-        let run_status = finished_status(status);
+        let failure_message = finalization_failure
+            .map(|failure| failure.message.clone())
+            .or_else(|| root.and_then(|root| root.failure.clone()));
+        let run_status = finished_status(status, finalization_failure);
         let (outcome, failure) = match run_status {
             RunStatus::Failed {
                 reason: reason @ FailureReason::Cancelled,
@@ -209,17 +226,28 @@ impl RunView {
 }
 
 /// The status Fabro gives a run at Petri's finish, by the status the finish
-/// records (`success`, `cancelled`, or a failure).
-pub(super) fn finished_status(status: &str) -> RunStatus {
+/// records (`success`, `cancelled`, or a failure). A failed checkpoint
+/// cancels the run, but the run failed: its finish says so with the
+/// checkpoint's finalization failure.
+pub(crate) fn finished_status(
+    status: &str,
+    finalization_failure: Option<&FinalizationFailure>,
+) -> RunStatus {
     match status {
         "success" => RunStatus::Succeeded {
             reason: SuccessReason::Completed,
         },
-        "cancelled" => RunStatus::Failed {
-            reason: FailureReason::Cancelled,
-        },
+        "cancelled" if !finalization_failure.is_some_and(super::is_checkpoint_failure) => {
+            RunStatus::Failed {
+                reason: FailureReason::Cancelled,
+            }
+        }
         _ => RunStatus::Failed {
-            reason: FailureReason::WorkflowError,
+            reason: if finalization_failure.is_some_and(super::is_publish_failure) {
+                FailureReason::PublishFailed
+            } else {
+                FailureReason::WorkflowError
+            },
         },
     }
 }

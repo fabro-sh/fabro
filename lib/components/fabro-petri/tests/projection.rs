@@ -27,7 +27,8 @@ use fabro_petri::providers::SandboxProviderConfig;
 use fabro_petri::runtime::RuntimeSpec;
 use fabro_petri::{SqliteRunStore, providers, test_support as petri_support};
 use fabro_store::platform_records::{
-    PlatformRecord, PlatformRecordStore, RunCreatedRecord, RunLifecycleKind, RunLifecycleRecord,
+    CheckpointRecord, PlatformRecord, PlatformRecordStore, RunCreatedRecord, RunDiffRecord,
+    RunLifecycleKind, RunLifecycleRecord,
 };
 use fabro_store::{BlobStore, test_support};
 use fabro_types::{
@@ -42,7 +43,7 @@ use petri_runtime::frontend::CompileInputs;
 use petri_runtime::ir::RunStatus as PetriRunStatus;
 use petri_store::{RunKey, RunStore};
 use tokio::fs;
-use tokio::time::sleep;
+use tokio::time::{self, sleep};
 
 const COMMAND_WORKFLOW: &str = r#"digraph Command {
     graph [goal="Run one command"]
@@ -1360,4 +1361,185 @@ async fn an_auto_approved_answer_closes_the_question_in_the_projection() {
         "{states:?}"
     );
     assert_view_equals_rebuild(&gate.scenario.pool, gate.scenario.run_id).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn required_finalization_projects_only_the_committed_overall_result() {
+    use fabro_petri::test_support::finalization::{self, TestFinalizer};
+    use fabro_types::{FailureReason, StageOutcome, SuccessReason};
+
+    for rejection in [None, Some("the push was rejected")] {
+        let scenario = command_scenario().await;
+        let projector = Projector::new(scenario.pool.clone(), scenario.pool.clone());
+        let store = projector.observe_store(Arc::new(SqliteRunStore::new(scenario.pool.clone())));
+        let finalizer = Arc::new(TestFinalizer::new(rejection));
+        let runtime = finalization::test_runtime(finalizer.clone())
+            .store(store)
+            .options(run_options(&scenario.run_dir, scenario.run_id));
+        let checked = runtime
+            .check(&scenario.workflow, None, None, &CompileInputs::new())
+            .unwrap();
+        let task = tokio::spawn(async move {
+            host::run_configured(
+                &runtime,
+                HostRun::new(checked.graph.unwrap()).with_children(checked.children),
+                |_, _| {},
+            )
+            .await
+            .unwrap()
+        });
+        time::timeout(Duration::from_secs(15), finalizer.entered.notified())
+            .await
+            .unwrap();
+        // The driver can still flush its execution journal after entering
+        // finalization. Wait for the exit-stage evidence, rather than racing
+        // that writer while comparing the live view with a full rebuild.
+        let pending = time::timeout(Duration::from_secs(5), async {
+            loop {
+                projector.signal(scenario.run_id);
+                projector.settle(scenario.run_id).await;
+                let pending = petri_support::stored_projection(&scenario.pool, scenario.run_id)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                if pending.iter_stages().any(|(id, stage)| {
+                    id.node_id() == "exit" && stage.state == StageState::Succeeded
+                }) {
+                    break pending;
+                }
+                time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("execution evidence flushes while publication is held");
+        assert_eq!(pending.status, RunStatus::Running);
+        assert!(pending.conclusion.is_none());
+        assert!(!task.is_finished());
+        assert_view_equals_rebuild(&scenario.pool, scenario.run_id).await;
+        let summary = fabro_types::DiffSummary {
+            files_changed: 1,
+            additions:     2,
+            deletions:     0,
+        };
+        let head_sha = "0123456789012345678901234567890123456789";
+        let patch_blob = BlobHash::new(b"final patch");
+        let platform = PlatformRecordStore::new(scenario.pool.clone());
+        for record in [
+            PlatformRecord::Checkpoint(CheckpointRecord {
+                execution:      0,
+                firing:         0,
+                attempt:        Some(1),
+                workspace:      None,
+                git_commit_sha: Some(head_sha.to_string()),
+                diff_summary:   Some(summary),
+                patch_blob:     Some(patch_blob),
+                operation:      None,
+            }),
+            PlatformRecord::RunDiff(RunDiffRecord {
+                base_sha:     None,
+                head_sha:     Some(head_sha.to_string()),
+                diff_summary: Some(summary),
+                patch_blob:   Some(patch_blob),
+            }),
+        ] {
+            platform
+                .append(&scenario.run_id, &record, None)
+                .await
+                .unwrap();
+        }
+        finalizer.release.add_permits(1);
+        let report = task.await.unwrap();
+        assert_eq!(report.state.folded_status(), PetriRunStatus::Success);
+        assert_eq!(
+            report.status,
+            if rejection.is_some() {
+                PetriRunStatus::Failed
+            } else {
+                PetriRunStatus::Success
+            }
+        );
+        projector.settle(scenario.run_id).await;
+        let stored = petri_support::stored_projection(&scenario.pool, scenario.run_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let expected = match rejection {
+            Some(_) => RunStatus::Failed {
+                reason: FailureReason::PublishFailed,
+            },
+            None => RunStatus::Succeeded {
+                reason: SuccessReason::Completed,
+            },
+        };
+        assert_eq!(stored.status, expected);
+        let conclusion = stored.conclusion.as_ref().unwrap();
+        assert_eq!(
+            conclusion
+                .failure
+                .as_ref()
+                .map(|failure| failure.detail.message.as_str()),
+            rejection
+        );
+        assert_eq!(
+            conclusion.status,
+            if rejection.is_some() {
+                StageOutcome::Failed {
+                    retry_requested: false,
+                }
+            } else {
+                StageOutcome::Succeeded
+            }
+        );
+        assert!(
+            stored
+                .iter_stages()
+                .all(|(_, stage)| stage.state == StageState::Succeeded)
+        );
+        assert_eq!(conclusion.final_git_commit_sha.as_deref(), Some(head_sha));
+        assert_eq!(conclusion.diff.summary, Some(summary));
+        assert_eq!(
+            conclusion.diff.patch.as_deref(),
+            Some(fabro_types::format_blob_ref(&patch_blob).as_str())
+        );
+        assert!(!conclusion.stages.is_empty());
+        assert_view_equals_rebuild(&scenario.pool, scenario.run_id).await;
+
+        // A later worker lifecycle cannot replace the committed terminal
+        // result or conclusion, even if its status disagrees.
+        let other = match rejection {
+            Some(_) => RunStatus::Succeeded {
+                reason: SuccessReason::Completed,
+            },
+            None => RunStatus::Failed {
+                reason: FailureReason::PublishFailed,
+            },
+        };
+        PlatformRecordStore::new(scenario.pool.clone())
+            .append(
+                &scenario.run_id,
+                &PlatformRecord::RunLifecycle(
+                    RunLifecycleRecord::new(if rejection.is_some() {
+                        RunLifecycleKind::Succeeded
+                    } else {
+                        RunLifecycleKind::Failed
+                    })
+                    .with_status(other),
+                ),
+                None,
+            )
+            .await
+            .unwrap();
+        projector.signal(scenario.run_id);
+        projector.settle(scenario.run_id).await;
+        let after = petri_support::stored_projection(&scenario.pool, scenario.run_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.status, stored.status);
+        assert_eq!(
+            serde_json::to_value(after.conclusion).unwrap(),
+            serde_json::to_value(stored.conclusion).unwrap()
+        );
+        assert_view_equals_rebuild(&scenario.pool, scenario.run_id).await;
+    }
 }

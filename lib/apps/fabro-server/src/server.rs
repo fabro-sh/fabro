@@ -282,6 +282,23 @@ struct ManagedRun {
 }
 
 impl ManagedRun {
+    /// Settle the run on a terminal `status`. The first terminal status
+    /// sticks: a later one that agrees only fills a missing error, and one
+    /// that disagrees is ignored. Returns whether the status was applied.
+    fn settle(&mut self, status: RunStatus, error: Option<String>) -> bool {
+        if self.status.is_terminal() {
+            if self.status == status && self.error.is_none() {
+                self.error = error;
+            }
+            return false;
+        }
+        self.status = status;
+        self.error = error;
+        self.active_steerable_stages.clear();
+        self.active_non_steerable_stages.clear();
+        true
+    }
+
     /// True if cancellation should still escalate to `worker_ref`; clears a
     /// stale escalation marker as a side effect.
     fn escalation_still_current(&mut self, worker_ref: &WorkerRef) -> bool {
@@ -3505,24 +3522,90 @@ async fn reject_run_if_sandbox_provider_disabled(
         return false;
     };
     tracing::warn!(run_id = %run_id, error = %error, "Sandbox provider disabled by server policy");
-    fail_run_before_execution(state, run_id, FailureReason::LaunchFailed, error).await;
+    persist_run_failure(state, run_id, FailureReason::LaunchFailed, error).await;
     true
 }
 
-async fn fail_run_before_execution(
+/// Record a host failure only while no terminal result is committed. This
+/// also handles a worker wait/launch error racing its durable Petri finish.
+/// The managed run settles on whichever terminal result the store committed.
+/// A failed commit is retried, so a brief storage fault does not leave the
+/// run active. When nothing could be committed its live state is still
+/// released, but its status is left alone: the API never reports an outcome
+/// storage lacks, and the restart reconciliation fails the run.
+pub(crate) async fn persist_run_failure(
     state: &Arc<AppState>,
     run_id: RunId,
     reason: FailureReason,
     message: String,
 ) {
-    if let Err(err) =
-        run_records::lifecycle(state, run_id, run_records::failed(reason, message.clone())).await
-    {
-        error!(run_id = %run_id, error = %err, "Failed to persist run failure status");
+    let mut retry_delays = HOST_FAILURE_RETRY_DELAYS.iter();
+    loop {
+        match commit_host_failure(state, run_id, reason, message.clone()).await {
+            Ok(committed) => {
+                let failure = committed
+                    .conclusion
+                    .as_ref()
+                    .and_then(|conclusion| conclusion.failure.as_ref())
+                    .map(|failure| failure.detail.message.clone());
+                settle_managed_run_at_finish(state, run_id, committed.status, failure);
+                break;
+            }
+            Err(err) => {
+                let Some(delay) = retry_delays.next() else {
+                    error!(run_id = %run_id, error = %err, "Failed to record a host failure");
+                    break;
+                };
+                warn!(
+                    run_id = %run_id,
+                    error = %err,
+                    retry_in_ms = delay.as_millis(),
+                    "Failed to record a host failure; retrying"
+                );
+                sleep(*delay).await;
+            }
+        }
     }
+    release_managed_run(state, run_id);
+}
 
-    fail_managed_run(state, run_id, reason, message);
-    state.scheduler_notify.notify_one();
+/// How long [`persist_run_failure`] waits before each retry of a failed
+/// commit.
+const HOST_FAILURE_RETRY_DELAYS: [Duration; 3] = [
+    Duration::from_millis(250),
+    Duration::from_secs(1),
+    Duration::from_secs(4),
+];
+
+/// Append the host failure unless the run already ended, and return the
+/// terminal projection the store committed: the failure, or the finish that
+/// won the race.
+async fn commit_host_failure(
+    state: &AppState,
+    run_id: RunId,
+    reason: FailureReason,
+    message: String,
+) -> anyhow::Result<Arc<fabro_store::RunProjection>> {
+    let committed = run_records::projection(state, run_id)
+        .await?
+        .context("the run is missing")?;
+    if committed.status.is_terminal() {
+        return Ok(committed);
+    }
+    // The append settles the projector, so the read after it folds the
+    // failure, or the finish that won the race.
+    run_records::lifecycle(state, run_id, run_records::failed(reason, message)).await?;
+    let committed = state
+        .stores
+        .run_summaries
+        .load_petri_projection(&run_id)
+        .await?
+        .context("the run is missing")?;
+    anyhow::ensure!(
+        committed.status.is_terminal(),
+        "the stored host failure has no terminal projection"
+    );
+    Ok(committed)
 }
 
 fn managed_run(
@@ -3582,11 +3665,22 @@ async fn durable_run_status(state: &AppState, run_id: RunId) -> anyhow::Result<O
 fn fail_managed_run(state: &Arc<AppState>, run_id: RunId, reason: FailureReason, message: String) {
     let mut runs = state.runs.lock().expect("runs lock poisoned");
     if let Some(managed_run) = runs.get_mut(&run_id) {
-        managed_run.status = RunStatus::Failed { reason };
-        managed_run.error = Some(message);
+        managed_run.settle(RunStatus::Failed { reason }, Some(message));
+    }
+    drop(runs);
+    release_managed_run(state, run_id);
+}
+
+/// Drop the run's live worker state and controls and free its scheduler
+/// slot, leaving its status alone.
+pub(in crate::server) fn release_managed_run(state: &AppState, run_id: RunId) {
+    let mut runs = state.runs.lock().expect("runs lock poisoned");
+    if let Some(managed_run) = runs.get_mut(&run_id) {
         clear_live_run_state(managed_run);
     }
-    cleanup_worker_control_bus_for_run(state.as_ref(), run_id);
+    drop(runs);
+    cleanup_worker_control_bus_for_run(state, run_id);
+    state.scheduler_notify.notify_one();
 }
 
 /// Fold one lifecycle record of the run's stream into the in-memory run:
@@ -3601,6 +3695,7 @@ fn apply_lifecycle_to_managed_run(state: &AppState, run_id: RunId, record: &RunL
     // A settled run is immutable to the lifecycle: the follower still folds
     // the records before the terminal one after Petri's finish or the
     // worker's terminal record settled the run, and none may reopen it.
+    // Terminal records go through [`ManagedRun::settle`].
     if managed_run.status.is_terminal() && !is_terminal_transition(record) {
         return;
     }
@@ -3648,21 +3743,17 @@ fn apply_lifecycle_to_managed_run(state: &AppState, run_id: RunId, record: &RunL
         }
         RunLifecycleKind::Removing => managed_run.status = RunStatus::Removing,
         RunLifecycleKind::Succeeded => {
-            managed_run.status = record.status.unwrap_or(RunStatus::Succeeded {
+            let status = record.status.unwrap_or(RunStatus::Succeeded {
                 reason: SuccessReason::Completed,
             });
-            managed_run.error = None;
-            managed_run.active_steerable_stages.clear();
-            managed_run.active_non_steerable_stages.clear();
+            managed_run.settle(status, None);
             cleanup_worker_control_bus_for_run(state, run_id);
         }
         RunLifecycleKind::Failed | RunLifecycleKind::Dead => {
-            managed_run.status = record.status.unwrap_or(RunStatus::Failed {
+            let status = record.status.unwrap_or(RunStatus::Failed {
                 reason: FailureReason::WorkflowError,
             });
-            managed_run.error.clone_from(&record.reason);
-            managed_run.active_steerable_stages.clear();
-            managed_run.active_non_steerable_stages.clear();
+            managed_run.settle(status, record.reason.clone());
             cleanup_worker_control_bus_for_run(state, run_id);
         }
         RunLifecycleKind::Runnable
@@ -3683,34 +3774,23 @@ fn is_terminal_transition(record: &RunLifecycleRecord) -> bool {
     )
 }
 
-/// Settle the in-memory run at Petri's own finish, as its worker stores
-/// the `run.finished` record: the view reports the run ended from the
-/// moment that record is stored, so the managed run the delete precheck
-/// prefers must not still say running while the worker tears down; a
-/// delete in that window was refused as active. A run already settled
-/// keeps its status. The worker's terminal lifecycle record, a moment
-/// later, refines the status and its error and ends the worker's controls
-/// ([`settle_managed_run_at_terminal_record`]); the worker's exit later
-/// reaps the process and leaves the settled status alone.
+/// Settle the in-memory run after Petri's authoritative finish is durable.
+/// Required publication has completed before this record. Worker teardown
+/// and subsequent lifecycle records cannot change its terminal outcome.
 pub(in crate::server) fn settle_managed_run_at_finish(
     state: &AppState,
     run_id: RunId,
     status: RunStatus,
+    failure: Option<String>,
 ) {
     let mut runs = state.runs.lock().expect("runs lock poisoned");
-    let Some(managed_run) = runs.get_mut(&run_id) else {
-        return;
-    };
-    if managed_run.status.is_terminal() {
-        return;
+    if let Some(managed_run) = runs.get_mut(&run_id) {
+        managed_run.settle(status, failure);
     }
-    managed_run.status = status;
-    managed_run.active_steerable_stages.clear();
-    managed_run.active_non_steerable_stages.clear();
 }
 
 /// Settle the in-memory run at the terminal lifecycle record its worker
-/// stores, ahead of the store: the same as [`settle_managed_run_at_finish`]
+/// stores, after the store: the same as [`settle_managed_run_at_finish`]
 /// for a worker that ended the run without Petri's finish (it failed before
 /// the engine ran), and the record's status, error and control cleanup for
 /// one that did. A record that is not terminal is left to the stream
@@ -3775,7 +3855,6 @@ async fn fail_worker_launch(state: &Arc<AppState>, run_id: RunId, err: anyhow::E
             None
         }
     };
-    let launch_message = format!("Failed to spawn worker: {err}");
     let (error, reason) = failure_honoring_pending_cancel(pending_control, || {
         (
             WorkflowError::engine_with_anyhow("Failed to spawn worker", err),
@@ -3785,16 +3864,9 @@ async fn fail_worker_launch(state: &Arc<AppState>, run_id: RunId, err: anyhow::E
     let message = if reason == FailureReason::Cancelled {
         "Run cancelled before worker launch completed".to_string()
     } else {
-        launch_message
+        collect_chain(&error).join(": ")
     };
-    let _ = run_records::lifecycle(
-        state,
-        run_id,
-        run_records::failed(reason, error.to_string()),
-    )
-    .await;
-    fail_managed_run(state, run_id, reason, message);
-    state.scheduler_notify.notify_one();
+    persist_run_failure(state, run_id, reason, message).await;
 }
 
 /// A worker that exited without recording the run's end left it failed,
@@ -4163,7 +4235,6 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                 FailureReason::WorkflowError,
                 "Run not found at launch".to_string(),
             );
-            state.scheduler_notify.notify_one();
             return;
         }
         Err(err) => {
@@ -4174,7 +4245,6 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                 FailureReason::WorkflowError,
                 format!("Failed to load run state: {err}"),
             );
-            state.scheduler_notify.notify_one();
             return;
         }
     };
@@ -4195,7 +4265,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
     let github_app_private_key = match state.vault_secret(EnvVars::GITHUB_APP_PRIVATE_KEY).await {
         Ok(value) => value,
         Err(err) => {
-            fail_run_before_execution(
+            persist_run_failure(
                 &state,
                 run_id,
                 FailureReason::WorkflowError,
@@ -4255,15 +4325,17 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         Err(err) => {
             tracing::error!(run_id = %run_id, error = %err, "Failed while waiting on worker");
             let message = format!("Worker wait failed: {err}");
+            let superseded = {
+                let runs = state.runs.lock().expect("runs lock poisoned");
+                runs.get(&run_id)
+                    .is_some_and(|run| run.worker_ref.as_ref() != Some(&worker_ref))
+            };
+            if superseded {
+                return;
+            }
             state.worker_runtime.force_stop(&worker_ref).await;
-            let _ = run_records::lifecycle(
-                &state,
-                run_id,
-                run_records::failed(FailureReason::Terminated, message.clone()),
-            )
-            .await;
-            fail_managed_run(&state, run_id, FailureReason::Terminated, message);
-            state.scheduler_notify.notify_one();
+            state.petri_runs.worker_exited(run_id);
+            persist_run_failure(&state, run_id, FailureReason::Terminated, message).await;
             return;
         }
     };
@@ -4321,7 +4393,6 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                 FailureReason::WorkflowError,
                 "The run's final state is missing from the store".to_string(),
             );
-            state.scheduler_notify.notify_one();
             return;
         }
         Err(err) => {
@@ -4332,7 +4403,6 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                 FailureReason::WorkflowError,
                 format!("Failed to load final run state: {err}"),
             );
-            state.scheduler_notify.notify_one();
             return;
         }
     };

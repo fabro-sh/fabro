@@ -84,6 +84,7 @@ use crate::admission::AdmittedGraphs;
 use crate::blobs::{Blobs, RunBlobs};
 use crate::controls::RunControls;
 use crate::hooks::{FabroHooks, HooksSpec};
+use crate::projection;
 use crate::runtime::RuntimeSpec;
 use crate::secrets::SharedSecrets;
 
@@ -150,7 +151,7 @@ pub enum RunStatus {
 #[derive(Clone, Debug)]
 pub struct RunOutcome {
     pub status:         RunStatus,
-    /// The root invocation's failure message, when it failed.
+    /// Required-finalization failure detail, or the root execution's failure.
     pub failure:        Option<String>,
     /// Whether the record is whole: the run recorded its finish and every
     /// log replays byte for byte.
@@ -353,27 +354,7 @@ pub async fn run(request: RunRequest) -> Result<RunOutcome, RunError> {
         return Err(RunError::StoreFailed(message));
     }
     let inspection = inspect(request.store.as_ref(), &key).await?;
-    let mut outcome = outcome(inspection, result.err())?;
-    // A failed checkpoint cancelled the run; what Fabro reports is the
-    // checkpoint failure, not a cancellation.
-    if let Some(failure) = fabro_hooks
-        .as_ref()
-        .and_then(|hooks| hooks.checkpoint_failure())
-    {
-        outcome.status = RunStatus::Failed;
-        outcome.failure = Some(failure);
-    }
-    // A successful run whose publication failed is a failed run: its work
-    // did not reach where the settings sent it.
-    if let Some(failure) = fabro_hooks
-        .as_ref()
-        .and_then(|hooks| hooks.publish_failure())
-    {
-        outcome.status = RunStatus::Failed;
-        outcome.failure = Some(failure);
-        outcome.publish_failed = true;
-    }
-    Ok(outcome)
+    outcome(inspection, result.err())
 }
 
 /// When Petri keeps a run's workspaces after their scope is released.
@@ -419,8 +400,9 @@ pub async fn outcome_of(store: &dyn RunStore, run_id: &str) -> Result<RunOutcome
 
 /// How Fabro reports what [`run`] returned. A cancelled run is a failure
 /// with the cancelled reason, as the legacy executor reports one; a failed
-/// store interrupted the run; every other shortfall is a workflow error
-/// whose message says what the record, or the host, said.
+/// store interrupted the run; a publication rejection keeps its
+/// publish_failed reason. Other shortfalls are workflow errors whose message
+/// says what the record, or the host, said.
 #[must_use]
 pub fn conclusion(result: &Result<RunOutcome, RunError>) -> Conclusion {
     match result {
@@ -543,31 +525,47 @@ fn outcome(
     inspection: RunInspection,
     host_error: Option<HostError>,
 ) -> Result<RunOutcome, RunError> {
-    let status = match inspection.status.as_deref() {
-        Some("success") => RunStatus::Success,
-        Some("failed") => RunStatus::Failed,
-        Some("cancelled") => RunStatus::Cancelled,
-        _ => {
-            let mut reasons = inspection.incomplete.clone();
-            if let Some(error) = host_error {
-                reasons.push(error.to_string());
-            }
-            return Err(RunError::Unfinished(reasons));
+    let Some(recorded) = inspection
+        .status
+        .as_deref()
+        .filter(|status| matches!(*status, "success" | "failed" | "cancelled"))
+    else {
+        let mut reasons = inspection.incomplete.clone();
+        if let Some(error) = host_error {
+            reasons.push(error.to_string());
         }
+        return Err(RunError::Unfinished(reasons));
     };
-    let failure = inspection
+    // The projection's reading of the finish, so the worker's return and
+    // the API agree: a failed checkpoint's cancellation is a failure.
+    let (status, publish_failed) =
+        match projection::finished_status(recorded, inspection.finalization_failure.as_ref()) {
+            fabro_types::RunStatus::Succeeded { .. } => (RunStatus::Success, false),
+            fabro_types::RunStatus::Failed {
+                reason: FailureReason::Cancelled,
+            } => (RunStatus::Cancelled, false),
+            fabro_types::RunStatus::Failed { reason } => {
+                (RunStatus::Failed, reason == FailureReason::PublishFailed)
+            }
+            _ => (RunStatus::Failed, false),
+        };
+    let execution_failure = inspection
         .invocations
         .iter()
         .find(|invocation| invocation.invocation == inspection.root.invocation)
         .and_then(|root| root.result.as_ref())
         .and_then(|result| result.failure.as_ref())
         .map(|failure| failure.message.clone());
+    let failure = inspection
+        .finalization_failure
+        .map(|failure| failure.message)
+        .or(execution_failure);
     Ok(RunOutcome {
         status,
         failure,
         complete: inspection.complete,
         incomplete: inspection.incomplete,
-        publish_failed: false,
+        publish_failed,
     })
 }
 

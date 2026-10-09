@@ -523,7 +523,7 @@ pub(crate) fn format_pretty(
         "run.finished" => {
             let status = view.body()?.get("status").and_then(Value::as_str)?;
             let duration = format_duration_ms(elapsed.unwrap_or(0));
-            Some(match status {
+            let verdict = match status {
                 "success" => format!(
                     "{ts} {} {}",
                     styles.bold_green.apply_to("\u{2713} SUCCEEDED"),
@@ -539,6 +539,17 @@ pub(crate) fn format_pretty(
                     styles.bold_red.apply_to("\u{2717} FAILED"),
                     styles.bold.apply_to(&duration),
                 ),
+            };
+            let failure = view
+                .body()?
+                .get("finalization_failure")
+                .and_then(|failure| failure.get("message"))
+                .and_then(Value::as_str);
+            Some(match failure {
+                Some(message) => {
+                    format!("{verdict}\n{ts}    {}", styles.bold_red.apply_to(message))
+                }
+                None => verdict,
             })
         }
         _ => None,
@@ -1274,6 +1285,32 @@ mod tests {
         let mut state = PrettyState::default();
         let line = format_pretty(&finished, &styles, &mut state).expect("a finish line");
         assert!(line.contains("\u{2717} FAILED"), "{line}");
+    }
+
+    #[test]
+    fn execution_success_does_not_finish_required_publication() {
+        let executed = petri(
+            8,
+            json!({ "origin": "external", "context": {},
+                "record": { "seq": 5, "body": { "event": "invocation.finished",
+                    "invocation": 0, "result": { "status": "success" } } }
+            }),
+        );
+        assert_eq!(exit_code_of(&executed), None);
+        let finished = petri(
+            9,
+            json!({ "origin": "external", "context": {},
+                "record": { "seq": 6, "body": { "event": "run.finished", "status": "failed",
+                    "finalization_failure": { "code": "publish_failed", "message": "the push was rejected" } } }
+            }),
+        );
+        assert_eq!(exit_code_of(&finished), Some(1));
+        let mut state = PrettyState::default();
+        let line = format_pretty(&finished, &Styles::new(false), &mut state).unwrap();
+        insta::assert_snapshot!(line, @"
+        04:43:08 ✗ FAILED 0ms
+        04:43:08    the push was rejected
+        ");
     }
 
     #[test]
