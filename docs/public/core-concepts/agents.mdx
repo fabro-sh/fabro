@@ -31,7 +31,7 @@ Fabro manages the agent loop directly — it calls the LLM provider's API, execu
 
 ### ACP backend
 
-Fabro can run Agent Client Protocol (ACP) stdio agents with `backend="acp"`. ACP agents run inside the active Fabro sandbox, so local and Docker runs keep the same workspace isolation, cancellation, and file-change tracking behavior as other agent stages.
+Fabro can run Agent Client Protocol (ACP) stdio agents with `backend="acp"`. ACP agents run inside the active Fabro sandbox, so local, Docker, and Daytona runs keep the same workspace isolation, cancellation, and file-change tracking behavior as other agent stages.
 
 ACP stages do not use Fabro model/provider credentials. The ACP process owns its auth, tools, and model behavior. Configure the process with exactly one of:
 
@@ -52,7 +52,7 @@ implement [
 
 Fabro does not install ACP agents, Node.js, npm, or `npx` at runtime. Commands must already be available in the sandbox image, repository, or setup steps. You can use `npx ...@latest` as an explicit `acp.command` if that is the behavior you want, but Fabro will treat it like any other user-supplied command.
 
-The legacy `acp_command` attribute is rejected; use `acp.command` for shell commands or `acp.config` for JSON stdio configs. ACP is supported with local and Docker sandboxes; Daytona does not expose bidirectional stdio yet, so ACP nodes fail there with an explicit unsupported-provider error.
+The legacy `acp_command` attribute is rejected; use `acp.command` for shell commands or `acp.config` for JSON stdio configs. ACP is supported with local, Docker, and Daytona sandboxes.
 
 ### Comparison
 
