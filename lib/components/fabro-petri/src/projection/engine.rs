@@ -6,10 +6,11 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 use fabro_types::{
-    ModelUsage, ParallelBranchId, ParallelBranchResult, RunProjection, RunSandbox,
+    ModelRef, ModelUsage, ParallelBranchId, ParallelBranchResult, RunProjection, RunSandbox,
     RunSandboxFailure, StageCompletion, StageHandler, StageId, StageOutcome, StageProjection,
     StageState, StageTiming, first_event_seq, parse_blob_ref, timing,
 };
+use lithos_llm::types::Usage;
 use petri_execution::events::{Derived, RunEvent, Subject, ViewEvent, WaitState};
 use petri_execution::{ExecutionId, InvocationId};
 use petri_runtime::engine::{Admission, Event};
@@ -423,43 +424,293 @@ fn apply_metrics(stage: &mut StageProjection, metrics: &Metrics) {
         _ => (inference, tool),
     };
     stage.set_authoritative_timing(StageTiming::new(wall, inference, tool).clamped_to_wall());
-    if let Some(usage) =
-        usage_of(custom.get("pebble.usage")).or_else(|| usage_of(custom.get("prompt.usage")))
-    {
+    if let Some(root) = usage_of(custom.get("pebble.usage")) {
+        apply_agent_usage(stage, metrics, root);
+    } else if let Some(usage) = usage_of(custom.get("prompt.usage")) {
         stage.usage = usage;
     }
-    if let Some(sessions) = custom
+}
+
+/// A coding agent's usage onto its finished stage: the root session's own
+/// and every descendant session's, each counted once. The root's usage goes
+/// under the routes `pebble.usage_by_model` names, or under the stage's model
+/// when Petri does not break it down; each descendant's goes under its own
+/// model, or the stage's when it has none.
+fn apply_agent_usage(stage: &mut StageProjection, metrics: &Metrics, root: Usage) {
+    let custom = &metrics.custom;
+    let root_rows = custom
+        .get("pebble.usage_by_model")
+        .and_then(Value::as_array)
+        .and_then(|routes| routes.iter().map(account).collect::<Option<Vec<_>>>())
+        .unwrap_or_else(|| vec![(None, root)]);
+    let descendants: Vec<_> = custom
         .get("pebble.subagents")
         .and_then(|subagents| subagents.get("sessions"))
-        .and_then(Value::as_array)
-    {
-        let mut by_model: Vec<ModelUsage> = Vec::new();
-        for session in sessions {
-            let provider = session.get("provider").and_then(Value::as_str);
-            let model = session.get("model").and_then(Value::as_str);
-            let Some(usage) = usage_of(session.get("usage")) else {
-                continue;
-            };
-            let Some(model) = model.and_then(|model| model_ref(provider, model)) else {
-                continue;
-            };
-            if let Some(entry) = by_model.iter_mut().find(|entry| entry.model == model) {
-                entry.usage = entry.usage.saturating_add(usage);
-            } else {
-                by_model.push(ModelUsage::new(model, usage));
-            }
-        }
-        if !by_model.is_empty() {
-            stage.usage_by_model = by_model;
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|sessions| sessions.values().filter_map(account))
+        .collect();
+
+    stage.usage = descendants
+        .iter()
+        .fold(root, |total, (_, usage)| total.saturating_add(*usage));
+    let mut by_model: Vec<ModelUsage> = Vec::new();
+    for (model, usage) in root_rows.into_iter().chain(descendants) {
+        let Some(model) = model.or_else(|| stage.model.clone()) else {
+            continue;
+        };
+        if let Some(entry) = by_model.iter_mut().find(|entry| entry.model == model) {
+            entry.usage = entry.usage.saturating_add(usage);
+        } else {
+            by_model.push(ModelUsage::new(model, usage));
         }
     }
+    stage.usage_by_model = by_model;
+}
+
+/// One usage account in Petri's metrics, `{ provider, model, usage }`: its
+/// model when it names one, and its usage.
+fn account(account: &Value) -> Option<(Option<ModelRef>, Usage)> {
+    let usage = usage_of(account.get("usage"))?;
+    let provider = account.get("provider").and_then(Value::as_str);
+    let model = account
+        .get("model")
+        .and_then(Value::as_str)
+        .and_then(|model| model_ref(provider, model));
+    Some((model, usage))
 }
 
 #[cfg(test)]
 mod tests {
+    use lithos_llm::catalog::{ModelId, ProviderId};
+    use lithos_llm::types::{Cost, CostSource, TokenCounts};
     use petri_runtime::ir::FailureInfo;
+    use serde_json::json;
 
     use super::*;
+
+    /// Usage in the proportions of the scripted-provider family: `input`
+    /// tokens, half as many output, a fifth read from cache, a tenth written
+    /// to it, and the catalog cost.
+    fn usage(input: u64, usd_micros: u64) -> Usage {
+        Usage {
+            tokens: TokenCounts {
+                input,
+                output: input / 2,
+                cache_read: input / 5,
+                cache_write: input / 10,
+                ..TokenCounts::default()
+            },
+            cost:   Some(Cost {
+                usd_micros,
+                source: CostSource::Catalog,
+            }),
+        }
+    }
+
+    fn model(provider: &str, model: &str) -> ModelRef {
+        ModelRef::new(ProviderId::new(provider), ModelId::new(model))
+    }
+
+    /// Petri's `pebble.subagents` metric: the descendants' summed usage and
+    /// their accounts, keyed by session id.
+    fn subagents(accounts: &[(&str, &str, &str, &str, Usage)]) -> Value {
+        let usage = accounts.iter().fold(Usage::default(), |sum, account| {
+            sum.saturating_add(account.4)
+        });
+        let sessions: serde_json::Map<String, Value> = accounts
+            .iter()
+            .map(|(session, parent, provider, model, usage)| {
+                (
+                    (*session).to_owned(),
+                    json!({
+                        "parent": parent,
+                        "provider": provider,
+                        "model": model,
+                        "usage": usage,
+                        "messages": 2,
+                        "compactions": 0,
+                    }),
+                )
+            })
+            .collect();
+        json!({
+            "spawned": accounts.len(),
+            "turns_started": accounts.len(),
+            "completed": accounts.len(),
+            "failed": 0,
+            "closed": accounts.len(),
+            "usage": usage,
+            "sessions": sessions,
+        })
+    }
+
+    fn agent_metrics(root: Usage, subagents: Value) -> Metrics {
+        let mut metrics = Metrics::default();
+        metrics.custom.insert("pebble.usage".into(), json!(root));
+        metrics.custom.insert("pebble.subagents".into(), subagents);
+        metrics
+    }
+
+    fn agent_stage(model: ModelRef) -> StageProjection {
+        let mut stage = StageProjection::new(first_event_seq(1));
+        stage.handler = Some(StageHandler::Agent);
+        stage.model = Some(model);
+        stage
+    }
+
+    /// A parent, its child and its grandchild on one model: the finished
+    /// stage keeps all three sessions' usage, counted once, under that model.
+    #[test]
+    fn a_finished_agent_keeps_its_descendants_usage() {
+        let sonnet = model("anthropic", "claude-sonnet-5");
+        let mut stage = agent_stage(sonnet.clone());
+        let metrics = agent_metrics(
+            usage(20_000, 145_800),
+            subagents(&[
+                (
+                    "child",
+                    "root",
+                    "anthropic",
+                    "claude-sonnet-5",
+                    usage(40_000, 291_600),
+                ),
+                (
+                    "grandchild",
+                    "child",
+                    "anthropic",
+                    "claude-sonnet-5",
+                    usage(60_000, 437_400),
+                ),
+            ]),
+        );
+
+        apply_metrics(&mut stage, &metrics);
+
+        assert_eq!(stage.usage, usage(120_000, 874_800));
+        assert_eq!(stage.usage_by_model, vec![ModelUsage::new(
+            sonnet,
+            usage(120_000, 874_800)
+        )]);
+    }
+
+    /// Each session's usage goes under its own model; sessions sharing a
+    /// model share a row, and the rows sum to the stage's usage.
+    #[test]
+    fn a_finished_agent_splits_its_usage_by_each_sessions_model() {
+        let sonnet = model("anthropic", "claude-sonnet-5");
+        let gpt = model("openai", "gpt-5.4");
+        let mut stage = agent_stage(sonnet.clone());
+        let metrics = agent_metrics(
+            usage(20_000, 145_800),
+            subagents(&[
+                ("child", "root", "openai", "gpt-5.4", usage(40_000, 200_000)),
+                (
+                    "grandchild",
+                    "child",
+                    "anthropic",
+                    "claude-sonnet-5",
+                    usage(60_000, 437_400),
+                ),
+            ]),
+        );
+
+        apply_metrics(&mut stage, &metrics);
+
+        assert_eq!(stage.usage, usage(120_000, 783_200));
+        assert_eq!(stage.usage_by_model, vec![
+            ModelUsage::new(sonnet, usage(80_000, 583_200)),
+            ModelUsage::new(gpt, usage(40_000, 200_000)),
+        ]);
+    }
+
+    /// When Petri breaks the root's usage down by route, a fallback's
+    /// usage stays under the model that spent it, not the stage's model.
+    #[test]
+    fn the_roots_usage_goes_under_the_routes_petri_reports() {
+        let sonnet = model("anthropic", "claude-sonnet-5");
+        let gpt = model("openai", "gpt-5.4");
+        let mut stage = agent_stage(gpt.clone());
+        let mut metrics = agent_metrics(
+            usage(30_000, 180_000),
+            subagents(&[("child", "root", "openai", "gpt-5.4", usage(40_000, 200_000))]),
+        );
+        metrics.custom.insert(
+            "pebble.usage_by_model".into(),
+            json!([
+                { "provider": "anthropic", "model": "claude-sonnet-5", "usage": usage(10_000, 72_900) },
+                { "provider": "openai", "model": "gpt-5.4", "usage": usage(20_000, 107_100) },
+            ]),
+        );
+
+        apply_metrics(&mut stage, &metrics);
+
+        assert_eq!(stage.usage, usage(70_000, 380_000));
+        assert_eq!(stage.usage_by_model, vec![
+            ModelUsage::new(sonnet, usage(10_000, 72_900)),
+            ModelUsage::new(gpt, usage(60_000, 307_100)),
+        ]);
+    }
+
+    /// An agent that started no subagents keeps its own usage, as before.
+    #[test]
+    fn a_finished_agent_without_subagents_keeps_its_own_usage() {
+        let sonnet = model("anthropic", "claude-sonnet-5");
+        let mut stage = agent_stage(sonnet.clone());
+        let metrics = agent_metrics(usage(20_000, 145_800), subagents(&[]));
+
+        apply_metrics(&mut stage, &metrics);
+
+        assert_eq!(stage.usage, usage(20_000, 145_800));
+        assert_eq!(stage.usage_by_model, vec![ModelUsage::new(
+            sonnet,
+            usage(20_000, 145_800)
+        )]);
+    }
+
+    /// The finished attempt's metrics replace the stage's usage rather than
+    /// add to it, so folding the same record again (a replay) or over the
+    /// live total changes nothing.
+    #[test]
+    fn applying_the_same_metrics_again_does_not_double_count() {
+        let sonnet = model("anthropic", "claude-sonnet-5");
+        let mut stage = agent_stage(sonnet);
+        let metrics = agent_metrics(
+            usage(20_000, 145_800),
+            subagents(&[(
+                "child",
+                "root",
+                "anthropic",
+                "claude-sonnet-5",
+                usage(40_000, 291_600),
+            )]),
+        );
+        stage.usage = usage(60_000, 437_400);
+
+        apply_metrics(&mut stage, &metrics);
+        let once = (stage.usage, stage.usage_by_model.clone());
+        apply_metrics(&mut stage, &metrics);
+
+        assert_eq!(once.0, usage(60_000, 437_400));
+        assert_eq!((stage.usage, stage.usage_by_model), once);
+    }
+
+    /// A prompt stage's usage is unchanged: no model rows, so the rollup
+    /// puts its usage under its model.
+    #[test]
+    fn a_prompt_stage_keeps_its_usage_without_model_rows() {
+        let mut stage = StageProjection::new(first_event_seq(1));
+        stage.handler = Some(StageHandler::Prompt);
+        let mut metrics = Metrics::default();
+        metrics
+            .custom
+            .insert("prompt.usage".into(), json!(usage(10_000, 72_900)));
+
+        apply_metrics(&mut stage, &metrics);
+
+        assert_eq!(stage.usage, usage(10_000, 72_900));
+        assert!(stage.usage_by_model.is_empty());
+    }
 
     /// A partial success reports the failure it was converted from, a
     /// timeout included, and its outcome stays a partial success.
