@@ -29,6 +29,10 @@ export function findScheduleTrigger(
   return automation.triggers.find((t): t is TriggerOfType<"schedule"> => t.type === "schedule");
 }
 
+export function findScheduleTriggers(automation: Automation): TriggerOfType<"schedule">[] {
+  return automation.triggers.filter((t): t is TriggerOfType<"schedule"> => t.type === "schedule");
+}
+
 export function hasEnabledApiTrigger(automation: Automation): boolean {
   return findApiTrigger(automation)?.enabled === true;
 }

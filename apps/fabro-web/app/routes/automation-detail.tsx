@@ -22,7 +22,7 @@ import { ApiError, apiData, automationsApi } from "../lib/api-client";
 import {
   UNSUPPORTED_TARGET_LABEL,
   findApiTrigger,
-  findScheduleTrigger,
+  findScheduleTriggers,
   gitTarget,
   workflowSourceLabel,
 } from "../lib/automation";
@@ -98,7 +98,7 @@ function AutomationHeader({ automation }: { automation: Automation }) {
   const toast = useToast();
   const [running, setRunning] = useState(false);
 
-  const scheduleTrigger = findScheduleTrigger(automation);
+  const schedules = findScheduleTriggers(automation);
   const apiTrigger = findApiTrigger(automation);
   const target = gitTarget(automation.target);
   const canRun = apiTrigger?.enabled === true && automation.environment_id !== null;
@@ -164,9 +164,12 @@ function AutomationHeader({ automation }: { automation: Automation }) {
                 <span className="text-coral">Environment required</span>
               )}
             </Chip>
-            {scheduleTrigger ? (
-              <Chip icon={ClockIcon}>{scheduleTrigger.expression}</Chip>
-            ) : null}
+            {schedules.map((schedule) => (
+              <Chip key={schedule.id} icon={ClockIcon}>
+                {schedules.length > 1 ? `${schedule.id} · ` : ""}
+                {schedule.expression}{schedule.enabled ? "" : " · Paused"}
+              </Chip>
+            ))}
           </div>
           {automation.description ? (
             <p className="mt-3 max-w-prose text-sm leading-relaxed text-fg-3">
