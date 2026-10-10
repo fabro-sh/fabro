@@ -84,9 +84,9 @@ use crate::admission::AdmittedGraphs;
 use crate::blobs::{Blobs, RunBlobs};
 use crate::controls::RunControls;
 use crate::hooks::{FabroHooks, HooksSpec};
-use crate::projection;
 use crate::runtime::RuntimeSpec;
 use crate::secrets::SharedSecrets;
+use crate::{git_identity, projection};
 
 /// How the run is entered: fresh, from the admitted graphs, or continued
 /// from its records.
@@ -247,6 +247,13 @@ pub async fn run(request: RunRequest) -> Result<RunOutcome, RunError> {
     if let Some(secrets) = request.secrets {
         runtime = runtime.secrets(SharedSecrets(secrets));
     }
+    let author = request
+        .hooks
+        .as_ref()
+        .map(|hooks| hooks.git.author.clone())
+        .unwrap_or_default();
+    runtime =
+        runtime.executor_layer(move |executor| git_identity::executor(executor, author.clone()));
     if let Some(credentials) = request.runtime.stage_credentials.clone() {
         let masker = runtime.masker();
         runtime =
