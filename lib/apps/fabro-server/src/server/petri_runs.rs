@@ -88,6 +88,7 @@ pub(crate) fn runtime_spec(
     eligible: &[ProviderId],
     dry_run: bool,
     sandbox: SandboxProviderConfig,
+    run_id: Option<RunId>,
 ) -> RuntimeSpec {
     let settings_toml = settings_layer_toml(state);
     let mcp_catalog_toml = mcp_catalog_toml(&state.mcp_server_store().catalog_settings());
@@ -97,6 +98,7 @@ pub(crate) fn runtime_spec(
         Arc::clone(&state.llm_source),
         state.http_client.clone(),
         eligible,
+        run_id,
     ) {
         Ok(client) => client,
         Err(err) => {
@@ -294,6 +296,7 @@ pub(crate) async fn admit(
             eligible,
             dry_run,
             state.sandbox_provider_config(None),
+            None,
         ),
         false,
     )
@@ -469,7 +472,7 @@ pub(crate) async fn execute(state: Arc<AppState>, run_id: RunId) {
     };
     let petri_interviewer = FabroInterviewer::new(interviewer, approval);
     let observers = vec![petri_interviewer.observer()];
-    let (_, eligible) = state.resolve_llm_client_with_ready_ids().await;
+    let (_, eligible) = state.resolve_llm_client_with_ready_ids(None).await;
     let dry_run = run_state.spec.settings.run.execution.mode == RunMode::DryRun;
     // The in-process path serves the server's tests: a Git target is
     // fetched without a credential, and nothing is published.
@@ -491,6 +494,7 @@ pub(crate) async fn execute(state: Arc<AppState>, run_id: RunId) {
         &eligible,
         dry_run,
         state.sandbox_provider_config(vault.get(EnvVars::DAYTONA_API_KEY).map(str::to_owned)),
+        Some(run_id),
     );
     let request = RunRequest {
         run_id: run_id.to_string(),

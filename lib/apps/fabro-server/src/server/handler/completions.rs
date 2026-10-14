@@ -21,7 +21,7 @@ async fn create_completion(
     Json(req): Json<CreateCompletionRequest>,
 ) -> Response {
     let catalog = state.catalog();
-    let llm_result = match state.resolve_llm_client().await {
+    let llm_result = match state.resolve_llm_client(None).await {
         Ok(result) => result,
         Err(err) => {
             error!(error = ?err, "Failed to create LLM client");

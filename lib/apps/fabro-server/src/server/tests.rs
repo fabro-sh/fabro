@@ -1721,7 +1721,7 @@ async fn resolve_llm_client_reads_openai_token_from_vault() {
         .await
         .unwrap();
 
-    let llm_result = state.resolve_llm_client().await.unwrap();
+    let llm_result = state.resolve_llm_client(None).await.unwrap();
 
     assert_eq!(llm_result.provider_ids(), vec![
         lithos_llm::catalog::builtin::openai()
@@ -1738,7 +1738,7 @@ async fn resolve_llm_client_ignores_env_lookup_provider_tokens() {
         |name| (name == EnvVars::OPENAI_API_KEY).then(|| "env-openai-key".to_string()),
     );
 
-    let llm_result = state.resolve_llm_client().await.unwrap();
+    let llm_result = state.resolve_llm_client(None).await.unwrap();
 
     assert!(
         llm_result.provider_ids().is_empty(),
@@ -1809,7 +1809,8 @@ async fn resolve_llm_client_uses_vault_key_without_env_lookup_openai_settings() 
         .mock_async(|when, then| {
             when.method(POST)
                 .path("/v1/responses")
-                .header("authorization", "Bearer vault-openai-key");
+                .header("authorization", "Bearer vault-openai-key")
+                .header_missing("x-session-id");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(openai_responses_payload("hello from vault key"));
@@ -1836,7 +1837,7 @@ async fn resolve_llm_client_uses_vault_key_without_env_lookup_openai_settings() 
         .await
         .unwrap();
 
-    let llm_result = state.resolve_llm_client().await.unwrap();
+    let llm_result = state.resolve_llm_client(None).await.unwrap();
     let response = llm_result
         .client
         .complete(
@@ -3091,7 +3092,19 @@ url = "http://127.0.0.1:32276"
 #[tokio::test]
 async fn create_run_without_explicit_title_returns_deterministic_then_updates_generated_title() {
     let llm = MockServer::start_async().await;
-    let title_mock = mock_openai_title_response(&llm, "Generated deploy title", None).await;
+    let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let headers = Arc::clone(&captured);
+    let title_mock = llm.mock(|when, then| {
+        when.method(POST).path("/v1/responses");
+        then.respond_with(move |request| {
+            *headers.lock().unwrap() = request.headers_vec().clone();
+            httpmock::HttpMockResponse::builder()
+                .status(200)
+                .header("content-type", "application/json")
+                .body(openai_responses_payload(r#"{"title":"Generated deploy title"}"#).to_string())
+                .build()
+        });
+    });
     let state = TestAppStateBuilder::new()
         .provider_base_url("openai", llm.url("/v1"))
         .env_lookup(|_| None)
@@ -3111,6 +3124,13 @@ async fn create_run_without_explicit_title_returns_deterministic_then_updates_ge
     wait_for_run_title(&state, run_id, "Generated deploy title").await;
     assert_eq!(title_update_event_count(&state, run_id).await, 1);
     title_mock.assert_async().await;
+    let headers = captured.lock().unwrap();
+    let sessions: Vec<_> = headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("x-session-id"))
+        .map(|(_, value)| value.as_str())
+        .collect();
+    assert_eq!(sessions, [run_id.to_string()]);
 }
 
 #[tokio::test]
@@ -5844,7 +5864,8 @@ async fn test_providers_successful_probe_returns_probe_model() {
         .mock_async(|when, then| {
             when.method(POST)
                 .path("/v1/responses")
-                .header("authorization", "Bearer vault-openai-key");
+                .header("authorization", "Bearer vault-openai-key")
+                .header_missing("x-session-id");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(openai_responses_payload("OK"));

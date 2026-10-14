@@ -245,6 +245,7 @@ pub(crate) async fn check_prepared_manifest(
         ready_providers,
         dry_run,
         state.sandbox_provider_config(None),
+        None,
     );
     let has_ready_provider = !ready_providers.is_empty();
     let prepared = prepared.clone();
@@ -1547,6 +1548,7 @@ mod tests {
             ready_providers,
             false,
             state.sandbox_provider_config(None),
+            None,
         );
         validate_prepared_manifest(
             prepared,
@@ -1713,7 +1715,7 @@ enabled = true
         state: &Arc<crate::server::AppState>,
         model: &str,
     ) -> (types::PreflightResponse, bool) {
-        let (_, ready_providers) = state.resolve_llm_client_with_ready_ids().await;
+        let (_, ready_providers) = state.resolve_llm_client_with_ready_ids(None).await;
         let mut manifest = minimal_manifest();
         manifest.workflows.get_mut("workflow.fabro").unwrap().source = format!(
             r#"
@@ -2868,7 +2870,7 @@ digraph Demo {
             &manifest,
         )
         .unwrap();
-        let (_, ready_providers) = state.resolve_llm_client_with_ready_ids().await;
+        let (_, ready_providers) = state.resolve_llm_client_with_ready_ids(None).await;
         assert!(ready_providers.is_empty());
 
         // With no provider ready there is no model client to resolve the

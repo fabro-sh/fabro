@@ -26,6 +26,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use fabro_auth::ExtraHeadersCredentialSource;
 use fabro_config::ServerSettingsBuilder;
 use fabro_github::token_source::{InstallationTokenSource, SecretString};
 use fabro_github::{GitHubContext, GitHubCredentials};
@@ -210,7 +211,7 @@ impl GitHubPublisher {
                 .pull_request
                 .clone()
                 .filter(|pull_request| pull_request.enabled),
-            llm_source,
+            llm_source: Arc::new(ExtraHeadersCredentialSource::for_run(llm_source, run_id)),
             catalog,
             records,
             client,
@@ -368,6 +369,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use chrono::Utc;
+    use fabro_auth::test_support as auth_test_support;
     use fabro_github::InstallationToken;
     use fabro_github::test_support::{InstallationTokenMinter, installation_token_source};
     use fabro_llm::credentials::NoCredentials;
@@ -418,6 +420,52 @@ mod tests {
         let mut empty = spec();
         empty.target = Some(RunTarget::None {});
         assert!(!publishes(&empty));
+    }
+
+    #[tokio::test]
+    async fn publication_model_calls_carry_the_run_id() {
+        let server = httpmock::MockServer::start_async().await;
+        let run_id = RunId::new();
+        let request = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/responses")
+                .header("authorization", "Bearer fixture-key")
+                .header("x-session-id", run_id.to_string());
+            then.status(200).json_body(serde_json::json!({
+                "id": "resp_1", "status": "completed", "model": "gpt-5.4",
+                "output": [{"type":"message", "id":"msg_1", "role":"assistant", "status":"completed",
+                    "content":[{"type":"output_text", "text": r#"{"title":"Update widgets","body":"Updated widgets."}"#, "annotations":[]}]}],
+                "usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}
+            }));
+        });
+        let publisher = GitHubPublisher::for_run(
+            run_id,
+            &spec(),
+            None,
+            auth_test_support::env_credential_source(|name| {
+                (name == "OPENAI_API_KEY").then(|| "fixture-key".to_string())
+            }),
+            Arc::new(test_support::test_catalog_with_provider_base_url(
+                "openai",
+                &server.url("/v1"),
+            )),
+            Arc::new(MemoryPlatformRecords::new()),
+            fabro_client::Client::new_no_proxy("http://127.0.0.1:9").unwrap(),
+        )
+        .unwrap();
+        let content = pull_request::build_pr_content(
+            "+change",
+            "Update widgets",
+            "openai/gpt-5.4",
+            publisher.llm_source,
+            publisher.catalog,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(content.title, "Update widgets");
+        request.assert_calls(1);
     }
 
     /// Mints `token-<n>` for its n-th mint, valid for an hour.

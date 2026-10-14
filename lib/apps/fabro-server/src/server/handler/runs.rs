@@ -699,7 +699,7 @@ pub(crate) async fn create_run_from_intent(
         return response;
     }
     let prepared = prepared.with_web_url(state.run_web_url(&run_id));
-    finalize_created_run(state, prepared, explicit_title_supplied, entrypoint).await
+    finalize_created_run(state, prepared, run_id, explicit_title_supplied, entrypoint).await
 }
 
 /// A run must not be its own parent; an explicit parent must pass
@@ -724,6 +724,7 @@ async fn validate_optional_parent(
 async fn finalize_created_run(
     state: Arc<AppState>,
     prepared: run_compiler::PreparedRun,
+    run_id: RunId,
     explicit_title_supplied: bool,
     title_generation_target: ManifestPath,
 ) -> Response {
@@ -731,7 +732,8 @@ async fn finalize_created_run(
     // and ask-fabro-readiness) and the LLM client itself (for the spawned
     // title-generation task). `ready_llm_provider_ids` would otherwise call
     // `resolve_llm_client` a second time and discard the client.
-    let (llm_result, ready_provider_ids) = state.resolve_llm_client_with_ready_ids().await;
+    let (llm_result, ready_provider_ids) =
+        state.resolve_llm_client_with_ready_ids(Some(run_id)).await;
     let llm_client_for_title = llm_result.ok();
     let run_materialization_provider_ids = {
         #[cfg(any(test, feature = "test-support"))]
@@ -1211,7 +1213,7 @@ async fn run_preflight(
         return ApiError::bad_request(format!("Run config variable interpolation failed: {err}"))
             .into_response();
     }
-    let (_, ready_providers) = state.resolve_llm_client_with_ready_ids().await;
+    let (_, ready_providers) = state.resolve_llm_client_with_ready_ids(None).await;
     let check = match run_manifest::check_prepared_manifest(
         &state,
         &prepared,
@@ -1264,7 +1266,7 @@ async fn validate_run_manifest(
         return ApiError::bad_request(format!("Run config variable interpolation failed: {err}"))
             .into_response();
     }
-    let (_, ready_providers) = state.resolve_llm_client_with_ready_ids().await;
+    let (_, ready_providers) = state.resolve_llm_client_with_ready_ids(None).await;
     let check = match run_manifest::check_prepared_manifest(
         &state,
         &prepared,

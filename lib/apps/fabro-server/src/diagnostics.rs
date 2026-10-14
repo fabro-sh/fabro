@@ -208,7 +208,7 @@ pub(crate) async fn test_llm_providers(state: &AppState) -> anyhow::Result<Provi
     // issues only arise for those providers, so this list is the complete
     // population to probe.
     let configured_providers = state.configured_llm_provider_ids().await;
-    let result = state.resolve_llm_client().await?;
+    let result = state.resolve_llm_client(None).await?;
     let catalog = state.catalog();
     let client = Arc::new(result.client);
 

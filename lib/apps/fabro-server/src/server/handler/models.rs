@@ -217,7 +217,7 @@ async fn test_model(
         },
         None => None,
     };
-    let llm_result = match state.resolve_llm_client().await {
+    let llm_result = match state.resolve_llm_client(None).await {
         Ok(result) => result,
         Err(err) => {
             error!(error = ?err, "Failed to resolve LLM client");

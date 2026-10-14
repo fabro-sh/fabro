@@ -157,7 +157,7 @@ async fn create_run_session(
     if let Err(response) = ensure_run(&state, run_id).await {
         return response;
     }
-    let llm_result = match state.resolve_llm_client().await {
+    let llm_result = match state.resolve_llm_client(Some(run_id)).await {
         Ok(result) => result,
         Err(err) => {
             return ApiError::new(
@@ -697,9 +697,14 @@ async fn build_agent(
     session: &ProjectedRunSession,
 ) -> Result<CodingAgent, AskFabroBuildError> {
     let catalog = state.catalog();
-    let llm_result = state.resolve_llm_client().await.map_err(|err| {
-        AskFabroBuildError::LlmUnconfigured(format!("LLM credentials are not configured: {err}"))
-    })?;
+    let llm_result = state
+        .resolve_llm_client(Some(run_id))
+        .await
+        .map_err(|err| {
+            AskFabroBuildError::LlmUnconfigured(format!(
+                "LLM credentials are not configured: {err}"
+            ))
+        })?;
     for (provider, issue) in &llm_result.auth_issues {
         warn!(provider = %provider, error = %issue, "LLM provider unavailable due to auth issue");
     }

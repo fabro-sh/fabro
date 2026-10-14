@@ -16,7 +16,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use fabro_auth::ExtraHeadersCredentialSource;
 use fabro_http::HttpClient;
+use fabro_types::RunId;
 use fabro_workflow::services::FabroRunToolServices;
 use lithos_llm::Client;
 use lithos_llm::catalog::{Catalog, ProviderId};
@@ -127,16 +129,24 @@ impl AdmissionPass for LocalDryRun {
 /// ready, the same eligible set the legacy compiler pinned models against.
 /// `None` when no provider is eligible, so Petri's admission pass leaves the
 /// graph alone rather than refusing every model.
+/// Execution supplies the durable run ID for HTTP session grouping; admission
+/// supplies `None` because it has no run-owned model calls.
 pub fn model_client(
     catalog: Catalog,
     credentials: Arc<dyn CredentialProvider>,
     http: Option<HttpClient>,
     eligible: &[ProviderId],
+    run_id: Option<RunId>,
 ) -> Result<Option<Client>, ClientBuildError> {
     if eligible.is_empty() {
         debug!("no eligible model provider; the Petri runtime gets no model client");
         return Ok(None);
     }
+    let credentials = match run_id {
+        Some(run_id) => Arc::new(ExtraHeadersCredentialSource::for_run(credentials, run_id))
+            as Arc<dyn CredentialProvider>,
+        None => credentials,
+    };
     let mut builder = Client::builder()
         .catalog(catalog)
         .credentials_arc(credentials)

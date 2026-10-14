@@ -59,7 +59,7 @@ async fn render_graph_from_manifest(
                 .into_response();
         }
     };
-    let (_, ready_providers) = state.resolve_llm_client_with_ready_ids().await;
+    let (_, ready_providers) = state.resolve_llm_client_with_ready_ids(None).await;
     let check = match run_manifest::check_prepared_manifest(
         &state,
         &prepared,

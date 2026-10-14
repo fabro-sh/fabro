@@ -49,9 +49,15 @@ async fn a_model_call_authenticates_through_the_vault_and_skills_read_the_home()
         AsyncRwLock::new(vault),
     )));
     let catalog = test_catalog_with_provider_base_url("openai", &twin.base_url);
-    let client = runtime::model_client(catalog, credentials, None, &[ProviderId::new("openai")])
-        .expect("the model client builds")
-        .expect("openai is eligible");
+    let client = runtime::model_client(
+        catalog,
+        credentials,
+        None,
+        &[ProviderId::new("openai")],
+        None,
+    )
+    .expect("the model client builds")
+    .expect("openai is eligible");
     let runtime = RuntimeSpec {
         model_client: Some(client),
         fabro_home: Some(home.clone()),

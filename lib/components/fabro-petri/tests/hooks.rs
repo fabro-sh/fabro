@@ -830,6 +830,7 @@ async fn a_run_hook_blocks_a_tool_effect_through_the_forwarded_service() {
         credentials,
         None,
         &[ProviderId::new("openai")],
+        None,
     )
     .expect("the model client builds")
     .expect("openai is eligible");

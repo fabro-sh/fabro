@@ -5,7 +5,7 @@
 mod support;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use fabro_petri::admission::AdmittedGraphs;
 use fabro_petri::check::Launch;
@@ -69,8 +69,9 @@ async fn a_failed_store_write_interrupts_the_run_and_a_resume_finishes_it() {
     let memory = Arc::new(MemoryRunStore::new());
     let failing = Arc::new(FailingStore {
         inner:    Arc::clone(&memory),
-        log:      LogId::Resources,
+        log:      Some(LogId::Resources),
         appended: Arc::new(AtomicUsize::new(0)),
+        armed:    Arc::new(AtomicBool::new(true)),
     });
     let runtime = RuntimeSpec::default();
     let graphs = || {
@@ -152,8 +153,9 @@ fn resume_request(
 /// would, before anything is stored.
 struct FailingStore {
     inner:    Arc<MemoryRunStore>,
-    log:      LogId,
+    log:      Option<LogId>,
     appended: Arc<AtomicUsize>,
+    armed:    Arc<AtomicBool>,
 }
 
 #[async_trait::async_trait]
@@ -163,14 +165,16 @@ impl RunStore for FailingStore {
             inner:    self.inner.open(key, access).await?,
             log:      self.log,
             appended: Arc::clone(&self.appended),
+            armed:    Arc::clone(&self.armed),
         }))
     }
 }
 
 struct FailingLogs {
     inner:    Arc<dyn RunLogs>,
-    log:      LogId,
+    log:      Option<LogId>,
     appended: Arc<AtomicUsize>,
+    armed:    Arc<AtomicBool>,
 }
 
 #[async_trait::async_trait]
@@ -180,7 +184,10 @@ impl RunLogs for FailingLogs {
     }
 
     async fn append(&self, log: &LogId, records: &[Record]) -> Result<(), StoreError> {
-        if *log == self.log && self.appended.fetch_add(1, Ordering::SeqCst) == 0 {
+        if self.log.is_none_or(|target| *log == target)
+            && self.armed.load(Ordering::SeqCst)
+            && self.appended.fetch_add(1, Ordering::SeqCst) == 0
+        {
             return Err(StoreError::backend(
                 self.locator(),
                 "append",
@@ -201,4 +208,98 @@ impl RunLogs for FailingLogs {
     async fn get_blob(&self, digest: Digest) -> Result<Option<Vec<u8>>, StoreError> {
         self.inner.get_blob(digest).await
     }
+}
+
+/// Fail a durable write after a model request, then resume with a rebuilt
+/// runtime. Every request on either side of that interruption belongs to
+/// the same run, even if Petri must repeat an uncommitted model call.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn resumed_model_calls_keep_the_original_run_session_header() {
+    use fabro_auth::test_support::env_credential_source;
+    use fabro_llm::test_support::test_catalog_with_provider_base_url;
+    use fabro_petri::runtime;
+    use fabro_types::RunId;
+    use httpmock::{HttpMockResponse, MockServer};
+    use lithos_llm::catalog::ProviderId;
+    use serde_json::json;
+
+    let root = tempfile::tempdir().unwrap();
+    let server = MockServer::start_async().await;
+    let run_id = RunId::new();
+    let armed = Arc::new(AtomicBool::new(false));
+    let arm_after_request = Arc::clone(&armed);
+    let mock = server.mock(|when, then| {
+        when.path("/v1/responses")
+            .header("x-session-id", run_id.to_string());
+        then.respond_with(move |_| {
+            arm_after_request.store(true, Ordering::SeqCst);
+            HttpMockResponse::builder().status(200).body(json!({
+                "id":"resp_1", "status":"completed", "model":"gpt-5.4",
+                "output":[{"type":"message", "id":"msg_1", "role":"assistant", "status":"completed",
+                    "content":[{"type":"output_text", "text":"Done", "annotations":[]}]}],
+                "usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}
+            }).to_string()).build()
+        });
+    });
+    let runtime = || RuntimeSpec {
+        model_client: runtime::model_client(
+            test_catalog_with_provider_base_url("openai", &server.url("/v1")),
+            env_credential_source(|name| {
+                (name == "OPENAI_API_KEY").then(|| "fixture-key".to_string())
+            }),
+            Some(fabro_test::test_http_client()),
+            &[ProviderId::new("openai")],
+            Some(run_id),
+        )
+        .unwrap(),
+        ..RuntimeSpec::default()
+    };
+    let workflow = r#"digraph Resume {
+        graph [backend="api", default_max_retries=0]
+        start [shape=Mdiamond]
+        first [shape=tab, prompt="Say Done", model="gpt-5.4", provider="openai"]
+        second [shape=tab, prompt="Say Done again", model="gpt-5.4", provider="openai"]
+        exit [shape=Msquare]
+        start -> first -> second -> exit
+    }"#;
+    let graphs = || {
+        admit(
+            &[("workflow.fabro", workflow), ("workflow.toml", SETTINGS)],
+            Launch::default(),
+            &runtime(),
+        )
+    };
+    let memory = Arc::new(MemoryRunStore::new());
+    let failing = Arc::new(FailingStore {
+        inner: Arc::clone(&memory),
+        log: None,
+        appended: Arc::new(AtomicUsize::new(0)),
+        armed,
+    });
+    let first = engine::run(run_request(
+        &run_id.to_string(),
+        root.path(),
+        graphs(),
+        failing,
+        runtime(),
+        no_questions(Arc::new(Silent)),
+    ))
+    .await;
+    assert!(matches!(first, Err(RunError::StoreFailed(_))), "{first:?}");
+    let before_resume = mock.calls();
+    assert!(before_resume > 0);
+    let outcome = engine::run(resume_request(
+        &run_id.to_string(),
+        root.path(),
+        graphs(),
+        memory,
+        runtime(),
+    ))
+    .await
+    .unwrap();
+    assert_eq!(outcome.status, RunStatus::Success, "{outcome:?}");
+    assert!(
+        mock.calls() > before_resume,
+        "the rebuilt runtime made a model request"
+    );
 }

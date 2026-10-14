@@ -83,9 +83,13 @@ fn runtime_with_openai() -> RuntimeSpec {
         "OPENAI_API_KEY" => Some("test-key".to_string()),
         _ => None,
     });
-    let client = runtime::model_client(test_catalog(), credentials, None, &[ProviderId::new(
-        "openai",
-    )])
+    let client = runtime::model_client(
+        test_catalog(),
+        credentials,
+        None,
+        &[ProviderId::new("openai")],
+        None,
+    )
     .expect("the model client builds")
     .expect("openai is eligible");
     RuntimeSpec {

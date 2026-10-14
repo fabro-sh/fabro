@@ -47,7 +47,7 @@ pub use fabro_api::types::{
     UpdateVariableRequest, UsageByModel, UsageStageRef, VariableListResponse, VncPreviewResponse,
     WriteBlobResponse,
 };
-use fabro_auth::SqlVaultCredentialSource;
+use fabro_auth::{ExtraHeadersCredentialSource, SqlVaultCredentialSource};
 use fabro_automation::{self, AutomationStore};
 use fabro_config::daemon::ServerDaemon;
 use fabro_config::{LlmLayer, RunLayer, Storage, WorkflowSettingsBuilder};
@@ -1479,13 +1479,18 @@ impl AppState {
         Some(format!("{}/runs/{run_id}", base.trim_end_matches('/')))
     }
 
-    pub(crate) async fn resolve_llm_client(&self) -> anyhow::Result<FabroClient> {
-        resolve_llm_client_from_source(
-            Arc::clone(&self.llm_source),
-            self.catalog(),
-            self.http_client.clone(),
-        )
-        .await
+    pub(crate) async fn resolve_llm_client(
+        &self,
+        run_id: Option<RunId>,
+    ) -> anyhow::Result<FabroClient> {
+        let source = match run_id {
+            Some(run_id) => Arc::new(ExtraHeadersCredentialSource::for_run(
+                Arc::clone(&self.llm_source),
+                run_id,
+            )) as Arc<dyn CredentialProvider>,
+            None => Arc::clone(&self.llm_source),
+        };
+        resolve_llm_client_from_source(source, self.catalog(), self.http_client.clone()).await
     }
 
     pub(crate) async fn configured_llm_provider_ids(&self) -> Vec<ProviderId> {
@@ -1499,8 +1504,9 @@ impl AppState {
     /// resolved twice.
     pub(crate) async fn resolve_llm_client_with_ready_ids(
         &self,
+        run_id: Option<RunId>,
     ) -> (anyhow::Result<FabroClient>, Vec<ProviderId>) {
-        let llm_result = self.resolve_llm_client().await;
+        let llm_result = self.resolve_llm_client(run_id).await;
         if let Err(err) = &llm_result {
             warn!(error = ?err, "Failed to resolve LLM client while checking ready providers");
         }
@@ -1512,7 +1518,7 @@ impl AppState {
     }
 
     pub(crate) async fn ready_llm_provider_ids(&self) -> Vec<ProviderId> {
-        self.resolve_llm_client_with_ready_ids().await.1
+        self.resolve_llm_client_with_ready_ids(None).await.1
     }
 
     pub(crate) async fn decorate_run_summary(&self, run: fabro_types::Run) -> fabro_types::Run {

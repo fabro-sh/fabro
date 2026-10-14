@@ -181,6 +181,7 @@ pub(super) async fn execute(worker: PetriWorker<'_>) -> Result<()> {
         command_context::load_cli_catalog().context("failed to build worker LLM catalog")?;
     let mut runtime = runtime_spec(
         catalog.clone(),
+        run_id,
         &vault,
         &worker.run_state,
         worker.fabro_home.clone(),
@@ -652,6 +653,7 @@ fn run_tool_services(worker: &PetriWorker<'_>) -> Option<FabroRunToolServices> {
 /// home the server named, and the run tools when the run has them.
 async fn runtime_spec(
     catalog: Catalog,
+    run_id: RunId,
     vault: &Arc<AsyncRwLock<Vault>>,
     run_state: &RunProjection,
     fabro_home: Option<PathBuf>,
@@ -663,13 +665,14 @@ async fn runtime_spec(
     for (provider, issue) in &ready.issues {
         warn!(provider = %provider, error = %issue, "model provider credentials unusable");
     }
-    let model_client = match runtime::model_client(catalog, credentials, None, &ready.ready) {
-        Ok(client) => client,
-        Err(err) => {
-            warn!(error = %err, "Petri model client unavailable; LLM nodes run without one");
-            None
-        }
-    };
+    let model_client =
+        match runtime::model_client(catalog, credentials, None, &ready.ready, Some(run_id)) {
+            Ok(client) => client,
+            Err(err) => {
+                warn!(error = %err, "Petri model client unavailable; LLM nodes run without one");
+                None
+            }
+        };
     let daytona = vault.read().await.get(EnvVars::DAYTONA_API_KEY).map(|key| {
         // The same shared client the server attaches, so the worker's
         // Daytona calls take the server's proxy and CA policy.

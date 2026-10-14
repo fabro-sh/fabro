@@ -127,7 +127,7 @@ OpenRouter's [provider routing preferences](https://openrouter.ai/docs/guides/ro
 
 ## Attribution headers
 
-Fabro does not send OpenRouter's optional attribution headers (`HTTP-Referer`, `X-Title`) by default, so self-hosted installations stay anonymous on OpenRouter's public app leaderboard. Workflow runs do send `x-session-id: <run-id>` for request grouping; an explicit provider `default_headers` value for that header takes precedence. To opt in to attribution:
+Fabro does not send OpenRouter's optional attribution headers (`HTTP-Referer`, `X-Title`) by default, so self-hosted installations stay anonymous on OpenRouter's public app leaderboard. Native HTTP model requests in workflow runs do send `x-session-id: <run-id>` for request grouping; an explicit provider `default_headers` value for that header takes precedence. To opt in to attribution:
 
 ```toml title="settings.toml"
 [llm.providers.openrouter.default_headers]
