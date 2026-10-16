@@ -164,6 +164,7 @@ use crate::{
 
 mod automation_scheduler;
 mod handler;
+mod main_event_mirror;
 pub(crate) mod petri_runs;
 mod pull_request_supervisor;
 pub(crate) mod resource_sampler;
@@ -4471,6 +4472,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
 /// Background task that promotes runnable runs when capacity is available.
 pub fn spawn_scheduler(state: Arc<AppState>) {
     stream_follower::spawn_stream_follower(Arc::clone(&state));
+    main_event_mirror::spawn_native_mirror(Arc::clone(&state));
     tokio::spawn(async move {
         loop {
             tokio::select! {

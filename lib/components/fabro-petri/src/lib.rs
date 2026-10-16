@@ -74,6 +74,7 @@ pub mod hooks;
 pub mod host_tools;
 pub mod http_store;
 pub mod interview;
+pub mod main_events;
 pub mod petri;
 pub mod platform_records;
 pub mod projection;
