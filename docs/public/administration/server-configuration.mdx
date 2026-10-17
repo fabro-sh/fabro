@@ -17,7 +17,7 @@ Fabro only reads `settings.toml`. Older `server.toml`, `user.toml`, and `cli.tom
 
 | Scope | Examples |
 |---|---|
-| Server-owned (runtime-only from local `settings.toml`) | `[server.listen]`, `[server.api]`, `[server.web]`, `[server.auth]`, `[server.sandbox]`, `[server.storage]`, `[server.artifacts]`, `[server.scheduler]`, `[server.logging]`, `[server.integrations]` |
+| Server-owned (runtime-only from local `settings.toml`) | `[server.listen]`, `[server.api]`, `[server.web]`, `[server.auth]`, `[server.sandbox]`, `[server.storage]`, `[server.artifacts]`, `[server.scheduler]`, `[server.approvals]`, `[server.logging]`, `[server.integrations]` |
 | Shared run defaults (layered through `.fabro/project.toml`/`workflow.toml`) | `[run.model]`, `[run.prepare]`, `[run.environment]`, `[environments.<slug>]`, `[run.checkpoint]`, `[run.inputs]`, `[run.pull_request]`, `[run.git]`, `[run.hooks]`, `[run.agent]` |
 
 The CLI-only `[cli.*]` sections (including `[cli.target]`) belong in the client machine's `settings.toml`. They tell CLI commands how to reach a server. The server process does not read `[cli.*]` for its own binding or routing.
@@ -75,6 +75,11 @@ region = "us-east-1"
 
 [server.scheduler]
 max_concurrent_runs = 8
+
+# Server half of the child auto-approval opt-in; a parent workflow must also
+# set `[run.children] auto_approve = true` for its children to skip approval.
+[server.approvals]
+allow_child_auto_approval = true
 
 [server.logging]
 level = "info"
@@ -279,9 +284,19 @@ The `[run.*]` sections in `settings.toml` act as defaults for every run.
 
 Run creation uses the registered workflow version's `workflow.toml` above the server defaults, with explicit `RunIntent` arguments at highest precedence. The same rules apply to local and remote clients. Project and user config are not submitted to the create endpoint. Manifest-based preflight, validation, and graph previews still accept their bundled configuration layers.
 
-Server-owned values like `[server.storage]`, `[server.api]`, `[server.web]`, and `[server.scheduler]` come from the server machine's `settings.toml` or `fabro server start` flags. Environments and MCP server references resolve against the server's catalogs.
+Server-owned values like `[server.storage]`, `[server.api]`, `[server.web]`, `[server.scheduler]`, and `[server.approvals]` come from the server machine's `settings.toml` or `fabro server start` flags. Environments and MCP server references resolve against the server's catalogs.
 
 Merge rules follow the normative matrix: TOML `[run.inputs]` tables replace wholesale, explicit intent inputs merge per key at highest precedence, environment `env` and `labels` merge by key, `[run.prepare.steps]` replaces whole-list, and `[[run.hooks]]` merge by optional `id`. Most other fields use "higher-precedence wins" field-wise merging.
+
+### `[server.approvals]` section
+
+Server-owned approval policy for worker-started child runs.
+
+| Key | Description | Default |
+|---|---|---|
+| `allow_child_auto_approval` | Server half of the child auto-approval opt-in | `false` |
+
+Worker-started child runs enter `pending` with `approval_required` unless both this setting and the spawning parent workflow's `[run.children] auto_approve` are enabled. The policy only affects future start requests; a pending child is never retroactively approved by a configuration change. See [Child Runs — Start and approval](/execution/child-runs#start-and-approval).
 
 ### `[server.logging]` section
 

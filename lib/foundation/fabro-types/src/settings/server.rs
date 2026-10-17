@@ -30,6 +30,7 @@ pub struct ServerNamespace {
     pub storage:      ServerStorageSettings,
     pub artifacts:    ServerArtifactsSettings,
     pub scheduler:    ServerSchedulerSettings,
+    pub approvals:    ServerApprovalsSettings,
     pub logging:      ServerLoggingSettings,
     pub integrations: ServerIntegrationsSettings,
 }
@@ -50,6 +51,7 @@ impl ServerNamespace {
             storage:      ServerStorageSettings::default(),
             artifacts:    ServerArtifactsSettings::default(),
             scheduler:    ServerSchedulerSettings::default(),
+            approvals:    ServerApprovalsSettings::default(),
             logging:      ServerLoggingSettings::default(),
             integrations: ServerIntegrationsSettings::default(),
         }
@@ -254,6 +256,19 @@ impl Default for ObjectStoreSettings {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerSchedulerSettings {
     pub max_concurrent_runs: usize,
+}
+
+/// `[server.approvals]` — server-owned approval policy.
+///
+/// The policy is only half of the child auto-approval opt-in: a workflow must
+/// also declare `[run.children] auto_approve` for a worker-started child to
+/// skip the operator approval gate.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerApprovalsSettings {
+    /// Whether policy approval of worker-started child runs is available on
+    /// this server at all. Absent or `false` keeps every child start on the
+    /// pending-approval path.
+    pub allow_child_auto_approval: bool,
 }
 
 #[derive(

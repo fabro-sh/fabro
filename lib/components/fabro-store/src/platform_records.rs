@@ -310,6 +310,7 @@ pub enum RunLifecycleKind {
     StartRequested,
     Pending,
     Approved,
+    AutoApproved,
     Denied,
     Runnable,
     Starting,

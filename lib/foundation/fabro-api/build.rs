@@ -268,6 +268,11 @@ fn main() {
             &[],
         ),
         (
+            "RunChildrenSettings",
+            "fabro_types::settings::run::RunChildrenSettings",
+            &[],
+        ),
+        (
             "ServerSandboxSettings",
             "fabro_types::settings::server::ServerSandboxSettings",
             &[],
@@ -305,6 +310,11 @@ fn main() {
         (
             "ServerSchedulerSettings",
             "fabro_types::settings::server::ServerSchedulerSettings",
+            &[],
+        ),
+        (
+            "ServerApprovalsSettings",
+            "fabro_types::settings::server::ServerApprovalsSettings",
             &[],
         ),
         (

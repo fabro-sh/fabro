@@ -45,6 +45,7 @@ pub struct RunNamespace {
     pub pull_request:  Option<PullRequestSettings>,
     pub artifacts:     ArtifactsSettings,
     pub integrations:  RunIntegrationsSettings,
+    pub children:      RunChildrenSettings,
 }
 
 #[expect(
@@ -74,6 +75,7 @@ impl Default for RunNamespace {
             pull_request:  None,
             artifacts:     ArtifactsSettings::default(),
             integrations:  RunIntegrationsSettings::default(),
+            children:      RunChildrenSettings::default(),
         }
     }
 }
@@ -595,6 +597,24 @@ mod run_namespace_variable_substitution_tests {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunIntegrationsSettings {
     pub github: RunIntegrationsGithubSettings,
+}
+
+/// `[run.children]` — how this workflow treats the child runs its workers
+/// start.
+///
+/// This governs the child's *lifecycle* start decision (whether the child
+/// waits for operator approval), not the child's own agent-interaction
+/// approval posture (`run.execution.approval`, which `RunIntentArgs
+/// .auto_approve` maps to). It is the workflow half of the child
+/// auto-approval opt-in; the server half is `server.approvals
+/// .allow_child_auto_approval`, and both must be enabled.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RunChildrenSettings {
+    /// Whether children this workflow spawns are auto-approved at start.
+    /// Absent or `false` keeps every worker-started child pending operator
+    /// approval.
+    pub auto_approve: bool,
 }
 
 /// `[run.integrations.github]` — runtime GitHub token shape.
