@@ -3526,6 +3526,171 @@ file = "goal.md"
 }
 
 #[tokio::test]
+async fn main_event_mirror_follows_an_executed_petri_workflow() {
+    let workspace = tempfile::tempdir().unwrap();
+    let state = TestAppStateBuilder::new()
+        .default_environment_provider(Some(SandboxProviderKind::LOCAL))
+        .vault_entries([(fabro_static::EnvVars::OPENAI_API_KEY, "test-openai-api-key")])
+        .in_process_execution()
+        .build();
+    let app = test_app_with_scheduler(Arc::clone(&state));
+    let version = store_workflow_version(
+        &state,
+        r#"digraph Command {
+        graph [goal="Run one command"]
+        start [shape=Mdiamond]
+        exit [shape=Msquare]
+        say [shape=parallelogram, script="echo hello from petri"]
+        start -> say -> exit
+    }"#,
+        None,
+    )
+    .await;
+    let events = state.stores.runs.main_events();
+    let mut live = events.subscribe();
+    let created = post_run_intent(&app, folder_intent(version, workspace.path())).await;
+    let run_id: RunId = created["id"].as_str().unwrap().parse().unwrap();
+    let request = Request::builder()
+        .method("POST")
+        .uri(api(&format!("/runs/{run_id}/start")))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    response_json!(response, StatusCode::OK).await;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let event = live.recv().await.unwrap();
+            if matches!(
+                event.event.body,
+                fabro_types::MainEventBody::RunCompleted(_)
+            ) {
+                break;
+            }
+            assert!(!matches!(
+                event.event.body,
+                fabro_types::MainEventBody::RunFailed(_)
+            ));
+        }
+    })
+    .await
+    .expect("workflow lifecycle should reach the main stream");
+    let mirrored = events.list_from_with_limit(1, 20).await.unwrap();
+    let mut names = mirrored
+        .iter()
+        .map(|event| event.event.event_name())
+        .collect::<Vec<_>>();
+    names.sort_unstable();
+    assert_eq!(names, [
+        "fabro.run.completed",
+        "fabro.run.created",
+        "fabro.run.running",
+        "fabro.run.started"
+    ]);
+    let stream = state
+        .petri_projector
+        .stream_after(run_id, 0, 100)
+        .await
+        .unwrap();
+    for event in mirrored {
+        let properties = event.event.properties().unwrap();
+        assert_eq!(properties["run_id"], run_id.to_string());
+        assert!(
+            stream
+                .iter()
+                .any(|item| properties["source_event_id"] == format!("{}:{}", item.kind, item.id))
+        );
+    }
+    state.shutdown_token().cancel();
+}
+
+#[tokio::test]
+async fn main_event_mirror_create_is_persisted_before_the_api_returns() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let workflow_version_id = store_workflow_version(&state, MINIMAL_DOT, None).await;
+    let body = post_run_intent(
+        &app,
+        json!({
+            "workflow_version_id": workflow_version_id,
+            "target": { "kind": "none" },
+            "args": {}
+        }),
+    )
+    .await;
+    let run_id: RunId = body["id"].as_str().unwrap().parse().unwrap();
+    let events = state
+        .stores
+        .runs
+        .main_events()
+        .list_from_with_limit(1, 10)
+        .await
+        .unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].seq, 1);
+    let fabro_types::MainEventBody::RunCreated(created) = &events[0].event.body else {
+        panic!("expected run creation");
+    };
+    assert_eq!(created.source.run_id, run_id);
+    assert_eq!(created.source.source_event_id, "platform:1");
+    let projection = state.load_run_projection(&run_id).await.unwrap();
+    assert_eq!(
+        created.provenance_subject.as_ref(),
+        Some(&projection.spec.provenance.subject)
+    );
+}
+
+#[tokio::test]
+async fn main_event_mirror_create_failure_retains_the_run_for_reconciliation() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let workflow_version_id = store_workflow_version(&state, MINIMAL_DOT, None).await;
+    let pool = state.stores.run_summaries.pool();
+    sqlx::raw_sql("CREATE TRIGGER fail_main_event BEFORE INSERT ON main_events BEGIN SELECT RAISE(ABORT, 'injected failure'); END;")
+        .execute(&pool).await.unwrap();
+    let response = post_run_intent_response(
+        &app,
+        json!({
+            "workflow_version_id": workflow_version_id,
+            "target": { "kind": "none" },
+            "args": {}
+        }),
+    )
+    .await;
+    let body = response_json!(response, StatusCode::INTERNAL_SERVER_ERROR).await;
+    assert_eq!(body["errors"][0]["code"], "run_persistence_failed");
+    let runs = state.stores.run_summaries.list_identities().await.unwrap();
+    assert_eq!(runs.len(), 1);
+    assert!(
+        state
+            .stores
+            .runs
+            .main_events()
+            .list_from_with_limit(1, 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    sqlx::query("DROP TRIGGER fail_main_event")
+        .execute(&pool)
+        .await
+        .unwrap();
+    main_event_mirror::mirror_created(&state, runs[0].id)
+        .await
+        .unwrap();
+    assert_eq!(
+        state
+            .stores
+            .runs
+            .main_events()
+            .list_from_with_limit(1, 10)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn post_runs_run_intent_creates_submitted_none_target_without_git_projection() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
