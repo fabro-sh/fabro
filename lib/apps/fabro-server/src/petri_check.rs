@@ -18,7 +18,7 @@ use fabro_llm::selection;
 use fabro_petri::check::{self, Admitted, Bundle, CheckError, CheckRequest, Diagnostic, Launch};
 use fabro_petri::runtime::RuntimeSpec;
 use fabro_types::diagnostic::{Diagnostic as FabroDiagnostic, Severity};
-use fabro_types::settings::run::RunGoal;
+use fabro_types::settings::run::{PreparedStepRun, RunGoal, RunPrepareSettings};
 use fabro_types::{ManifestPath, WorkflowSettings};
 use fabro_workflow::Error as WorkflowError;
 use fabro_workflow::workflow_bundle::WorkflowBundle;
@@ -127,6 +127,7 @@ pub(crate) fn check_request(
             files.insert(config.path.to_string(), config.source.clone());
         }
     }
+    inherit_prepare(&mut files, entrypoint, &settings.run.prepare)?;
     let mut inputs = BTreeMap::new();
     for (name, value) in &settings.run.inputs {
         let value = serde_json::to_value(value).map_err(|err| {
@@ -152,6 +153,95 @@ pub(crate) fn check_request(
         runtime,
         unbound_is_warning,
     })
+}
+
+/// Petri currently reads preparation only from the workflow sidecar, even
+/// though it receives the server settings layer. Fill a missing section from
+/// Fabro's already resolved settings so admission and the saved run agree.
+/// A workflow-owned section replaces the entire lower section (including an
+/// empty list or a timeout alone), and keeps its normal source and lowering.
+/// Only the check's in-memory files change; the version bundle stays intact.
+fn inherit_prepare(
+    files: &mut BTreeMap<String, String>,
+    entrypoint: &ManifestPath,
+    prepare: &RunPrepareSettings,
+) -> Result<(), WorkflowError> {
+    if prepare.steps.is_empty() {
+        return Ok(());
+    }
+    let path = entrypoint.to_string().rsplit_once('/').map_or_else(
+        || "workflow.toml".to_string(),
+        |(dir, _)| format!("{dir}/workflow.toml"),
+    );
+    let source = files.get(&path).map_or("_version = 1\n", String::as_str);
+    let mut table = source.parse::<toml::Table>().map_err(|source| {
+        WorkflowError::engine_with_source(
+            "could not read workflow settings for preparation",
+            source,
+        )
+    })?;
+    if table
+        .get("run")
+        .and_then(toml::Value::as_table)
+        .is_some_and(|run| run.contains_key("prepare"))
+    {
+        return Ok(());
+    }
+    let steps = prepare
+        .steps
+        .iter()
+        .map(|step| {
+            let mut table = toml::Table::new();
+            match &step.run {
+                PreparedStepRun::Script { script } => {
+                    table.insert("script".to_string(), toml::Value::String(script.clone()));
+                }
+                PreparedStepRun::Command { command } => {
+                    table.insert(
+                        "command".to_string(),
+                        toml::Value::Array(
+                            command.iter().cloned().map(toml::Value::String).collect(),
+                        ),
+                    );
+                }
+            }
+            if !step.env.is_empty() {
+                table.insert(
+                    "env".to_string(),
+                    toml::Value::Table(
+                        step.env
+                            .iter()
+                            .map(|(name, value)| (name.clone(), toml::Value::String(value.clone())))
+                            .collect(),
+                    ),
+                );
+            }
+            toml::Value::Table(table)
+        })
+        .collect();
+    let run = table
+        .entry("run")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+        .as_table_mut()
+        .ok_or_else(|| WorkflowError::engine("workflow run settings must be a table"))?;
+    run.insert(
+        "prepare".to_string(),
+        toml::Value::Table(toml::Table::from_iter([
+            (
+                "timeout".to_string(),
+                toml::Value::String(format!("{}ms", prepare.timeout_ms)),
+            ),
+            ("steps".to_string(), toml::Value::Array(steps)),
+        ])),
+    );
+    // Serialize structurally: appending a [run.prepare] header cannot extend
+    // a workflow's valid inline `run = { ... }` table. Keep argv as argv;
+    // Petri retains ownership of rendering and shell quoting.
+    let source = toml::to_string(&table).map_err(|source| {
+        WorkflowError::engine_with_source("could not encode workflow preparation settings", source)
+    })?;
+    files.insert(path, source);
+    Ok(())
 }
 
 /// What a check said: the admitted graphs when Petri admitted the workflow,
@@ -236,6 +326,9 @@ fn fabro_diagnostic(diagnostic: &Diagnostic) -> FabroDiagnostic {
 
 #[cfg(test)]
 mod tests {
+    use fabro_config::{RunLayer, SettingsLayer, WorkflowSettingsBuilder};
+    use fabro_workflow::workflow_bundle::{BundledWorkflow, ParsedWorkflowConfig};
+
     use super::*;
 
     fn request(launch: Launch, overrides: Option<&RunModelLayer>) -> CheckRequest {
@@ -299,5 +392,176 @@ mod tests {
         assert_eq!(launch.model, None);
         assert_eq!(launch.provider, None);
         assert_eq!(launch.default_model.as_deref(), Some("settings-model"));
+    }
+
+    fn prepare_request(server: &str, workflow: Option<&str>) -> CheckRequest {
+        let entrypoint = ManifestPath::from_wire("nested/workflow.fabro").unwrap();
+        let mut builder = WorkflowSettingsBuilder::new().server_manifest_defaults(
+            server.parse::<SettingsLayer>().unwrap().run.unwrap(),
+            fabro_environment::seeded_catalog_layer(),
+        );
+        if let Some(source) = workflow {
+            builder = builder.workflow_toml(source).unwrap();
+        }
+        let settings = builder.build().unwrap();
+        let bundle = WorkflowBundle::new(HashMap::from([(entrypoint.clone(), BundledWorkflow {
+            path: entrypoint.clone(),
+            source: "digraph Prepare { start [shape=Mdiamond]; work [shape=parallelogram, script=\"true\"]; exit [shape=Msquare]; start -> work -> exit }".to_string(),
+            config: workflow.map(|source| ParsedWorkflowConfig {
+                path: ManifestPath::from_wire("nested/workflow.toml").unwrap(),
+                source: source.to_string(),
+            }),
+            ..BundledWorkflow::default()
+        })]));
+        check_request(
+            &bundle,
+            &entrypoint,
+            &settings,
+            &HashMap::new(),
+            Launch::default(),
+            None,
+            RuntimeSpec::default(),
+            false,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn server_prepare_reaches_admission_with_argv_env_order_and_timeout() {
+        let request = prepare_request(
+            r#"
+_version = 1
+[run.prepare]
+timeout = "17s"
+[[run.prepare.steps]]
+script = "printf first"
+[[run.prepare.steps]]
+command = ["printf", "%s", "two words; literal"]
+env = { PREPARE_VALUE = "a value" }
+"#,
+            Some("_version = 1\n[run]\ngoal = \"Keep this goal\"\n"),
+        );
+        let admitted = check::check(&request).unwrap();
+        let stages: Vec<_> = admitted
+            .graph
+            .body
+            .nodes
+            .iter()
+            .filter(|node| node.name.as_str().starts_with("run_prepare_"))
+            .map(|node| (&node.name, &node.step.config))
+            .collect();
+        assert_eq!(stages.len(), 2);
+        assert_eq!(stages[0].0.as_str(), "run_prepare_1");
+        assert_eq!(stages[0].1["script"], "printf first");
+        assert_eq!(stages[1].0.as_str(), "run_prepare_2");
+        assert_eq!(stages[1].1["script"], "printf '%s' 'two words; literal'");
+        assert_eq!(stages[1].1["env"]["PREPARE_VALUE"], "a value");
+        assert_eq!(stages[0].1["timeout_ms"], 17_000);
+        assert_eq!(stages[1].1["timeout_ms"], 17_000);
+        assert_eq!(admitted.graph.params["goal"], "Keep this goal");
+    }
+
+    #[test]
+    fn server_prepare_reaches_a_bundle_without_workflow_settings() {
+        let request = prepare_request(
+            "_version = 1\n[[run.prepare.steps]]\nscript = \"true\"\n",
+            None,
+        );
+        let admitted = check::check(&request).unwrap();
+        assert!(
+            admitted
+                .graph
+                .body
+                .nodes
+                .iter()
+                .any(|node| node.name.as_str() == "run_prepare_1")
+        );
+    }
+
+    #[test]
+    fn workflow_prepare_replaces_server_steps_and_timeout() {
+        let workflow = "_version = 1\n[[run.prepare.steps]]\nscript = \"printf workflow\"\n";
+        let request = prepare_request(
+            "_version = 1\n[run.prepare]\ntimeout = \"17s\"\n[[run.prepare.steps]]\nscript = \"exit 23\"\n",
+            Some(workflow),
+        );
+        // A workflow-owned section keeps its source and normal lowering.
+        assert_eq!(request.bundle.files["nested/workflow.toml"], workflow);
+        let admitted = check::check(&request).unwrap();
+        let steps: Vec<_> = admitted
+            .graph
+            .body
+            .nodes
+            .iter()
+            .filter(|node| node.name.as_str().starts_with("run_prepare_"))
+            .collect();
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].step.config["script"], "printf workflow");
+        assert_eq!(steps[0].step.config["timeout_ms"], 300_000);
+    }
+
+    #[test]
+    fn an_empty_workflow_prepare_section_disables_server_steps() {
+        for workflow in [
+            "_version = 1\n[run.prepare]\nsteps = []\n",
+            "_version = 1\n[run.prepare]\ntimeout = \"2s\"\n",
+        ] {
+            let request = prepare_request(
+                "_version = 1\n[[run.prepare.steps]]\nscript = \"exit 23\"\n",
+                Some(workflow),
+            );
+            let admitted = check::check(&request).unwrap();
+            assert!(
+                !admitted
+                    .graph
+                    .body
+                    .nodes
+                    .iter()
+                    .any(|node| node.name.as_str().starts_with("run_prepare_"))
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_prepare_sidecar_preserves_the_parse_error() {
+        let settings = WorkflowSettingsBuilder::new()
+            .server_manifest_defaults(
+                RunLayer::default(),
+                fabro_environment::seeded_catalog_layer(),
+            )
+            .workflow_toml("_version = 1\n[[run.prepare.steps]]\nscript = \"true\"\n")
+            .unwrap()
+            .build()
+            .unwrap();
+        let mut files = BTreeMap::from([("workflow.toml".to_string(), "[run".to_string())]);
+        let error = inherit_prepare(
+            &mut files,
+            &ManifestPath::from_wire("workflow.fabro").unwrap(),
+            &settings.run.prepare,
+        )
+        .unwrap_err();
+        assert!(
+            !error.causes().is_empty(),
+            "the TOML parse error must remain in the source chain"
+        );
+        assert_eq!(files["workflow.toml"], "[run");
+    }
+
+    #[test]
+    fn inherited_prepare_extends_inline_run_settings() {
+        let request = prepare_request(
+            "_version = 1\n[[run.prepare.steps]]\nscript = \"true\"\n",
+            Some("_version = 1\nrun = { goal = \"Inline goal\" }\n"),
+        );
+        let admitted = check::check(&request).unwrap();
+        assert_eq!(admitted.graph.params["goal"], "Inline goal");
+        assert!(
+            admitted
+                .graph
+                .body
+                .nodes
+                .iter()
+                .any(|node| node.name.as_str() == "run_prepare_1")
+        );
     }
 }
