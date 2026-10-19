@@ -5,6 +5,8 @@
 //! when a workflow is validated, when a fallback chain is compiled. Those
 //! boundaries share one passthrough policy:
 //!
+//! - A provider id or alias without an explicit pin selects that provider's
+//!   default.
 //! - A selector known to the catalog resolves to its canonical offering.
 //! - `provider/model` pins the provider, as the lithos resolver reads it.
 //! - An unknown selector pinned to a provider passes through verbatim on that
@@ -208,6 +210,16 @@ pub fn resolve_selection(
     explicit_provider: Option<&ProviderId>,
     eligible: &HashSet<ProviderId>,
 ) -> Result<SelectedModel, ModelSelectionError> {
+    // Provider-only selectors use the same default and readiness checks as
+    // an explicit provider with no model. Recognize disabled providers too:
+    // they must be rejected, not passed through to another provider as models.
+    let provider_selector = selector
+        .filter(|_| explicit_provider.is_none())
+        .and_then(|selector| catalog.provider(selector).ok());
+    let (selector, explicit_provider) = match provider_selector {
+        Some(provider) => (None, Some(provider.id())),
+        None => (selector, explicit_provider),
+    };
     let Some(selector) = selector else {
         let eligible = match explicit_provider {
             Some(provider) => HashSet::from([ready_provider(catalog, provider, eligible)?]),
@@ -292,6 +304,90 @@ mod tests {
         assert_eq!(selected, SelectedModel {
             provider: builtin::anthropic(),
             model:    "claude-sonnet-5".to_string(),
+        });
+    }
+
+    #[test]
+    fn provider_selectors_and_aliases_use_the_configured_default() {
+        let catalog = test_catalog_with_overlay(
+            "[providers.gemini]\ndefault_model = \"gemini-3.1-flash-lite\"\n",
+        );
+        for selector in ["gemini", "google"] {
+            let selected = resolve_selection(
+                &catalog,
+                Some(selector),
+                None,
+                &eligible(&["anthropic", "gemini"]),
+            )
+            .unwrap();
+            assert_eq!(selected, SelectedModel {
+                provider: builtin::gemini(),
+                model:    "gemini-3.1-flash-lite".to_string(),
+            });
+        }
+    }
+
+    #[test]
+    fn unavailable_provider_selector_does_not_fall_back() {
+        let catalog = test_catalog();
+        for selector in ["gemini", "google"] {
+            assert_eq!(
+                resolve_selection(&catalog, Some(selector), None, &eligible(&["anthropic"])),
+                Err(ModelSelectionError::ProviderUnavailable {
+                    provider: builtin::gemini(),
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn disabled_provider_selector_is_rejected_instead_of_passed_through() {
+        let catalog = test_catalog_with_overlay("[providers.gemini]\nenabled = false\n");
+        assert_eq!(
+            resolve_selection(&catalog, Some("gemini"), None, &eligible(&["anthropic"])),
+            Err(ModelSelectionError::UnknownProvider {
+                provider: "gemini".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn provider_without_a_default_does_not_use_another_providers_default() {
+        let catalog = test_catalog_with_overlay(
+            r#"
+[providers.custom]
+display_name = "Custom"
+base_url = "http://127.0.0.1:1"
+auth = { type = "none" }
+[providers.custom.models.example]
+display_name = "Example"
+api_model = "example"
+"#,
+        );
+        assert!(matches!(
+            resolve_selection(
+                &catalog,
+                Some("custom"),
+                None,
+                &eligible(&["anthropic", "custom"])
+            ),
+            Err(ModelSelectionError::NoDefaultModel { .. })
+        ));
+    }
+
+    #[test]
+    fn explicit_provider_preserves_literal_models_named_after_a_provider() {
+        let catalog = test_catalog();
+        let selected = resolve_selection(
+            &catalog,
+            Some("gemini"),
+            Some(&builtin::anthropic()),
+            &eligible(&["anthropic", "gemini"]),
+        )
+        .unwrap();
+        assert_eq!(selected, SelectedModel {
+            provider: builtin::anthropic(),
+            model:    "gemini".to_string(),
         });
     }
 
