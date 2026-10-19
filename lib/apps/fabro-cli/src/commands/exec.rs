@@ -19,9 +19,11 @@ use anyhow::{Context as _, Result as AnyResult};
 use async_trait::async_trait;
 use fabro_llm::credentials::CredentialProvider;
 use fabro_llm::gateway::{GatewayAdapter, GatewayError, GatewayTransport};
-use fabro_llm::lithos_catalog::{Catalog, CatalogProvider};
+use fabro_llm::lithos_catalog::Catalog;
 use fabro_llm::middleware::{Call, Middleware, Next, Output};
-use fabro_llm::{Client, ClientOptions, Error as LlmError, ErrorKind};
+use fabro_llm::{
+    Client, ClientOptions, Error as LlmError, ErrorKind, ModelSelection, ModelSelectionError,
+};
 use fabro_redact::SecretRedactor;
 use fabro_static::EnvVars;
 use fabro_types::settings::cli::OutputFormat as SettingsOutputFormat;
@@ -30,7 +32,8 @@ use fabro_util::exit::{self, ErrorExt, ExitClass};
 use fabro_util::home::Home;
 use fabro_util::terminal::Styles;
 use fabro_workflow::web_search::{self, SearchSecrets};
-use lithos_llm::catalog::ProviderId;
+use lithos_llm::catalog::{ModelHandle, ModelId, ProviderId};
+use lithos_llm::resolver::ResolvedRoute;
 use pebble_cli_core::approval::TerminalApproval;
 use pebble_cli_core::render::{self, JsonStream, RenderOptions, Style};
 use pebble_cli_core::session::{SessionOptions, run_prompt_with};
@@ -185,16 +188,7 @@ pub(crate) async fn execute(mut args: ExecArgs, ctx: &CommandContext) -> AnyResu
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
     if let Some(target) = server_target {
         tracing::info!(transport = "server", "Agent session starting");
-        let provider_name = args
-            .agent
-            .provider
-            .clone()
-            .unwrap_or_else(|| "anthropic".to_string());
         let catalog = ctx.catalog()?;
-        let provider_id = catalog.enabled_provider(&provider_name).map_or_else(
-            || ProviderId::new(provider_name.as_str()),
-            |provider| provider.id().clone(),
-        );
         let server_client = server_client::connect_server_target(&target).await?;
         let adapter = Arc::new(GatewayAdapter::new(Box::new(
             ServerCompletionTransport::new(server_client),
@@ -203,12 +197,14 @@ pub(crate) async fn execute(mut args: ExecArgs, ctx: &CommandContext) -> AnyResu
         // local client only routes and reports diagnostics.
         let mut options = cli_client_options(&args.agent, styles);
         options.inline_attachments = false;
-        let client = fabro_llm::build_offline_client(
-            Catalog::clone(&catalog),
-            options.with_adapter(provider_id, adapter),
-        )
-        .context("Failed to register fabro server adapter")?
-        .client;
+        // Every enabled provider can use this transport. Shared selection picks
+        // the route; the server checks its own readiness before dispatching.
+        for provider_id in catalog.enabled_provider_ids() {
+            options = options.with_adapter(provider_id, adapter.clone());
+        }
+        let client = fabro_llm::build_offline_client(Catalog::clone(&catalog), options)
+            .context("Failed to register fabro server adapter")?
+            .client;
         run_session(args.agent, client, mcp_servers, catalog, styles)
             .await
             .map_err(classify_server_agent_auth)?;
@@ -276,36 +272,12 @@ fn cli_search_secrets() -> SearchSecrets {
     }
 }
 
-/// The provider the session runs on: the `--provider` flag, else the
-/// highest-priority available provider offering `--model`, else the default.
-fn resolve_provider_id(
-    catalog: &Catalog,
-    args: &AgentArgs,
-    available: &std::collections::HashSet<ProviderId>,
-) -> ProviderId {
-    let requested = ProviderId::new(args.provider.as_deref().unwrap_or("anthropic"));
-    if args.provider.is_some() {
-        return canonical_provider_id(catalog, &requested);
-    }
-    if let Some(model_id) = args.model.as_deref() {
-        let matches = catalog.offerings_matching(model_id);
-        if let Some(entry) = matches
-            .iter()
-            .find(|entry| available.contains(entry.provider.id()))
-            .or_else(|| matches.first())
-        {
-            return entry.provider.id().clone();
-        }
-    }
-    canonical_provider_id(catalog, &requested)
-}
-
-/// The catalog id for `requested`, resolving aliases; the request itself when
-/// the catalog does not know it, so the error names what the caller typed.
-fn canonical_provider_id(catalog: &Catalog, requested: &ProviderId) -> ProviderId {
-    catalog
-        .enabled_provider(requested.as_str())
-        .map_or_else(|| requested.clone(), |provider| provider.id().clone())
+/// Resolve CLI intent through the same client that dispatches the session.
+fn resolve_model(client: &Client, args: &AgentArgs) -> Result<ResolvedRoute, ModelSelectionError> {
+    client.resolve_selection(&ModelSelection::from_parts(
+        args.model.as_deref(),
+        args.provider.as_deref(),
+    ))
 }
 
 /// The model that summarizes fetched web pages: the provider's small default,
@@ -323,7 +295,7 @@ fn summarizer_model(catalog: &Catalog, provider_id: &ProviderId, selected_model:
             || selected_model.to_string(),
             |entry| entry.model.id().to_string(),
         );
-    format!("{provider_id}/{model}")
+    ModelHandle::new(provider_id.clone(), ModelId::new(model)).to_string()
 }
 
 /// Middleware that logs LLM request/response summaries to stderr.
@@ -409,25 +381,16 @@ async fn run_session(
     catalog: Arc<Catalog>,
     styles: &'static Styles,
 ) -> AnyResult<()> {
-    let available: std::collections::HashSet<ProviderId> =
-        client.available_providers().iter().cloned().collect();
-    let provider_id = resolve_provider_id(&catalog, &args, &available);
-    if !available.contains(&provider_id) {
-        anyhow::bail!("LLM credentials not configured for provider '{provider_id}'");
-    }
-    let model = if let Some(model) = args.model.clone() {
-        model
-    } else {
-        catalog
-            .enabled_provider(provider_id.as_str())
-            .and_then(CatalogProvider::default_offering)
-            .map(|entry| entry.model.id().to_string())
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "provider '{provider_id}' has no default model in the catalog; pass --model explicitly"
-                )
-            })?
+    let route = match resolve_model(&client, &args) {
+        Ok(route) => route,
+        // Preserve the CLI's credential guidance at its presentation boundary.
+        Err(ModelSelectionError::ProviderUnavailable { provider }) => {
+            anyhow::bail!("LLM credentials not configured for provider '{provider}'");
+        }
+        Err(error) => return Err(error.into()),
     };
+    let provider_id = route.provider().id().clone();
+    let model = route.model().id().to_string();
     eprintln!("{}", styles.dim.apply_to(format!("Using model: {model}")));
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -464,7 +427,7 @@ async fn run_session(
 
     let environment: Arc<dyn Environment> = Arc::clone(&sandbox) as Arc<dyn Environment>;
     let mut builder = CodingAgent::builder(client, environment)
-        .model(format!("{provider_id}/{model}"))
+        .model(route.handle().to_string())
         .options(options)
         .tool_middleware(Arc::new(permission_middleware))
         .redactor(Arc::new(SecretRedactor))
@@ -548,13 +511,14 @@ async fn host_sandbox(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     use fabro_llm::test_support::{test_catalog, test_catalog_with_overlay};
     use fabro_types::settings::run::{McpServerRef, McpServerSettings, ResolvedMcpEntry};
     use lithos_llm::catalog::builtin;
     use pebble_coding_agent::environment::{Environment, ExecRequest};
 
-    use super::{AgentArgs, resolve_provider_id, run_mcp_servers_for_exec, summarizer_model};
+    use super::{AgentArgs, resolve_model, run_mcp_servers_for_exec, summarizer_model};
     use crate::args::{ExecOutputFormat, PermissionsArg};
 
     fn args(provider: Option<&str>, model: Option<&str>) -> AgentArgs {
@@ -605,23 +569,32 @@ mod tests {
     }
 
     #[test]
-    fn explicit_provider_wins_over_model_matching() {
+    fn exec_inspection_uses_available_defaults_and_refuses_unavailable_pins() {
+        use fabro_llm::test_support::ScriptedAdapter;
+        use fabro_llm::{ClientOptions, ModelSelectionError};
+
         let catalog = test_catalog_with_overlay("[providers.openrouter]\nenabled = true\n");
-        let available = [builtin::openai()].into_iter().collect();
-
-        let provider = resolve_provider_id(&catalog, &args(Some("openrouter"), None), &available);
-
-        assert_eq!(provider.as_str(), "openrouter");
-    }
-
-    #[test]
-    fn a_bare_model_picks_an_available_provider_offering_it() {
-        let catalog = test_catalog();
-        let available = [builtin::openai()].into_iter().collect();
-
-        let provider = resolve_provider_id(&catalog, &args(None, Some("gpt-5.4")), &available);
-
-        assert_eq!(provider, builtin::openai());
+        let built = fabro_llm::build_offline_client(
+            catalog,
+            ClientOptions::default()
+                .with_adapter(builtin::openai(), Arc::new(ScriptedAdapter::new(vec![]))),
+        )
+        .unwrap();
+        let error = resolve_model(&built.client, &args(Some("openrouter"), None)).unwrap_err();
+        assert!(matches!(
+            error,
+            ModelSelectionError::ProviderUnavailable { .. }
+        ));
+        for selector in [
+            None,
+            Some("openai"),
+            Some("openai:gpt-5.6-sol"),
+            Some("gpt-56-sol"),
+        ] {
+            let route = resolve_model(&built.client, &args(None, selector)).unwrap();
+            assert_eq!(route.provider().id(), &builtin::openai());
+            assert_eq!(route.model().id().as_str(), "gpt-5.6-sol");
+        }
     }
 
     #[test]

@@ -4,8 +4,9 @@ use std::time::Duration;
 
 use fabro_llm::lithos_catalog::Catalog;
 use fabro_llm::probe::{self, ApiKeyProbeError, ModelTestStatus};
-use fabro_llm::{ModelSelectionError, api, selection};
+use fabro_llm::{ModelSelection, ModelSelectionError, api, selection};
 use fabro_redact::redact_string;
+use lithos_llm::resolver::{AvailableProviders, ModelResolver as _};
 use lithos_llm::types::ReasoningEffort;
 
 use super::super::{
@@ -234,19 +235,38 @@ async fn test_model(
         .into_iter()
         .collect::<HashSet<_>>();
     let explicit_provider = params.provider.map(ProviderId::new);
-    let info = if let Some(provider) = explicit_provider.as_ref() {
-        match selection::resolve_on_provider(&catalog, provider, &id) {
-            Ok(info) => info,
-            Err(error) => return model_selection_response(&error),
-        }
+    // Explicit probes may describe an unready catalog provider and report skip.
+    let available = if explicit_provider.is_some() {
+        AvailableProviders::all(&catalog)
     } else {
-        match selection::select(&catalog, &id, None, &eligible) {
-            Ok(info) => info,
-            Err(error) => return model_selection_response(&error),
+        AvailableProviders::new(eligible)
+    };
+    let selection = ModelSelection::from_parts(
+        Some(&id),
+        explicit_provider.as_ref().map(ProviderId::as_str),
+    );
+    let info = match selection::catalog_policy().resolve_selection(&selection, &catalog, &available)
+    {
+        Ok(route) => route,
+        Err(error) => {
+            // Preserve the probe API's distinction between an unknown model
+            // (404) and a known model with no ready provider (400). This
+            // catalog-only retry classifies the error; it never dispatches.
+            if matches!(error, ModelSelectionError::ModelNotFound { .. })
+                && selection::catalog_policy()
+                    .resolve_selection(&selection, &catalog, &AvailableProviders::all(&catalog))
+                    .is_ok()
+            {
+                return ApiError::bad_request(format!(
+                    "Model '{id}' has no offering on an eligible provider"
+                ))
+                .into_response();
+            }
+            return model_selection_response(&error);
         }
     };
-    let provider_id = info.provider.id().clone();
-    let model_id = info.model.id().clone();
+    let provider_id = info.provider().id().clone();
+    let model_id = info.model().id().clone();
     if let Some((_, issue)) = llm_result
         .auth_issues
         .iter()
@@ -263,7 +283,7 @@ async fn test_model(
         .into_response();
     }
     if let Some(effort) = reasoning_effort {
-        let capabilities = info.model.capabilities();
+        let capabilities = info.model().capabilities();
         if !capabilities.reasoning_effort(effort).is_supported() {
             let allowed = ReasoningEffort::ALL
                 .into_iter()
@@ -280,7 +300,7 @@ async fn test_model(
 
     let outcome = probe::run_model_test(
         &llm_result.client,
-        &format!("{provider_id}/{model_id}"),
+        &info.handle().to_string(),
         mode,
         reasoning_effort,
         None,
@@ -297,15 +317,10 @@ async fn test_model(
 
 fn model_selection_response(error: &ModelSelectionError) -> Response {
     match error {
-        ModelSelectionError::UnknownProvider { .. }
-        | ModelSelectionError::UnknownSelector { .. }
-        | ModelSelectionError::UnknownSelectorOnProvider { .. } => {
+        ModelSelectionError::ProviderNotFound { .. }
+        | ModelSelectionError::ModelNotFound { .. } => {
             ApiError::not_found(error.to_string()).into_response()
         }
-        ModelSelectionError::ProviderUnavailable { .. }
-        | ModelSelectionError::NoEligibleOffering { .. }
-        | ModelSelectionError::NoDefaultModel { .. } => {
-            ApiError::bad_request(error.to_string()).into_response()
-        }
+        _ => ApiError::bad_request(error.to_string()).into_response(),
     }
 }

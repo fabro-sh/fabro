@@ -1247,11 +1247,7 @@ impl AgentArgs {
         permissions: Option<PermissionLevel>,
         output_format: Option<ExecOutputFormat>,
     ) {
-        self.provider = self
-            .provider
-            .take()
-            .or_else(|| provider.map(String::from))
-            .or_else(|| Some("anthropic".to_string()));
+        self.provider = self.provider.take().or_else(|| provider.map(String::from));
         self.model = self.model.take().or_else(|| model.map(String::from));
         self.permissions = self
             .permissions

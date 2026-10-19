@@ -1,8 +1,6 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
-use fabro_llm::lithos_catalog::Catalog;
-use fabro_llm::{ModelSelectionError, Request, selection};
+use fabro_llm::{ModelSelection, Request};
 use lithos_llm::types::{Message, Role};
 
 use super::super::{
@@ -20,7 +18,6 @@ async fn create_completion(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateCompletionRequest>,
 ) -> Response {
-    let catalog = state.catalog();
     let llm_result = match state.resolve_llm_client().await {
         Ok(result) => result,
         Err(err) => {
@@ -39,21 +36,12 @@ async fn create_completion(
         warn!(provider = %issue.provider, error = %issue.cause, "LLM provider unavailable due to build issue");
     }
     let client = llm_result.client;
-    let eligible: HashSet<ProviderId> = client.available_providers().iter().cloned().collect();
-    let (model_id, selected_provider) = match resolve_request_model(
-        catalog.as_ref(),
-        &eligible,
-        req.model.as_deref(),
-        req.provider,
-    ) {
-        Ok(selection) => selection,
+    let selection = ModelSelection::from_parts(req.model.as_deref(), req.provider.as_deref());
+    let route = match client.resolve_selection(&selection) {
+        Ok(route) => route,
         Err(error) => return ApiError::bad_request(error.to_string()).into_response(),
     };
-
-    // The request body is a lithos `Request` plus `stream`, `system`, and
-    // `schema`. Rebuild it on the resolved `provider/model` route so the
-    // server and the caller agree on the offering.
-    let mut builder = Request::builder().model(format!("{selected_provider}/{model_id}"));
+    let mut builder = Request::builder().selection(selection);
     if let Some(system) = req.system {
         builder = builder.message(Message::text(Role::System, system));
     }
@@ -121,8 +109,8 @@ async fn create_completion(
         Err(error) => return ApiError::bad_request(error.to_string()).into_response(),
     };
     info!(
-        model = %model_id,
-        provider = %selected_provider,
+        model = %route.model().id(),
+        provider = %route.provider().id(),
         "Completion request received"
     );
 
@@ -164,20 +152,4 @@ async fn create_completion(
         Ok(response) => Json(response).into_response(),
         Err(error) => ApiError::from(error).into_response(),
     }
-}
-
-pub(super) fn resolve_request_model(
-    catalog: &Catalog,
-    eligible: &HashSet<ProviderId>,
-    requested_model: Option<&str>,
-    explicit_provider: Option<String>,
-) -> Result<(String, ProviderId), ModelSelectionError> {
-    let explicit_provider = explicit_provider.map(ProviderId::new);
-    let selected = selection::resolve_selection(
-        catalog,
-        requested_model,
-        explicit_provider.as_ref(),
-        eligible,
-    )?;
-    Ok((selected.model, selected.provider))
 }

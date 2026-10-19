@@ -7,6 +7,7 @@
 //! they are recorded.
 
 use chrono::{DateTime, Utc};
+use lithos_llm::ModelSelection;
 use lithos_llm::catalog::ProviderId;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -108,12 +109,15 @@ impl SessionEventBody {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionCreatedProps {
+    /// Canonical catalog identity or explicitly scoped passthrough intent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title:    Option<String>,
+    pub selection: Option<ModelSelection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model:    Option<String>,
+    pub title:     Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<ProviderId>,
+    pub model:     Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider:  Option<ProviderId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -266,9 +270,10 @@ mod tests {
     #[test]
     fn a_created_event_has_no_turn() {
         let body = SessionEventBody::Created(SessionCreatedProps {
-            title:    Some("Ask".to_string()),
-            model:    None,
-            provider: None,
+            selection: None,
+            title:     Some("Ask".to_string()),
+            model:     None,
+            provider:  None,
         });
         assert_eq!(body.event_name(), "run.session.created");
         assert_eq!(body.turn_id(), None);

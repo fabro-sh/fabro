@@ -73,7 +73,8 @@ impl GatewayAdapter {
         })?;
         // The gateway resolves models itself; send the canonical route so the
         // server and the local catalog agree on the offering.
-        body["model"] = serde_json::Value::String(call.route().handle().to_string());
+        body["model"] = serde_json::Value::String(call.route().model().id().to_string());
+        body["provider"] = serde_json::Value::String(call.route().provider().id().to_string());
         body["stream"] = serde_json::Value::Bool(stream);
         Ok(body)
     }
@@ -302,5 +303,43 @@ mod tests {
         );
         assert_eq!(error.kind(), ErrorKind::Authentication);
         assert_eq!(error.retry_classification(), RetryClassification::Never);
+    }
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use lithos_llm::ModelSelection;
+    use lithos_llm::middleware::CallContext;
+    use lithos_llm::resolver::{AvailableProviders, ModelResolver as _};
+    use lithos_llm::types::Request;
+
+    use super::*;
+    use crate::{selection, test_support};
+
+    #[test]
+    fn gateway_body_round_trips_provider_scope_for_catalog_and_opaque_ids() {
+        let catalog =
+            test_support::test_catalog_with_overlay("[providers.openrouter]\nenabled = true\n");
+        let available = AvailableProviders::all(&catalog);
+        for model in ["openai/gpt-5.6-sol", "vendor/model:version", "default"] {
+            let intent = ModelSelection::from_parts(Some(model), Some("openrouter"));
+            let route = selection::policy()
+                .resolve_selection(&intent, &catalog, &available)
+                .unwrap();
+            let request = Request::builder()
+                .selection(intent)
+                .user("hello")
+                .build()
+                .unwrap();
+            let call = ResolvedCall::new(request, route.clone(), CallContext::new());
+            let body = GatewayAdapter::body(&call, false).unwrap();
+            let received =
+                ModelSelection::from_parts(body["model"].as_str(), body["provider"].as_str());
+            let rerouted = selection::policy()
+                .resolve_selection(&received, &catalog, &available)
+                .unwrap();
+            assert_eq!(rerouted.handle(), route.handle());
+            assert_eq!(rerouted.api_model(), route.api_model());
+        }
     }
 }

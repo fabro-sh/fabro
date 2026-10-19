@@ -431,6 +431,36 @@ fn exec_server_target_accepts_configured_custom_provider_from_settings() {
 }
 
 #[test]
+fn exec_gateway_resolves_provider_only_model_without_a_hidden_provider_pin() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let receipt = server.mock(|when, then| {
+        when.method("POST")
+            .path("/api/v1/completions")
+            .json_body_includes(r#"{"provider":"gemini","model":"gemini-3.5-flash"}"#);
+        then.status(400).body("gemini-gateway-receipt");
+    });
+    let mut cmd = context.exec_cmd();
+    cmd.env_clear();
+    preserve_coverage_env!(cmd);
+    cmd.env("HOME", &context.home_dir)
+        .env("FABRO_STORAGE_DIR", &context.storage_dir)
+        .env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled");
+    cmd.args([
+        "--server",
+        &format!("{}/api/v1", server.base_url()),
+        "--model",
+        "google",
+        "test prompt",
+    ]);
+    let output = cmd.assert().failure().get_output().clone();
+    let stderr = String::from_utf8(output.stderr).expect("valid utf8");
+    assert!(stderr.contains("gemini-gateway-receipt"), "{stderr}");
+    receipt.assert_calls(1);
+}
+
+#[test]
 fn exec_configured_server_target_alone_does_not_reroute_exec() {
     let context = test_context!();
     let server = MockServer::start();

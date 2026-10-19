@@ -114,7 +114,7 @@ pub async fn probe_provider_with_api_key(
     let model = catalog_provider
         .probe_offering()
         .ok_or_else(|| ApiKeyProbeError::NoProbeModel(provider_id.clone()))?;
-    let selector = format!("{provider_id}/{}", model.model.id());
+    let selector = model.handle().to_string();
     let source = Arc::new(ApiKeyCredentialSource::new(provider_id.clone(), api_key));
     let built = build_client(catalog, source, ClientOptions::standard()).await?;
     if let Some((_, issue)) = built

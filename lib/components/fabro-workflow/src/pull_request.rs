@@ -5,7 +5,7 @@ use std::time::Duration;
 use fabro_github::{self as github_app, ssh_url_to_https};
 use fabro_llm::credentials::CredentialProvider;
 use fabro_llm::lithos_catalog::Catalog;
-use fabro_llm::{Client, ClientOptions, Request, client as llm_client, selection};
+use fabro_llm::{Client, ClientOptions, ModelSelection, Request, client as llm_client, selection};
 use fabro_store::RunProjection;
 use fabro_types::settings::run::MergeStrategy;
 use fabro_types::{
@@ -13,6 +13,7 @@ use fabro_types::{
 };
 use fabro_util::text::strip_goal_decoration;
 use lithos_llm::catalog::ProviderId;
+use lithos_llm::resolver::{AvailableProviders, ModelResolver as _};
 use lithos_llm::types::{Cost, Message, Role};
 use tokio::time::sleep;
 use tracing::{debug, info, warn};
@@ -70,10 +71,15 @@ fn truncation_caps(
     eligible: &HashSet<ProviderId>,
     catalog: &Catalog,
 ) -> TruncationCaps {
-    let ctx = selection::select(catalog, model, None, eligible)
+    let ctx = selection::catalog_policy()
+        .resolve_selection(
+            &ModelSelection::from_parts(Some(model), None),
+            catalog,
+            &AvailableProviders::new(eligible.iter().cloned()),
+        )
         .ok()
-        .and_then(|entry| entry.model.limits())
-        .and_then(|limits| usize::try_from(limits.context_tokens).ok())
+        .and_then(|entry| entry.model().limits().map(|limits| limits.context_tokens))
+        .and_then(|tokens| usize::try_from(tokens).ok())
         .unwrap_or(UNKNOWN_MODEL_CTX);
 
     truncation_caps_for_context_window(ctx)
@@ -1505,7 +1511,7 @@ capabilities = { text = true, tools = true, response_format = { json_object = tr
                 None,
             )
             .unwrap();
-        let llm_source: Arc<dyn CredentialProvider> = Arc::new(VaultCredentialSource::new(
+        let llm_source: Arc<dyn CredentialProvider> = Arc::new(VaultCredentialSource::vault_only(
             Arc::new(AsyncRwLock::new(vault)),
         ));
         // Use catalog settings to override base_url instead of env var

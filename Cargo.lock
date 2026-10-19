@@ -4301,7 +4301,7 @@ checksum = "6373607a59f0be73a39b6fe456b8192fcc3585f602af20751600e974dd455e77"
 [[package]]
 name = "lithos-llm"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/lithos-llm?branch=main#b47b0065df903cb759a0911100d151bd04fc5546"
+source = "git+https://www.github.com/lithoscomputer/lithos-llm?rev=25ccf13befa43d914b3b734645897e2327ec6737#25ccf13befa43d914b3b734645897e2327ec6737"
 dependencies = [
  "async-trait",
  "aws-config",

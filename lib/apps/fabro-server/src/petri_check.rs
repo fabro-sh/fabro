@@ -9,12 +9,12 @@
 //! model is refused when no LLM provider is ready, since Petri admits the
 //! model nodes unchecked without a model client.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use fabro_config::RunModelLayer;
 use fabro_llm::lithos_catalog::Catalog;
-use fabro_llm::selection;
+use fabro_llm::{ModelSelection, selection};
 use fabro_petri::check::{self, Admitted, Bundle, CheckError, CheckRequest, Diagnostic, Launch};
 use fabro_petri::runtime::RuntimeSpec;
 use fabro_types::diagnostic::{Diagnostic as FabroDiagnostic, Severity};
@@ -23,6 +23,7 @@ use fabro_types::{ManifestPath, WorkflowSettings};
 use fabro_workflow::Error as WorkflowError;
 use fabro_workflow::workflow_bundle::WorkflowBundle;
 use lithos_llm::catalog::ProviderId;
+use lithos_llm::resolver::{AvailableProviders, ModelResolver as _};
 
 /// Fabro's rule for a model node with no provider ready to run it.
 pub(crate) const NO_READY_PROVIDER_RULE: &str = "fabro.model.no_ready_provider";
@@ -45,10 +46,11 @@ pub(crate) fn launch(
         if settings.run.model.provider.is_some() {
             return None;
         }
-        let eligible = eligible.iter().cloned().collect::<HashSet<_>>();
-        selection::select_default(catalog, &eligible)
+        let eligible = AvailableProviders::new(eligible.iter().cloned());
+        selection::catalog_policy()
+            .resolve_selection(&ModelSelection::Default, catalog, &eligible)
             .ok()
-            .map(|offering| offering.model.id().to_string())
+            .map(|offering| offering.model().id().to_string())
     });
     Launch {
         default_model: model,

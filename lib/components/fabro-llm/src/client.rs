@@ -14,6 +14,8 @@ use lithos_llm::middleware::{
 };
 use lithos_llm::types::ErrorData;
 
+use crate::selection;
+
 /// The application name lithos reports to providers that ask, such as the
 /// `originator` header on the OpenAI Codex deployment.
 const APPLICATION_NAME: &str = "fabro";
@@ -142,6 +144,7 @@ impl ClientOptions {
     }
 
     fn apply(self, mut builder: ClientBuilder) -> ClientBuilder {
+        builder = builder.resolver(selection::policy());
         if let Some(http) = self.http {
             builder = builder.http(http);
         }

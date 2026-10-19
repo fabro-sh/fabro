@@ -1,425 +1,226 @@
-//! Model selection shared by every Fabro dispatch boundary.
+//! Fabro's boundary policy over Lithos model selection.
 //!
-//! lithos resolves a request's selector at call time. Fabro also has to pick
-//! a provider and model before there is a request: when a run is created,
-//! when a workflow is validated, when a fallback chain is compiled. Those
-//! boundaries share one passthrough policy:
-//!
-//! - A selector known to the catalog resolves to its canonical offering.
-//! - `provider/model` pins the provider, as the lithos resolver reads it.
-//! - An unknown selector pinned to a provider passes through verbatim on that
-//!   provider.
-//! - An unqualified unknown selector passes through on the default provider.
-//! - No selector picks the default offering (of the pinned provider, when one
-//!   is given).
-//!
-//! Only enabled providers take part. Disabled ones are invisible here,
-//! exactly as they are to the lithos resolver at request time.
+//! Lithos owns selector parsing, defaults, aliases, priority, passthrough
+//! permissions, and canonical identity. Fabro requires exact provider pins and
+//! allows unknown bare models on the default provider. Install the same policy
+//! on clients and use it for preflight with the actual eligible provider set.
 
-use std::collections::HashSet;
-use std::fmt;
+use lithos_llm::ModelSelection;
+use lithos_llm::catalog::Catalog;
+use lithos_llm::resolver::{
+    ProviderMatchPolicy, ResolvedRoute, SelectionPolicy, UnknownModelPolicy,
+};
 
-use lithos_llm::catalog::{Catalog, ModelId, Offering, ProviderId};
-use thiserror::Error;
-
-/// A provider/model pair one of the selection functions chose.
-///
-/// `model` is the canonical catalog id when the selector matched an offering,
-/// or the caller's selector passed through verbatim when it did not.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SelectedModel {
-    pub provider: ProviderId,
-    pub model:    String,
+/// Dispatch and preflight use the same exact-provider policy.
+#[must_use]
+pub fn policy() -> SelectionPolicy {
+    SelectionPolicy::default()
+        .with_providers(ProviderMatchPolicy::Exact)
+        .with_unknown_models(UnknownModelPolicy::DefaultProvider)
 }
 
-/// A resolved fallback target: provider id plus model id.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FallbackTarget {
-    pub provider: ProviderId,
-    pub model:    ModelId,
+/// Workflows require explicit provider scope for unknown models. The Petri
+/// client uses this during both admission and execution.
+#[must_use]
+pub fn workflow_policy() -> SelectionPolicy {
+    policy().with_unknown_models(UnknownModelPolicy::ExplicitProvider)
 }
 
-impl FallbackTarget {
-    /// Builds a target from anything that renders as a provider id and model
-    /// id, so callers holding typed ids or bare passthrough selectors all use
-    /// one constructor.
-    pub fn new(provider: impl fmt::Display, model: impl fmt::Display) -> Self {
-        Self {
-            provider: ProviderId::new(provider.to_string()),
-            model:    ModelId::new(model.to_string()),
-        }
-    }
+/// Catalog inspection must never invent a passthrough catalog row.
+#[must_use]
+pub fn catalog_policy() -> SelectionPolicy {
+    policy().with_unknown_models(UnknownModelPolicy::CatalogOnly)
 }
 
-impl fmt::Display for FallbackTarget {
-    /// Renders as `provider:model`, the qualified form model references
-    /// accept.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.provider, self.model)
-    }
-}
-
-/// Why a selection could not be made.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum ModelSelectionError {
-    #[error("unknown model provider '{provider}'")]
-    UnknownProvider { provider: String },
-    #[error("model provider '{provider}' is unavailable")]
-    ProviderUnavailable { provider: ProviderId },
-    #[error("unknown model selector '{selector}'")]
-    UnknownSelector { selector: String },
-    #[error("model selector '{selector}' is unknown on provider '{provider}'")]
-    UnknownSelectorOnProvider {
-        selector: String,
-        provider: ProviderId,
-    },
-    #[error(
-        "model selector '{selector}' is known but has no offering on an eligible provider; available providers: {providers:?}"
-    )]
-    NoEligibleOffering {
-        selector:  String,
-        providers: Vec<ProviderId>,
-    },
-    #[error(
-        "no default model is available on an eligible provider; providers with defaults: {providers:?}"
-    )]
-    NoDefaultModel { providers: Vec<ProviderId> },
-}
-
-/// Canonicalizes a provider id or alias, requiring an enabled provider.
-pub fn require_provider(
-    catalog: &Catalog,
-    selector: &str,
-) -> Result<ProviderId, ModelSelectionError> {
-    catalog
-        .enabled_provider(selector)
-        .map(|provider| provider.id().clone())
-        .ok_or_else(|| ModelSelectionError::UnknownProvider {
-            provider: selector.to_string(),
-        })
-}
-
-/// Canonicalizes a provider and requires it to be in the eligible set.
-pub fn ready_provider(
-    catalog: &Catalog,
-    provider: &ProviderId,
-    eligible: &HashSet<ProviderId>,
-) -> Result<ProviderId, ModelSelectionError> {
-    let provider = require_provider(catalog, provider.as_str())?;
-    if canonical_eligible(catalog, eligible).contains(&provider) {
-        Ok(provider)
+/// Persist catalog identity exactly, or explicit scope for a passthrough route.
+/// A passthrough handle alone is not a valid canonical catalog selection.
+#[must_use]
+pub fn for_route(catalog: &Catalog, route: &ResolvedRoute) -> ModelSelection {
+    let handle = route.handle();
+    if catalog
+        .model(handle.provider().as_str(), handle.model().as_str())
+        .is_ok()
+    {
+        handle.into()
     } else {
-        Err(ModelSelectionError::ProviderUnavailable { provider })
+        ModelSelection::from_parts(
+            Some(route.api_model()),
+            Some(route.provider().id().as_str()),
+        )
     }
-}
-
-/// Finds `selector` as a model on an enabled provider.
-pub fn resolve_on_provider<'a>(
-    catalog: &'a Catalog,
-    provider: &ProviderId,
-    selector: &str,
-) -> Result<Offering<'a>, ModelSelectionError> {
-    let provider = require_provider(catalog, provider.as_str())?;
-    catalog
-        .enabled_provider(provider.as_str())
-        .and_then(|provider| provider.offering(selector))
-        .ok_or(ModelSelectionError::UnknownSelectorOnProvider {
-            selector: selector.to_string(),
-            provider,
-        })
-}
-
-/// Selects a catalog model for `selector`, requiring a real offering.
-///
-/// With an explicit provider the model must exist there. Otherwise models
-/// named `selector` are preferred over aliases, and the highest-priority
-/// eligible offering wins.
-pub fn select<'a>(
-    catalog: &'a Catalog,
-    selector: &str,
-    explicit_provider: Option<&ProviderId>,
-    eligible: &HashSet<ProviderId>,
-) -> Result<Offering<'a>, ModelSelectionError> {
-    if let Some(explicit) = explicit_provider {
-        let provider = ready_provider(catalog, explicit, eligible)?;
-        return resolve_on_provider(catalog, &provider, selector);
-    }
-    // `provider/model` pins the provider, exactly as the lithos resolver reads
-    // it at request time. A slash whose prefix is not a provider (an
-    // aggregator's `vendor/model` api id) falls through to plain matching.
-    if let Some((prefix, rest)) = selector.split_once('/') {
-        if let Some(provider) = catalog.enabled_provider(prefix) {
-            let provider = ready_provider(catalog, provider.id(), eligible)?;
-            return resolve_on_provider(catalog, &provider, rest);
-        }
-    }
-    let matches = catalog.offerings_matching(selector);
-    if matches.is_empty() {
-        return Err(ModelSelectionError::UnknownSelector {
-            selector: selector.to_string(),
-        });
-    }
-    let eligible = canonical_eligible(catalog, eligible);
-    let providers: Vec<ProviderId> = matches
-        .iter()
-        .map(|entry| entry.provider.id().clone())
-        .collect();
-    matches
-        .into_iter()
-        .find(|entry| eligible.contains(entry.provider.id()))
-        .ok_or(ModelSelectionError::NoEligibleOffering {
-            selector: selector.to_string(),
-            providers,
-        })
-}
-
-/// The default offering of the highest-priority eligible provider.
-pub fn select_default<'a>(
-    catalog: &'a Catalog,
-    eligible: &HashSet<ProviderId>,
-) -> Result<Offering<'a>, ModelSelectionError> {
-    let eligible = canonical_eligible(catalog, eligible);
-    let providers_with_defaults: Vec<_> = catalog
-        .enabled_providers()
-        .into_iter()
-        .filter_map(|provider| {
-            provider
-                .default_offering()
-                .map(|offering| (provider.id().clone(), offering))
-        })
-        .collect();
-    providers_with_defaults
-        .iter()
-        .find(|(provider, _)| eligible.contains(provider))
-        .map(|(_, offering)| *offering)
-        .ok_or_else(|| ModelSelectionError::NoDefaultModel {
-            providers: providers_with_defaults
-                .into_iter()
-                .map(|(provider, _)| provider)
-                .collect(),
-        })
-}
-
-/// Resolves an optional selector to one provider/model pair under Fabro's
-/// passthrough policy (see the module docs).
-pub fn resolve_selection(
-    catalog: &Catalog,
-    selector: Option<&str>,
-    explicit_provider: Option<&ProviderId>,
-    eligible: &HashSet<ProviderId>,
-) -> Result<SelectedModel, ModelSelectionError> {
-    let Some(selector) = selector else {
-        let eligible = match explicit_provider {
-            Some(provider) => HashSet::from([ready_provider(catalog, provider, eligible)?]),
-            None => eligible.clone(),
-        };
-        let offering = select_default(catalog, &eligible)?;
-        return Ok(SelectedModel {
-            provider: offering.provider.id().clone(),
-            model:    offering.model.id().to_string(),
-        });
-    };
-    match select(catalog, selector, explicit_provider, eligible) {
-        Ok(offering) => Ok(SelectedModel {
-            provider: offering.provider.id().clone(),
-            model:    offering.model.id().to_string(),
-        }),
-        Err(ModelSelectionError::UnknownSelectorOnProvider { provider, selector }) => {
-            Ok(SelectedModel {
-                provider,
-                model: selector,
-            })
-        }
-        Err(ModelSelectionError::UnknownSelector { .. }) => {
-            let default = select_default(catalog, eligible)?;
-            Ok(SelectedModel {
-                provider: default.provider.id().clone(),
-                model:    selector.to_string(),
-            })
-        }
-        Err(error) => Err(error),
-    }
-}
-
-/// Resolves against `preferred` providers first, falling back to every enabled
-/// provider only when the preferred set cannot supply the requested provider
-/// or model. Semantic failures such as an unknown provider do not fall back.
-pub fn resolve_selection_with_catalog_fallback(
-    catalog: &Catalog,
-    selector: Option<&str>,
-    explicit_provider: Option<&ProviderId>,
-    preferred: &HashSet<ProviderId>,
-) -> Result<SelectedModel, ModelSelectionError> {
-    match resolve_selection(catalog, selector, explicit_provider, preferred) {
-        Err(
-            ModelSelectionError::ProviderUnavailable { .. }
-            | ModelSelectionError::NoEligibleOffering { .. }
-            | ModelSelectionError::NoDefaultModel { .. },
-        ) => resolve_selection(
-            catalog,
-            selector,
-            explicit_provider,
-            &catalog.enabled_provider_ids().into_iter().collect(),
-        ),
-        result => result,
-    }
-}
-
-fn canonical_eligible(catalog: &Catalog, eligible: &HashSet<ProviderId>) -> HashSet<ProviderId> {
-    eligible
-        .iter()
-        .filter_map(|id| catalog.enabled_provider(id.as_str()))
-        .map(|provider| provider.id().clone())
-        .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use lithos_llm::catalog::builtin;
+    use lithos_llm::catalog::{ModelHandle, ModelId, ProviderId};
+    use lithos_llm::resolver::{
+        AvailableProviders, CatalogResolver, ModelResolver as _, ModelSelectionError,
+    };
 
     use super::*;
     use crate::test_support::{test_catalog, test_catalog_with_overlay};
 
-    fn eligible(ids: &[&str]) -> HashSet<ProviderId> {
-        ids.iter().map(|id| ProviderId::new(*id)).collect()
-    }
-
     #[test]
-    fn known_alias_resolves_to_canonical_offering_on_an_eligible_provider() {
+    fn exact_pins_refuse_stand_ins_and_catalog_only_refuses_unknown_models() {
         let catalog = test_catalog();
-        let selected =
-            resolve_selection(&catalog, Some("sonnet"), None, &eligible(&["anthropic"])).unwrap();
-        assert_eq!(selected, SelectedModel {
-            provider: builtin::anthropic(),
-            model:    "claude-sonnet-5".to_string(),
-        });
-    }
-
-    #[test]
-    fn unknown_selector_passes_through_on_the_default_provider() {
-        let catalog = test_catalog();
-        let selected = resolve_selection(
-            &catalog,
-            Some("totally-new-model"),
-            None,
-            &eligible(&["openai", "anthropic"]),
-        )
-        .unwrap();
-        assert_eq!(selected.provider, builtin::anthropic());
-        assert_eq!(selected.model, "totally-new-model");
-    }
-
-    #[test]
-    fn slash_qualified_selector_pins_the_provider_like_the_lithos_resolver() {
-        let catalog = test_catalog();
-        let selected = resolve_selection(
-            &catalog,
-            Some("openai/gpt-5.6-sol"),
-            None,
-            &eligible(&["openai", "anthropic"]),
-        )
-        .unwrap();
-        assert_eq!(selected, SelectedModel {
-            provider: builtin::openai(),
-            model:    "gpt-5.6-sol".to_string(),
-        });
-
-        let unknown = resolve_selection(
-            &catalog,
-            Some("openai/brand-new-model"),
-            None,
-            &eligible(&["openai", "anthropic"]),
-        )
-        .unwrap();
-        assert_eq!(unknown, SelectedModel {
-            provider: builtin::openai(),
-            model:    "brand-new-model".to_string(),
-        });
-
-        let unavailable = resolve_selection(
-            &catalog,
-            Some("openai/gpt-5.6-sol"),
-            None,
-            &eligible(&["anthropic"]),
+        let available = AvailableProviders::new([ProviderId::new("openai-codex")]);
+        let intent = ModelSelection::from_parts(Some("openai/gpt-5.6-sol"), None);
+        assert!(
+            CatalogResolver
+                .resolve_selection(&intent, &catalog, &available)
+                .is_ok()
         );
-        assert_eq!(
-            unavailable,
-            Err(ModelSelectionError::ProviderUnavailable {
-                provider: builtin::openai(),
-            })
-        );
-    }
-
-    #[test]
-    fn slash_selector_with_a_non_provider_prefix_matches_api_ids_on_a_pinned_provider() {
-        let catalog = test_catalog_with_overlay("[providers.openrouter]\nenabled = true\n");
-        let selected = resolve_selection(
-            &catalog,
-            Some("openai/gpt-5.6-sol"),
-            Some(&ProviderId::new("openrouter")),
-            &eligible(&["openrouter"]),
-        )
-        .unwrap();
-        assert_eq!(selected, SelectedModel {
-            provider: ProviderId::new("openrouter"),
-            model:    "gpt-5.6-sol".to_string(),
-        });
-    }
-
-    #[test]
-    fn pinned_provider_must_be_eligible() {
-        let catalog = test_catalog();
-        let error = resolve_selection(
-            &catalog,
-            Some("gpt-5.4"),
-            Some(&builtin::openai()),
-            &eligible(&["anthropic"]),
-        )
-        .unwrap_err();
         assert!(matches!(
-            error,
-            ModelSelectionError::ProviderUnavailable { provider } if provider == builtin::openai()
+            policy().resolve_selection(&intent, &catalog, &available),
+            Err(ModelSelectionError::ProviderUnavailable { .. })
+        ));
+        let available = AvailableProviders::all(&catalog);
+        let unknown = ModelSelection::from_parts(Some("future-model"), None);
+        assert!(
+            policy()
+                .resolve_selection(&unknown, &catalog, &available)
+                .is_ok()
+        );
+        assert!(matches!(
+            catalog_policy().resolve_selection(&unknown, &catalog, &available),
+            Err(ModelSelectionError::ModelNotFound { .. })
         ));
     }
 
     #[test]
-    fn catalog_fallback_recovers_from_readiness_failures_only() {
+    fn workflow_preflight_and_dispatch_require_scope_for_unknown_models() {
         let catalog = test_catalog();
-        let selected = resolve_selection_with_catalog_fallback(
-            &catalog,
-            Some("gpt-5.4"),
-            Some(&builtin::openai()),
-            &eligible(&["anthropic"]),
-        )
-        .unwrap();
-        assert_eq!(selected.provider, builtin::openai());
-        let error = resolve_selection_with_catalog_fallback(
-            &catalog,
-            None,
-            Some(&ProviderId::new("nope")),
-            &eligible(&["anthropic"]),
-        )
-        .unwrap_err();
-        assert!(matches!(error, ModelSelectionError::UnknownProvider { .. }));
-    }
-
-    #[test]
-    fn disabled_providers_are_not_selectable() {
-        let catalog = test_catalog();
+        let available = AvailableProviders::all(&catalog);
+        let bare = ModelSelection::from_parts(Some("future-model"), None);
         assert!(matches!(
-            select(&catalog, "gpt-5.4", None, &eligible(&["bedrock-openai"])),
-            Err(ModelSelectionError::NoEligibleOffering { .. })
+            workflow_policy().resolve_selection(&bare, &catalog, &available),
+            Err(ModelSelectionError::ModelNotFound { .. })
         ));
-        let enabled = test_catalog_with_overlay("[providers.bedrock-openai]\nenabled = true\n");
-        let entry = select(&enabled, "gpt-5.4", None, &eligible(&["bedrock-openai"])).unwrap();
-        assert_eq!(entry.provider.id(), &ProviderId::new("bedrock-openai"));
+        let scoped = ModelSelection::from_parts(Some("future-model"), Some("openai"));
+        assert!(
+            workflow_policy()
+                .resolve_selection(&scoped, &catalog, &available)
+                .is_ok()
+        );
     }
 
     #[test]
-    fn fallback_targets_render_qualified() {
+    fn passthrough_permission_and_provider_scope_are_enforced() {
+        let catalog = test_catalog_with_overlay("[providers.openai]\nallow_passthrough = false\n");
+        let available = AvailableProviders::new([ProviderId::new("openai")]);
+        for intent in [
+            ModelSelection::from_parts(Some("future-model"), None),
+            ModelSelection::from_parts(Some("vendor/model:version"), Some("openai")),
+        ] {
+            assert!(matches!(
+                policy().resolve_selection(&intent, &catalog, &available),
+                Err(ModelSelectionError::ModelNotFound { .. })
+            ));
+        }
+        let catalog = test_catalog();
+        for model in ["vendor/model:version", "future-model:latest", "default"] {
+            let intent = ModelSelection::from_parts(Some(model), Some("openai"));
+            let route = policy()
+                .resolve_selection(&intent, &catalog, &available)
+                .unwrap();
+            assert_eq!(route.api_model(), model);
+        }
+        for model in ["missing/model", "claude-sonnet-5"] {
+            assert!(
+                policy()
+                    .resolve_selection(
+                        &ModelSelection::from_parts(Some(model), None),
+                        &catalog,
+                        &available
+                    )
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn disabled_unavailable_and_defaultless_providers_return_typed_errors() {
+        let catalog = test_catalog_with_overlay("[providers.gemini]\nenabled = false\n");
+        let available = AvailableProviders::all(&catalog);
+        assert!(matches!(
+            policy().resolve_selection(
+                &ModelSelection::from_parts(Some("gemini"), None),
+                &catalog,
+                &available
+            ),
+            Err(ModelSelectionError::ProviderDisabled { .. })
+        ));
+        assert!(matches!(
+            policy().resolve_selection(
+                &ModelSelection::Default,
+                &catalog,
+                &AvailableProviders::default()
+            ),
+            Err(ModelSelectionError::NoDefaultModel)
+        ));
+        let catalog = Catalog::builder()
+            .overlay_toml(
+                r#"
+schema_version = 1
+[providers.empty]
+display_name = "No default"
+adapter = "http"
+codecs = ["openai-responses"]
+base_url = "http://127.0.0.1"
+auth = { type = "none" }
+"#,
+            )
+            .unwrap()
+            .build()
+            .unwrap();
+        assert!(matches!(
+            policy().resolve_selection(
+                &ModelSelection::from_parts(None, Some("empty")),
+                &catalog,
+                &AvailableProviders::all(&catalog)
+            ),
+            Err(ModelSelectionError::ProviderHasNoDefault { .. })
+        ));
+    }
+
+    #[test]
+    fn canonical_persistence_refuses_removed_rows_even_when_an_alias_reuses_the_id() {
+        let catalog = test_catalog();
+        let handle = ModelHandle::new(ProviderId::new("openai"), ModelId::new("gpt-5.6-sol"));
+        let intent: ModelSelection = handle.clone().into();
+        let restored: ModelSelection =
+            serde_json::from_str(&serde_json::to_string(&intent).unwrap()).unwrap();
         assert_eq!(
-            FallbackTarget::new("openai", "gpt-5.4").to_string(),
-            "openai:gpt-5.4"
+            policy()
+                .resolve_selection(&restored, &catalog, &AvailableProviders::all(&catalog))
+                .unwrap()
+                .handle(),
+            handle
         );
+        let changed = Catalog::builder()
+            .overlay_toml(
+                r#"
+schema_version = 1
+[providers.openai]
+display_name = "OpenAI"
+adapter = "http"
+codecs = ["openai-responses"]
+base_url = "http://127.0.0.1"
+auth = { type = "none" }
+allow_passthrough = true
+default_model = "replacement"
+[providers.openai.models.replacement]
+display_name = "Replacement"
+api_model = "new-wire-id"
+aliases = ["gpt-5.6-sol"]
+"#,
+            )
+            .unwrap()
+            .build()
+            .unwrap();
+        assert!(matches!(
+            policy().resolve_selection(&restored, &changed, &AvailableProviders::all(&changed)),
+            Err(ModelSelectionError::ModelNotFound { .. })
+        ));
     }
 }

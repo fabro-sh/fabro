@@ -4,6 +4,7 @@ use fabro_types::{
     RunSessionMetadata, SessionEvent, SessionEventBody, SessionId, SessionStatus, SessionSummary,
     SessionTurn,
 };
+use lithos_llm::ModelSelection;
 
 /// Ask Fabro session metadata at the session's event position it was read
 /// at.
@@ -12,8 +13,9 @@ use fabro_types::{
 /// holds the durable history, and the events stream it live.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectedRunSession {
-    pub record:   RunSessionMetadata,
-    pub last_seq: u32,
+    pub selection: Option<ModelSelection>,
+    pub record:    RunSessionMetadata,
+    pub last_seq:  u32,
 }
 
 /// Every session the events describe, in session id order.
@@ -54,6 +56,7 @@ impl RunSessionProjection {
                     record.model.clone_from(&props.model);
                     record.provider.clone_from(&props.provider);
                     self.sessions.insert(session_id, ProjectedRunSession {
+                        selection: props.selection.clone(),
                         record,
                         last_seq: event.seq,
                     });
@@ -132,9 +135,10 @@ mod tests {
                 1,
                 session_id,
                 SessionEventBody::Created(SessionCreatedProps {
-                    title:    Some("Ask".to_string()),
-                    model:    Some("test-model".to_string()),
-                    provider: None,
+                    selection: None,
+                    title:     Some("Ask".to_string()),
+                    model:     Some("test-model".to_string()),
+                    provider:  None,
                 }),
             ),
             event(
@@ -200,9 +204,10 @@ mod tests {
                 1,
                 session_id,
                 SessionEventBody::Created(SessionCreatedProps {
-                    title:    None,
-                    model:    None,
-                    provider: None,
+                    selection: None,
+                    title:     None,
+                    model:     None,
+                    provider:  None,
                 }),
             ),
             event(
@@ -241,18 +246,20 @@ mod tests {
                 1,
                 first,
                 SessionEventBody::Created(SessionCreatedProps {
-                    title:    Some("First".to_string()),
-                    model:    None,
-                    provider: None,
+                    selection: None,
+                    title:     Some("First".to_string()),
+                    model:     None,
+                    provider:  None,
                 }),
             ),
             event(
                 1,
                 second,
                 SessionEventBody::Created(SessionCreatedProps {
-                    title:    Some("Second".to_string()),
-                    model:    None,
-                    provider: None,
+                    selection: None,
+                    title:     Some("Second".to_string()),
+                    model:     None,
+                    provider:  None,
                 }),
             ),
             event(
@@ -271,6 +278,40 @@ mod tests {
         assert_eq!(projected.last_seq, 1);
         assert_eq!(project_run_sessions(&events).len(), 2);
         assert!(project_run_session(fabro_types::SessionId::new(), &events).is_none());
+    }
+
+    #[test]
+    fn creation_event_round_trip_preserves_catalog_and_passthrough_intent() {
+        use lithos_llm::ModelSelection;
+        use lithos_llm::catalog::{ModelHandle, ModelId, ProviderId};
+
+        let session_id = fabro_types::SessionId::new();
+        for selection in [
+            Some(ModelHandle::new(ProviderId::new("openai"), ModelId::new("gpt-5.4")).into()),
+            Some(ModelSelection::from_parts(
+                Some("vendor/model:version"),
+                Some("openrouter"),
+            )),
+            None,
+        ] {
+            let created = event(
+                1,
+                session_id,
+                SessionEventBody::Created(SessionCreatedProps {
+                    selection: selection.clone(),
+                    title:     None,
+                    model:     None,
+                    provider:  None,
+                }),
+            );
+            let stored = serde_json::to_string(&created).unwrap();
+            if selection.is_none() {
+                assert!(!stored.contains("selection"));
+            }
+            let restored: SessionEvent = serde_json::from_str(&stored).unwrap();
+            let projected = project_run_session(session_id, &[restored]).unwrap();
+            assert_eq!(projected.selection, selection);
+        }
     }
 
     fn event(seq: u32, session_id: fabro_types::SessionId, body: SessionEventBody) -> SessionEvent {

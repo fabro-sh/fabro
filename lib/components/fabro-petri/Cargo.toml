@@ -19,6 +19,7 @@ workspace = true
 test-support = ["dep:petri_testkit", "dep:tempfile"]
 
 [dependencies]
+fabro-llm = { path = "../fabro-llm" }
 fabro-github = { path = "../fabro-github" }
 percent-encoding.workspace = true
 smol_str.workspace = true

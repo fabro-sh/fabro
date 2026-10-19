@@ -17,11 +17,11 @@
 export interface CreateRunSessionRequest {
     'title'?: string;
     /**
-     * Catalog model ID or alias, optionally qualified as `provider:selector`. A provider-qualified selector may be a canonical model ID, alias, or provider API ID. A value counts as qualified only when the text before the first `:` names a known provider, so model IDs containing a colon stay whole. Legacy `provider/model` references remain accepted. The server stores the canonical model ID.
+     * Model ID or alias, `default`, a provider ID or alias, or a qualified `provider/model` or `provider:model` selector. Provider-only selectors choose that provider\'s configured default. With a separate provider field, the entire model string is opaque on that provider, including slashes, colons, and `default`. Unknown bare models require the default provider\'s passthrough permission. Unknown or unavailable qualified prefixes never fall back to another provider. The server stores canonical catalog identity or explicitly scoped passthrough intent.
      */
     'model'?: string;
     /**
-     * Optional provider pin. Provider-qualified model references remain accepted for compatibility.
+     * Optional exact provider pin. Scopes the entire model string; omit model to select this provider\'s configured default.
      */
     'provider'?: string;
 }

@@ -41,11 +41,11 @@ export interface CreateCompletionRequest {
      */
     'messages': Array<CompletionMessage>;
     /**
-     * Model selector: `provider/model`, a model id or alias, or a provider id. The server picks a ready-provider default when omitted.
+     * Model selector: `provider/model`, `provider:model`, a model ID or alias, `default`, or a provider ID or alias. Provider-only selectors choose that provider\'s configured default. The server picks a ready-provider default when omitted. Unknown bare models require that default provider\'s passthrough permission.
      */
     'model'?: string;
     /**
-     * Optional provider pin for a bare model selector.
+     * Optional exact provider pin. The entire model string is opaque on this provider, including slashes, colons, and `default`; omit model to choose its configured default.
      */
     'provider'?: string;
     /**

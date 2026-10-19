@@ -234,9 +234,10 @@ mod tests {
 
     fn created() -> SessionEventBody {
         SessionEventBody::Created(SessionCreatedProps {
-            title:    Some("Ask Fabro".to_string()),
-            model:    Some("test-model".to_string()),
-            provider: None,
+            selection: None,
+            title:     Some("Ask Fabro".to_string()),
+            model:     Some("test-model".to_string()),
+            provider:  None,
         })
     }
 

@@ -203,6 +203,10 @@ async fn supplied_session_model_alias_is_canonicalized() {
         .expect("session creation event should be recorded");
     assert_eq!(created_event["properties"]["model"], "gpt-5.4");
     assert_eq!(created_event["properties"]["provider"], "openai");
+    assert_eq!(
+        created_event["properties"]["selection"],
+        serde_json::json!({"handle":{"provider":"openai","model":"gpt-5.4"}})
+    );
 }
 
 #[tokio::test]
@@ -234,7 +238,7 @@ async fn invalid_session_model_refs_are_rejected_at_creation() {
     let app = fabro_server::test_support::build_test_router(test_app_state());
     let (run_id, _run_id_workspace) = create_run(&app).await;
 
-    for model in ["openai", "openai/", "anthropic/gpt-5.4"] {
+    for model in ["", "openai/", "anthropic/gpt-5.4"] {
         let response = create_session_response(
             &app,
             &run_id,
@@ -251,7 +255,7 @@ async fn invalid_session_model_refs_are_rejected_at_creation() {
 }
 
 #[tokio::test]
-async fn ambiguous_session_model_refs_are_rejected_at_creation() {
+async fn provider_alias_wins_over_model_alias_at_session_creation() {
     let state = fabro_server::test_support::TestAppStateBuilder::new()
         .llm_overlay_toml("[providers.openai]\naliases = [\"gpt54\"]\n")
         .vault_entries([(EnvVars::OPENAI_API_KEY, "test-openai-api-key")])
@@ -265,12 +269,14 @@ async fn ambiguous_session_model_refs_are_rejected_at_creation() {
         serde_json::json!({ "title": "Ask Fabro", "model": "gpt54" }),
     )
     .await;
-    response_status(
+    let created = response_json(
         response,
-        StatusCode::BAD_REQUEST,
-        format!("POST /api/v1/runs/{run_id}/sessions with ambiguous model gpt54"),
+        StatusCode::CREATED,
+        "provider alias at session creation",
     )
     .await;
+    assert_eq!(created["provider"], "openai");
+    assert_eq!(created["model"], "gpt-5.6-sol");
 }
 
 #[tokio::test]
@@ -305,7 +311,7 @@ async fn session_turn_fails_when_selected_model_provider_becomes_unconfigured() 
         failed["properties"]["error"]
             .as_str()
             .expect("failure event should include an error")
-            .contains("provider 'openai'"),
+            .contains("provider openai"),
         "failure should be for the selected model provider: {failed:?}"
     );
     assert_eq!(failed["properties"]["code"], "model_unavailable");

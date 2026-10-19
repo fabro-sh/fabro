@@ -18,7 +18,7 @@
 import type { SessionEventName } from './session-event-name';
 
 /**
- * One recorded event of an Ask Fabro session: its position in the session (`seq`, from 1), the session and run it belongs to, when it was recorded, the event\'s name and its properties. Every event but `run.session.created` carries the `turn_id` it belongs to in its properties.
+ * One recorded event of an Ask Fabro session: its position in the session (`seq`, from 1), the session and run it belongs to, when it was recorded, the event\'s name and its properties. Every event but `run.session.created` carries the `turn_id` it belongs to in its properties. Creation events also carry an optional `selection` property: a canonical Lithos model handle or explicitly scoped passthrough intent. Older events without it remain readable.
  */
 export interface SessionEvent {
     'seq': number;

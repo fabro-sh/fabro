@@ -1,3 +1,4 @@
+mod completion_selection;
 use std::collections::HashMap;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -10205,7 +10206,7 @@ async fn create_completion_unknown_provider_returns_clear_error() {
     let body = response_json!(response, StatusCode::BAD_REQUEST).await;
     assert_eq!(
         body["errors"][0]["detail"],
-        "unknown model provider 'missing-provider'"
+        "provider `missing-provider` was not found"
     );
 }
 

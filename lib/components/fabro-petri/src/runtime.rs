@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use fabro_http::HttpClient;
+use fabro_llm::selection;
 use fabro_workflow::services::FabroRunToolServices;
 use lithos_llm::Client;
 use lithos_llm::catalog::{Catalog, ProviderId};
@@ -138,6 +139,7 @@ pub fn model_client(
         return Ok(None);
     }
     let mut builder = Client::builder()
+        .resolver(selection::workflow_policy())
         .catalog(catalog)
         .credentials_arc(credentials)
         .enabled_providers(eligible.iter().cloned());
