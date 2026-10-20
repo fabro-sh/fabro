@@ -13,7 +13,7 @@ pub use error::ResolveError;
 use fabro_types::settings::InterpString;
 pub use project::resolve_project;
 pub use run::resolve_run;
-pub use server::resolve_server;
+pub use server::{resolve_sandbox as resolve_server_sandbox, resolve_server};
 pub use workflow::resolve_workflow;
 
 pub(crate) fn require_interp(

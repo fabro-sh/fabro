@@ -1251,12 +1251,13 @@ mod tests {
         let config = plugin_config(
             ProviderKind::try_new("e2b").unwrap(),
             &SandboxPluginSettings {
-                path:        Some("/opt/e2b".to_string()),
-                sha256:      Some("abc".to_string()),
-                dev:         true,
-                args:        vec!["--flag".to_string()],
-                env:         BTreeMap::from([("A".to_string(), "1".to_string())]),
-                inherit_env: vec!["PATH".to_string()],
+                path:         Some("/opt/e2b".to_string()),
+                sha256:       Some("abc".to_string()),
+                dev:          true,
+                args:         vec!["--flag".to_string()],
+                env:          BTreeMap::from([("A".to_string(), "1".to_string())]),
+                inherit_env:  vec!["PATH".to_string()],
+                process_spec: None,
             },
         );
         assert_eq!(

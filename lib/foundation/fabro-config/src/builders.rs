@@ -3,6 +3,7 @@ use std::fmt;
 use std::path::Path;
 
 use fabro_types::settings::run::McpServerSettings;
+use fabro_types::settings::server::ServerSandboxSettings;
 use fabro_types::settings::{RunNamespace, WorkflowNamespace};
 use fabro_types::{ServerSettings, UserSettings, WorkflowSettings};
 use fabro_util::error::SharedError;
@@ -11,7 +12,8 @@ use crate::defaults::DEFAULTS_LAYER;
 use crate::load::load_settings_path;
 use crate::parse::{SettingsSource, validate_settings_source};
 use crate::resolve::{
-    ResolveError, resolve_cli, resolve_project, resolve_run, resolve_server, resolve_workflow,
+    ResolveError, resolve_cli, resolve_project, resolve_run, resolve_server,
+    resolve_server_sandbox, resolve_workflow,
 };
 use crate::user::load_settings_config;
 use crate::{
@@ -84,6 +86,33 @@ impl ServerSettingsBuilder {
     pub fn load_from(path: &Path) -> Result<ServerSettings> {
         let layer = load_settings_path(path, SettingsSource::ActiveSettings)?;
         Self::from_layer(&layer)
+    }
+
+    /// The active settings' `server.sandbox`, resolved without the rest of
+    /// the server namespace. A run worker needs only its sandbox providers,
+    /// and must not fail on server fields it never reads.
+    pub fn load_default_sandbox() -> Result<ServerSandboxSettings> {
+        Self::sandbox_from_layer(&load_settings_config(None)?)
+    }
+
+    pub fn sandbox_from_toml(source: &str) -> Result<ServerSandboxSettings> {
+        Self::sandbox_from_layer(&parse_settings_toml(
+            source,
+            SettingsSource::ActiveSettings,
+        )?)
+    }
+
+    fn sandbox_from_layer(layer: &SettingsLayer) -> Result<ServerSandboxSettings> {
+        let layer = layer.clone().combine(DEFAULTS_LAYER.clone());
+        let mut errors = Vec::new();
+        let sandbox = resolve_server_sandbox(
+            layer
+                .server
+                .as_ref()
+                .and_then(|server| server.sandbox.as_ref()),
+            &mut errors,
+        );
+        finish_result(sandbox, "failed to resolve server sandbox settings", errors)
     }
 
     pub fn from_toml(source: &str) -> Result<ServerSettings> {
@@ -549,7 +578,10 @@ mod tests {
     use fabro_types::settings::cli::OutputVerbosity;
     use fabro_types::settings::run::{ApprovalMode, RunMode};
 
-    use super::{RunSettingsBuilder, WorkflowSettingsBuilder, server_runtime_settings_from_toml};
+    use super::{
+        RunSettingsBuilder, ServerSettingsBuilder, WorkflowSettingsBuilder,
+        server_runtime_settings_from_toml,
+    };
     use crate::{
         CliLayer, CliOutputLayer, ReplaceMap, RunExecutionLayer, RunLayer, RunModelLayer,
         SettingsLayer,
@@ -563,6 +595,32 @@ provider = "local"
         .parse::<SettingsLayer>()
         .expect("seeded catalog should parse")
         .environments
+    }
+
+    #[test]
+    fn sandbox_settings_resolve_without_the_rest_of_the_server_namespace() {
+        let source = r#"
+_version = 1
+
+[server.sandbox.providers.kubernetes]
+path = "/usr/local/bin/sandbox-driver-kubernetes"
+inherit_env = ["HOME", "PATH"]
+"#;
+        assert!(
+            ServerSettingsBuilder::from_toml(source).is_err(),
+            "the full server namespace requires fields this file does not set"
+        );
+        let sandbox = ServerSettingsBuilder::sandbox_from_toml(source)
+            .expect("the sandbox section resolves on its own");
+        let kind = SandboxProviderKind::try_new("kubernetes").expect("a valid kind");
+        let plugin = sandbox.providers.entries[&kind]
+            .plugin
+            .clone()
+            .expect("an unbundled kind carries plugin settings");
+        assert_eq!(plugin.inherit_env, vec![
+            "HOME".to_string(),
+            "PATH".to_string()
+        ]);
     }
 
     #[test]

@@ -76,7 +76,7 @@ use petri_runtime::driver::lifecycle::ExecutionHooks;
 pub use petri_runtime::executor::Retention;
 use petri_runtime::executor::SecretProvider;
 use petri_runtime::{DaytonaResources, LostSandbox, RunOptions, Runtime, SandboxBackend};
-use sandbox_driver::NetworkPolicy;
+use sandbox_driver::{NetworkPolicy, Resources};
 use tokio::fs;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::AbortOnDropHandle;
@@ -172,6 +172,9 @@ pub enum RunError {
     ModelHeaders(#[source] LlmError),
     #[error("the run's sandbox provider `{provider}` is not one Petri serves")]
     UnsupportedProvider { provider: SandboxProviderKind },
+    /// The run's provider is a third-party kind the server cannot register.
+    #[error("{message}")]
+    UnregisteredProvider { message: String },
     #[error("the Daytona CPU allocation must be a non-negative integer: {cpu}")]
     InvalidCpu { cpu: i32 },
     #[error("the run's record could not be opened")]
@@ -224,6 +227,13 @@ pub async fn run(mut request: RunRequest) -> Result<RunOutcome, RunError> {
         // real local workspace for Fabro's checkpoint and artifact hooks.
         SandboxBackend::Host
     } else {
+        if let Some(message) = request
+            .runtime
+            .sandbox
+            .registration_problem(&request.provider)
+        {
+            return Err(RunError::UnregisteredProvider { message });
+        }
         backend(&request.provider).ok_or_else(|| RunError::UnsupportedProvider {
             provider: request.provider.clone(),
         })?
@@ -260,15 +270,22 @@ pub async fn run(mut request: RunRequest) -> Result<RunOutcome, RunError> {
     let mut options = RunOptions::new(&request.run_dir);
     options.run_key = Some(key.clone());
     options.retention = RETENTION;
-    options.sandbox.backend = backend;
     // The host provider manages no networking and refuses any policy but its
     // default, so only container backends receive the run's policy.
     if backend != SandboxBackend::Host {
         options.sandbox.network = network_policy(&request.network);
     }
-    if backend == SandboxBackend::Daytona {
-        options.sandbox.daytona_resources = daytona_resources(&request.resources)?;
+    match &backend {
+        SandboxBackend::Daytona => {
+            options.sandbox.daytona_resources = daytona_resources(&request.resources)?;
+        }
+        // A registered provider sizes each sandbox over its template.
+        SandboxBackend::Registered(_) => {
+            options.sandbox.resources = Some(registered_resources(&request.resources)?);
+        }
+        _ => {}
     }
+    options.sandbox.backend = backend.clone();
     // A normal resume requires its original sandbox to survive.
     options.sandbox.lost_sandbox = LostSandbox::Refuse;
     let resumed = matches!(request.execution, Execution::Resume(_));
@@ -529,12 +546,26 @@ fn daytona_resources(
     })
 }
 
+/// The environment's resources for a registered provider: each one given
+/// replaces the template's, and one left out keeps it.
+fn registered_resources(settings: &EnvironmentResourcesSettings) -> Result<Resources, RunError> {
+    let mut resources = Resources::default();
+    resources.cpu_cores = settings
+        .cpu
+        .map(|cpu| u32::try_from(cpu).map_err(|_| RunError::InvalidCpu { cpu }))
+        .transpose()?;
+    resources.memory_mb = settings.memory.map(mebibytes);
+    resources.disk_mb = settings.disk.map(mebibytes);
+    Ok(resources)
+}
+
 fn mebibytes(size: Size) -> u64 {
     size.as_bytes().div_ceil(1024 * 1024)
 }
 
-/// The sandbox backend for Fabro's provider kind; `None` for a kind Petri
-/// does not serve.
+/// The sandbox backend for Fabro's provider kind: a bundled kind's own,
+/// and for any other the provider registered under it from
+/// `server.sandbox.providers`. `None` for a name Petri reserves.
 pub(crate) fn backend(provider: &SandboxProviderKind) -> Option<SandboxBackend> {
     if *provider == SandboxProviderKind::LOCAL {
         Some(SandboxBackend::Host)
@@ -543,7 +574,7 @@ pub(crate) fn backend(provider: &SandboxProviderKind) -> Option<SandboxBackend> 
     } else if *provider == SandboxProviderKind::DAYTONA {
         Some(SandboxBackend::Daytona)
     } else {
-        None
+        provider.as_str().parse().ok()
     }
 }
 
@@ -652,6 +683,36 @@ async fn write_receipt(run_dir: &std::path::Path, receipt: &petri_execution::Int
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_third_party_kind_runs_on_the_provider_registered_under_it() {
+        let kind = SandboxProviderKind::try_new("kubernetes").expect("a valid kind");
+        assert_eq!(
+            backend(&kind).map(|backend| backend.to_string()),
+            Some("kubernetes".to_string())
+        );
+        assert!(matches!(
+            backend(&kind),
+            Some(SandboxBackend::Registered(_))
+        ));
+        assert_eq!(
+            backend(&SandboxProviderKind::LOCAL),
+            Some(SandboxBackend::Host)
+        );
+    }
+
+    #[test]
+    fn a_registered_providers_size_names_only_what_the_environment_set() {
+        let settings = EnvironmentResourcesSettings {
+            cpu: Some(2),
+            memory: Some("4GB".parse().expect("a size")),
+            ..EnvironmentResourcesSettings::default()
+        };
+        let resources = registered_resources(&settings).expect("valid resources");
+        assert_eq!(resources.cpu_cores, Some(2));
+        assert_eq!(resources.memory_mb, Some(3815));
+        assert_eq!(resources.disk_mb, None, "the template's disk is kept");
+    }
 
     fn outcome_with(status: RunStatus, failure: Option<&str>, complete: bool) -> RunOutcome {
         RunOutcome {

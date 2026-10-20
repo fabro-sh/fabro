@@ -211,7 +211,7 @@ async fn a_finished_runs_host_workspace_is_deleted_once_and_a_held_run_is_refuse
 }
 
 #[tokio::test]
-async fn a_provider_petri_does_not_serve_is_refused_before_the_store_is_opened() {
+async fn a_provider_the_server_has_not_registered_is_refused_before_the_store_is_opened() {
     let store = Arc::new(petri_store::MemoryRunStore::new());
     let error = prune(PruneRequest {
         sandbox: SandboxProviderConfig::default(),
@@ -221,9 +221,9 @@ async fn a_provider_petri_does_not_serve_is_refused_before_the_store_is_opened()
         provider: SandboxProviderKind::try_new("e2b").expect("a valid kind"),
     })
     .await
-    .expect_err("an unknown backend cannot be pruned");
+    .expect_err("a provider with no registration cannot be pruned");
     assert!(
-        matches!(error, PruneError::UnsupportedProvider { ref provider } if provider.as_str() == "e2b"),
+        matches!(error, PruneError::UnregisteredProvider { ref message } if message.contains("`e2b`")),
         "{error}"
     );
 }
