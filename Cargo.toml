@@ -82,7 +82,7 @@ fabro-test = { path = "lib/foundation/fabro-test" }
 # Provider-neutral LLM catalog and client, from git until 0.x is published to
 # crates.io.
 # Temporary adoption revision pending lithoscomputer/lithos-llm#49.
-lithos-llm = { git = "https://github.com/lithoscomputer/lithos-llm", rev = "25ccf13befa43d914b3b734645897e2327ec6737", default-features = false }
+lithos-llm = { git = "https://github.com/lithoscomputer/lithos-llm", rev = "d8edab8d89315be363073dd0de0fe47089f6b557", default-features = false }
 # Deterministic OpenAI twin used by twin-mode E2E tests, the twin lithos-llm
 # verifies its codecs against.
 twin-openai = { git = "https://github.com/lithoscomputer/twins", branch = "main" }
@@ -201,4 +201,4 @@ opt-level = 2
 # Cargo rejects same-source patches; the public HTTPS redirect is a distinct
 # source identity without requiring SSH credentials. Remove with the rev pin.
 [patch."https://github.com/lithoscomputer/lithos-llm"]
-lithos-llm = { git = "https://www.github.com/lithoscomputer/lithos-llm", rev = "25ccf13befa43d914b3b734645897e2327ec6737" }
+lithos-llm = { git = "https://www.github.com/lithoscomputer/lithos-llm", rev = "d8edab8d89315be363073dd0de0fe47089f6b557" }

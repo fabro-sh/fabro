@@ -238,7 +238,15 @@ async fn invalid_session_model_refs_are_rejected_at_creation() {
     let app = fabro_server::test_support::build_test_router(test_app_state());
     let (run_id, _run_id_workspace) = create_run(&app).await;
 
-    for model in ["", "openai/", "anthropic/gpt-5.4"] {
+    for model in [
+        "",
+        "openai",
+        "gemini",
+        "google",
+        "openrouter",
+        "openai/",
+        "anthropic/gpt-5.4",
+    ] {
         let response = create_session_response(
             &app,
             &run_id,
@@ -255,7 +263,27 @@ async fn invalid_session_model_refs_are_rejected_at_creation() {
 }
 
 #[tokio::test]
-async fn provider_alias_wins_over_model_alias_at_session_creation() {
+async fn separate_provider_selects_the_configured_session_default() {
+    let state = fabro_server::test_support::TestAppStateBuilder::new()
+        .env_lookup(|_| None)
+        .llm_overlay_toml("[providers.openai]\ndefault_model = \"gpt-5.4-mini\"\n")
+        .vault_entries([(EnvVars::OPENAI_API_KEY, "test-openai-api-key")])
+        .build();
+    let app = fabro_server::test_support::build_test_router(state);
+    let (run_id, _run_id_workspace) = create_run(&app).await;
+    let response = create_session_response(
+        &app,
+        &run_id,
+        serde_json::json!({"title":"Ask Fabro", "provider":"openai"}),
+    )
+    .await;
+    let created = response_json(response, StatusCode::CREATED, "explicit provider default").await;
+    assert_eq!(created["provider"], "openai");
+    assert_eq!(created["model"], "gpt-5.4-mini");
+}
+
+#[tokio::test]
+async fn model_alias_is_not_reinterpreted_as_a_provider_default() {
     let state = fabro_server::test_support::TestAppStateBuilder::new()
         .llm_overlay_toml("[providers.openai]\naliases = [\"gpt54\"]\n")
         .vault_entries([(EnvVars::OPENAI_API_KEY, "test-openai-api-key")])
@@ -272,11 +300,11 @@ async fn provider_alias_wins_over_model_alias_at_session_creation() {
     let created = response_json(
         response,
         StatusCode::CREATED,
-        "provider alias at session creation",
+        "model alias at session creation",
     )
     .await;
     assert_eq!(created["provider"], "openai");
-    assert_eq!(created["model"], "gpt-5.6-sol");
+    assert_eq!(created["model"], "gpt-5.4");
 }
 
 #[tokio::test]

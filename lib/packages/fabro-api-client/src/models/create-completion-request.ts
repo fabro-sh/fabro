@@ -41,7 +41,7 @@ export interface CreateCompletionRequest {
      */
     'messages': Array<CompletionMessage>;
     /**
-     * Model selector: `provider/model`, `provider:model`, a model ID or alias, `default`, or a provider ID or alias. Provider-only selectors choose that provider\'s configured default. The server picks a ready-provider default when omitted. Unknown bare models require that default provider\'s passthrough permission.
+     * Model selector: `provider/model`, `provider:model`, a model ID or alias, or `default`. Provider-only names and aliases are rejected; set provider and omit model to choose its configured default. Genuine catalog model IDs and aliases still resolve as models. The server picks a ready-provider default when omitted. Unknown bare models require that default provider\'s passthrough permission.
      */
     'model'?: string;
     /**

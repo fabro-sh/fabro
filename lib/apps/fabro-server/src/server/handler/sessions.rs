@@ -1408,7 +1408,7 @@ enabled = true
         let catalog = portable_session_catalog();
         let eligible = catalog.enabled_provider_ids().into_iter().collect();
         for (model, provider, expected_provider, expected_model) in [
-            (Some("openai"), None, "openai", "gpt-5.6-sol"),
+            (None, Some("openai"), "openai", "gpt-5.6-sol"),
             (Some("gpt-56-sol"), None, "openai", "gpt-5.6-sol"),
             (None, Some("openrouter"), "openrouter", "gpt-5.6-sol"),
             (

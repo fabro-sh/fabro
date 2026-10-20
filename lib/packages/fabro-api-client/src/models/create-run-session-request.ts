@@ -17,7 +17,7 @@
 export interface CreateRunSessionRequest {
     'title'?: string;
     /**
-     * Model ID or alias, `default`, a provider ID or alias, or a qualified `provider/model` or `provider:model` selector. Provider-only selectors choose that provider\'s configured default. With a separate provider field, the entire model string is opaque on that provider, including slashes, colons, and `default`. Unknown bare models require the default provider\'s passthrough permission. Unknown or unavailable qualified prefixes never fall back to another provider. The server stores canonical catalog identity or explicitly scoped passthrough intent.
+     * Model ID or alias, `default`, or a qualified `provider/model` or `provider:model` selector. Provider-only names and aliases are rejected; set provider and omit model to choose its configured default. Genuine catalog model IDs and aliases still resolve as models. With a separate provider field, the entire model string is opaque on that provider, including slashes, colons, and `default`. Unknown bare models require the default provider\'s passthrough permission. Unknown or unavailable qualified prefixes never fall back to another provider. The server stores canonical catalog identity or explicitly scoped passthrough intent.
      */
     'model'?: string;
     /**

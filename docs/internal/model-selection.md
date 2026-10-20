@@ -26,22 +26,25 @@ only because Lithos's probe API currently accepts a string selector.
 
 Completions and Ask Fabro session creation share these rules:
 
-- `gemini` or its alias `google` chooses the Gemini default in the server's
-  ready catalog, including operator overlays. An unavailable provider errors.
+- `provider: "gemini"` (or its alias `google`) with model omitted chooses the
+  Gemini default, including operator overlays. An unavailable provider errors.
+  Putting a provider-only name in `model` returns HTTP 400 with instructions to
+  use the provider field; it never selects a default or passes through.
 - Both `openai/gpt-5.6-sol` and `openai:gpt-5.6-sol` are qualified selectors.
 - With `provider: "openrouter"`, `model: "openai/gpt-5.6-sol"` is an opaque
   OpenRouter identifier. `vendor/model:version` and `future-model:latest` also
   remain whole. Supplying `model: "default"` with a provider means a literal
   model named `default`; omit model to select the provider default.
-- Provider names win over bare model aliases. Canonical model IDs beat aliases;
-  Lithos owns priority and tie breaking.
+- Genuine model names and aliases resolve as models even if a provider uses
+  the same name. Canonical model IDs beat aliases; Lithos owns priority and tie
+  breaking. Provider defaults are never inferred from model text.
 - Unknown bare models may pass through on the default provider only when it
   permits them. Disabled providers, unavailable pins, and known models with no
   eligible offering never turn into wire IDs on an unrelated provider.
 
-Sessions previously rejected provider-only selectors and checked conflicts
-between a provider field and a parsed model prefix. They now use the shared
-rules above: the separate provider field is authoritative. Sessions no longer
+Sessions keep rejecting provider-only selectors through the shared resolver.
+The separate provider field is authoritative rather than checking for conflicts
+with a parsed prefix inside the model field. Sessions no longer
 reinterpret an unavailable raw prefix as an aggregator's wire ID, or accept an
 unknown colon prefix as an unqualified model. Supply the aggregator in the
 `provider` field for those opaque IDs. Empty session model values remain errors.
@@ -77,7 +80,7 @@ retry is performed on an unavailable pin.
 
 This adoption depends on unmerged
 [lithos-llm PR #49](https://github.com/lithoscomputer/lithos-llm/pull/49), pinned at
-`25ccf13befa43d914b3b734645897e2327ec6737`. Cargo rejects a git patch to the same
+`d8edab8d89315be363073dd0de0fe47089f6b557`. Cargo rejects a git patch to the same
 source, so a temporary patch uses GitHub's public `www.github.com` HTTPS redirect
 to unify Pebble and Petri with that revision. It requires no SSH credentials.
 After verifying the upstream merge, remove the patch, restore `branch = "main"`,

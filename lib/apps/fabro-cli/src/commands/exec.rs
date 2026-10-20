@@ -585,13 +585,17 @@ mod tests {
             error,
             ModelSelectionError::ProviderUnavailable { .. }
         ));
-        for selector in [
-            None,
-            Some("openai"),
-            Some("openai:gpt-5.6-sol"),
-            Some("gpt-56-sol"),
+        assert!(matches!(
+            resolve_model(&built.client, &args(None, Some("openai"))),
+            Err(ModelSelectionError::ProviderInModel { .. })
+        ));
+        for (provider, model) in [
+            (None, None),
+            (Some("openai"), None),
+            (None, Some("openai:gpt-5.6-sol")),
+            (None, Some("gpt-56-sol")),
         ] {
-            let route = resolve_model(&built.client, &args(None, selector)).unwrap();
+            let route = resolve_model(&built.client, &args(provider, model)).unwrap();
             assert_eq!(route.provider().id(), &builtin::openai());
             assert_eq!(route.model().id().as_str(), "gpt-5.6-sol");
         }

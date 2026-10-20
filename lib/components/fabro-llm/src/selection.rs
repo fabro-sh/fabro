@@ -144,7 +144,7 @@ mod tests {
         let available = AvailableProviders::all(&catalog);
         assert!(matches!(
             policy().resolve_selection(
-                &ModelSelection::from_parts(Some("gemini"), None),
+                &ModelSelection::from_parts(None, Some("gemini")),
                 &catalog,
                 &available
             ),

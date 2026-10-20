@@ -79,13 +79,13 @@ async fn assert_completion_route(selector: Value, provider: &str, model: &str, o
 }
 
 #[tokio::test]
-async fn provider_only_selectors_send_provider_defaults() {
+async fn separate_provider_fields_send_provider_defaults() {
     for (provider, model) in [
         ("gemini", "gemini-3.5-flash"),
         ("openai", "gpt-5.6-sol"),
         ("anthropic", "claude-sonnet-5"),
     ] {
-        assert_completion_route(json!({"model": provider}), provider, model, "").await;
+        assert_completion_route(json!({"provider": provider}), provider, model, "").await;
     }
 }
 
@@ -126,7 +126,7 @@ fn completion_request(selector: &Value) -> Request<Body> {
 #[tokio::test]
 async fn provider_alias_uses_the_operator_configured_default() {
     assert_completion_route(
-        json!({"model": "google"}),
+        json!({"provider": "google"}),
         "gemini",
         "gemini-3.1-flash-lite",
         "[providers.gemini]\ndefault_model = \"gemini-3.1-flash-lite\"\n",
@@ -154,12 +154,7 @@ async fn invalid_or_unavailable_provider_selection_makes_no_outbound_request() {
     });
     for (selector, overlay, detail) in [
         (
-            json!({"model": "gemini"}),
-            "",
-            "provider gemini has no registered adapter",
-        ),
-        (
-            json!({"model": "google"}),
+            json!({"provider": "google"}),
             "",
             "provider gemini has no registered adapter",
         ),
@@ -179,7 +174,7 @@ async fn invalid_or_unavailable_provider_selection_makes_no_outbound_request() {
             "provider `missing-provider` was not found",
         ),
         (
-            json!({"model": "gemini"}),
+            json!({"provider": "gemini"}),
             "[providers.gemini]\nenabled = false\n",
             "provider gemini is disabled in the catalog",
         ),
@@ -261,8 +256,8 @@ async fn inspection_completion_stream_and_count_use_the_same_gemini_wire_model()
     let built = state.resolve_llm_client().await.unwrap();
     let eligible = AvailableProviders::new(built.provider_ids());
     for selection in [
-        ModelSelection::from_parts(Some("gemini"), None),
-        ModelSelection::from_parts(Some("google"), None),
+        ModelSelection::from_parts(Some("gemini-3.1-flash-lite"), None),
+        ModelSelection::from_parts(None, Some("google")),
         ModelSelection::from_parts(None, Some("gemini")),
         ModelSelection::from_parts(Some("gemini:gemini-3.1-flash-lite"), None),
     ] {
@@ -302,7 +297,7 @@ async fn inspection_completion_stream_and_count_use_the_same_gemini_wire_model()
     let app = crate::test_support::build_test_router(state);
     let response = app
         .oneshot(completion_request(
-            &json!({"model":"gemini", "stream":true}),
+            &json!({"provider":"gemini", "stream":true}),
         ))
         .await
         .unwrap();
@@ -344,4 +339,91 @@ capabilities = { text = true }
 "#,
     )
     .await;
+}
+
+#[tokio::test]
+async fn provider_names_in_model_are_rejected_before_dispatch() {
+    let upstream = MockServer::start();
+    let unexpected = upstream.mock(|when, then| {
+        when.method(POST);
+        then.status(500);
+    });
+    let state = TestAppStateBuilder::new()
+        .env_lookup(|_| None)
+        .provider_base_url("anthropic", upstream.url("/anthropic"))
+        .provider_base_url("gemini", upstream.url("/gemini"))
+        .vault_entries([
+            (EnvVars::ANTHROPIC_API_KEY, "test-anthropic"),
+            (EnvVars::GEMINI_API_KEY, "test-gemini"),
+        ])
+        .build();
+    let app = crate::test_support::build_test_router(state);
+    for model in ["gemini", "google", "anthropic", "openai", "openrouter"] {
+        for stream in [false, true] {
+            let response = app
+                .clone()
+                .oneshot(completion_request(&json!({"model":model,"stream":stream})))
+                .await
+                .unwrap();
+            let body = fabro_test::expect_axum_json(
+                response,
+                StatusCode::BAD_REQUEST,
+                "provider in model",
+            )
+            .await;
+            assert_eq!(
+                body["errors"][0]["detail"],
+                format!(
+                    "`{model}` names a provider, not a model; set provider to `{model}` and omit model to use its default"
+                )
+            );
+        }
+    }
+    unexpected.assert_calls(0);
+}
+
+#[tokio::test]
+async fn openrouter_keeps_native_model_ids_and_uses_catalog_wire_ids() {
+    let upstream = MockServer::start();
+    let state = TestAppStateBuilder::new()
+        .env_lookup(|_| None)
+        .provider_base_url("openrouter", upstream.url("/openrouter"))
+        .vault_entries([("OPENROUTER_API_KEY", "test-openrouter")])
+        .build();
+    let app = crate::test_support::build_test_router(state);
+    for (selector, wire) in [
+        (
+            json!({"provider":"openrouter", "model":"gemini-3.5-flash"}),
+            "google/gemini-3.5-flash",
+        ),
+        (
+            json!({"provider":"openrouter", "model":"google/gemini-3.5-flash"}),
+            "google/gemini-3.5-flash",
+        ),
+        (
+            json!({"provider":"openrouter", "model":"some-vendor/new-model:free"}),
+            "some-vendor/new-model:free",
+        ),
+        (
+            json!({"provider":"openrouter"}),
+            "anthropic/claude-sonnet-5",
+        ),
+    ] {
+        let mut receipt = upstream.mock(|when, then| {
+            when.method(POST).path("/openrouter/v1/chat/completions")
+                .json_body_includes(json!({"model":wire}).to_string());
+            then.status(200).json_body(json!({
+                "id":"route", "object":"chat.completion", "model":wire,
+                "choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]
+            }));
+        });
+        let response = app
+            .clone()
+            .oneshot(completion_request(&selector))
+            .await
+            .unwrap();
+        fabro_test::assert_axum_status(response, StatusCode::OK, "OpenRouter model scope").await;
+        receipt.assert_calls(1);
+        receipt.delete();
+    }
 }
