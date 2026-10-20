@@ -10205,8 +10205,166 @@ async fn create_completion_unknown_provider_returns_clear_error() {
     let body = response_json!(response, StatusCode::BAD_REQUEST).await;
     assert_eq!(
         body["errors"][0]["detail"],
-        "unknown model provider 'missing-provider'"
+        "provider `missing-provider` was not found"
     );
+}
+
+fn completion_request(mut body: serde_json::Value) -> Request<Body> {
+    body["messages"] = json!([{
+        "role": "user",
+        "content": [{"type": "text", "text": "hi"}]
+    }]);
+    Request::builder()
+        .method("POST")
+        .uri(api("/completions"))
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn create_completion_provider_names_are_rejected_before_dispatch() {
+    let upstream = MockServer::start();
+    let outbound = upstream.mock(|when, then| {
+        when.method(POST);
+        then.status(500);
+    });
+    let state = TestAppStateBuilder::new()
+        .provider_base_url("anthropic", upstream.base_url())
+        .vault_entries([(EnvVars::ANTHROPIC_API_KEY, "test-anthropic-key")])
+        .build();
+    let app = crate::test_support::build_test_router(state);
+
+    for model in ["gemini", "google"] {
+        for stream in [false, true] {
+            let response = app
+                .clone()
+                .oneshot(completion_request(json!({
+                    "model": model, "stream": stream
+                })))
+                .await
+                .unwrap();
+            let body = response_json!(response, StatusCode::BAD_REQUEST).await;
+            assert_eq!(
+                body["errors"][0]["detail"],
+                format!(
+                    "`{model}` names a provider, not a model; set provider = \"gemini\" and omit model to use its configured default"
+                )
+            );
+        }
+    }
+    outbound.assert_calls(0);
+}
+
+#[tokio::test]
+async fn create_completion_explicit_provider_uses_configured_default() {
+    let upstream = MockServer::start();
+    let completion = upstream.mock(|when, then| {
+        when.method(POST)
+            .path("/v1beta/models/gemini-3.1-pro-preview:generateContent");
+        then.status(200).json_body(json!({
+            "candidates": [{
+                "content": {"role": "model", "parts": [{"text": "OK"}]},
+                "finishReason": "STOP"
+            }],
+            "modelVersion": "gemini-3.1-pro-preview",
+            "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 1}
+        }));
+    });
+    let state = TestAppStateBuilder::new()
+        .llm_overlay_toml("[providers.gemini]\ndefault_model = \"gemini-3.1-pro-preview\"\n")
+        .provider_base_url("gemini", upstream.base_url())
+        .provider_base_url("anthropic", upstream.base_url())
+        .vault_entries([
+            (EnvVars::GEMINI_API_KEY, "test-gemini-key"),
+            (EnvVars::ANTHROPIC_API_KEY, "test-anthropic-key"),
+        ])
+        .build();
+    let app = crate::test_support::build_test_router(state);
+    for selection in [
+        json!({"provider": "gemini", "stream": false}),
+        json!({"provider": "google", "stream": false}),
+        json!({"model": "google/gemini-3.1-pro-preview", "stream": false}),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(completion_request(selection))
+            .await
+            .unwrap();
+        assert_status!(response, StatusCode::OK).await;
+    }
+    completion.assert_calls(3);
+}
+
+#[tokio::test]
+async fn create_completion_openrouter_preserves_wire_model_identity() {
+    let upstream = MockServer::start();
+    let state = TestAppStateBuilder::new()
+        .llm_overlay_toml(
+            "[providers.openrouter]\nenabled = true\ndefault_model = \"gemini-3.5-flash\"\n",
+        )
+        .provider_base_url("openrouter", upstream.base_url())
+        .vault_entries([(EnvVars::OPENROUTER_API_KEY, "test-openrouter-key")])
+        .build();
+    let app = crate::test_support::build_test_router(state);
+    for (model, provider, wire_model) in [
+        (None, Some("openrouter"), "google/gemini-3.5-flash"),
+        (
+            Some("gemini-3.5-flash"),
+            Some("openrouter"),
+            "google/gemini-3.5-flash",
+        ),
+        (
+            Some("google/gemini-3.5-flash"),
+            Some("openrouter"),
+            "google/gemini-3.5-flash",
+        ),
+        (
+            Some("sonnet"),
+            Some("openrouter"),
+            "anthropic/claude-sonnet-5",
+        ),
+        (
+            Some("some-vendor/new-model:free"),
+            Some("openrouter"),
+            "some-vendor/new-model:free",
+        ),
+        (
+            Some("openrouter/google/gemini-3.5-flash"),
+            None,
+            "google/gemini-3.5-flash",
+        ),
+        (Some("unlisted-model"), None, "unlisted-model"),
+        (
+            Some("some-vendor/new-model:free"),
+            None,
+            "some-vendor/new-model:free",
+        ),
+    ] {
+        let mut completion = upstream.mock(|when, then| {
+            when.method(POST)
+                .path("/v1/chat/completions")
+                .json_body_includes(json!({"model": wire_model}).to_string());
+            then.status(200).json_body(json!({
+                "id": "chatcmpl-selection", "model": wire_model,
+                "choices": [{
+                    "message": {"role": "assistant", "content": "OK"},
+                    "finish_reason": "stop"
+                }],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+            }));
+        });
+        let response = app
+            .clone()
+            .oneshot(completion_request(json!({
+                "model": model, "provider": provider, "stream": false
+            })))
+            .await
+            .unwrap();
+        assert_status!(response, StatusCode::OK).await;
+        completion.assert_calls(1);
+        completion.delete();
+    }
 }
 
 #[tokio::test]

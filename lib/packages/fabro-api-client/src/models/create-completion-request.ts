@@ -41,11 +41,11 @@ export interface CreateCompletionRequest {
      */
     'messages': Array<CompletionMessage>;
     /**
-     * Model selector: `provider/model`, a model id or alias, or a provider id. The server picks a ready-provider default when omitted.
+     * Model id, alias, or qualified `provider/model` reference. A bare provider name such as `gemini` or `google` is not a model; use the provider field instead. When omitted, selects the configured default of the specified provider or highest-priority ready provider. Unknown unscoped model ids use the ready-provider default\'s provider, subject to its passthrough policy.
      */
     'model'?: string;
     /**
-     * Optional provider pin for a bare model selector.
+     * Optional provider id or alias. Scopes the entire model string, including slash/colon API ids such as OpenRouter\'s `google/gemini-3.5-flash` or `some-vendor/new-model:free`. When model is omitted, selects this provider\'s configured default.
      */
     'provider'?: string;
     /**

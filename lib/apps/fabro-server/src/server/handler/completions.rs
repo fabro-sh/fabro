@@ -1,8 +1,7 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
-use fabro_llm::lithos_catalog::Catalog;
-use fabro_llm::{ModelSelectionError, Request, selection};
+use fabro_llm::{Client, Request};
+use lithos_llm::resolver::{CatalogResolver, ModelSelectionError, ResolvedRoute};
 use lithos_llm::types::{Message, Role};
 
 use super::super::{
@@ -20,7 +19,6 @@ async fn create_completion(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateCompletionRequest>,
 ) -> Response {
-    let catalog = state.catalog();
     let llm_result = match state.resolve_llm_client().await {
         Ok(result) => result,
         Err(err) => {
@@ -39,21 +37,15 @@ async fn create_completion(
         warn!(provider = %issue.provider, error = %issue.cause, "LLM provider unavailable due to build issue");
     }
     let client = llm_result.client;
-    let eligible: HashSet<ProviderId> = client.available_providers().iter().cloned().collect();
-    let (model_id, selected_provider) = match resolve_request_model(
-        catalog.as_ref(),
-        &eligible,
-        req.model.as_deref(),
-        req.provider,
-    ) {
-        Ok(selection) => selection,
+    let route = match resolve_request_model(&client, req.model.as_deref(), req.provider.as_deref())
+    {
+        Ok(route) => route,
         Err(error) => return ApiError::bad_request(error.to_string()).into_response(),
     };
 
-    // The request body is a lithos `Request` plus `stream`, `system`, and
-    // `schema`. Rebuild it on the resolved `provider/model` route so the
-    // server and the caller agree on the offering.
-    let mut builder = Request::builder().model(format!("{selected_provider}/{model_id}"));
+    // Format only the resolved handle: the separate provider field has already
+    // scoped the entire model string, including opaque slash/colon API IDs.
+    let mut builder = Request::builder().model(route.handle().to_string());
     if let Some(system) = req.system {
         builder = builder.message(Message::text(Role::System, system));
     }
@@ -121,8 +113,8 @@ async fn create_completion(
         Err(error) => return ApiError::bad_request(error.to_string()).into_response(),
     };
     info!(
-        model = %model_id,
-        provider = %selected_provider,
+        model = %route.model().id(),
+        provider = %route.provider().id(),
         "Completion request received"
     );
 
@@ -166,18 +158,36 @@ async fn create_completion(
     }
 }
 
-pub(super) fn resolve_request_model(
-    catalog: &Catalog,
-    eligible: &HashSet<ProviderId>,
-    requested_model: Option<&str>,
-    explicit_provider: Option<String>,
-) -> Result<(String, ProviderId), ModelSelectionError> {
-    let explicit_provider = explicit_provider.map(ProviderId::new);
-    let selected = selection::resolve_selection(
-        catalog,
-        requested_model,
-        explicit_provider.as_ref(),
-        eligible,
-    )?;
-    Ok((selected.model, selected.provider))
+fn resolve_request_model(
+    client: &Client,
+    model: Option<&str>,
+    provider: Option<&str>,
+) -> Result<ResolvedRoute, ModelSelectionError> {
+    let catalog = client.catalog();
+    let available = client.available_providers();
+    match CatalogResolver.resolve_selection(model, provider, catalog, available) {
+        Err(
+            ModelSelectionError::ModelNotFound { .. }
+            | ModelSelectionError::ProviderNotFound { .. },
+        ) if provider.is_none()
+            && model.is_some_and(|selector| {
+                !catalog.is_model_selector(selector)
+                    && selector
+                        .split_once('/')
+                        .is_none_or(|(prefix, _)| catalog.provider(prefix).is_err())
+            }) =>
+        {
+            // Preserve Fabro's unknown-model fallback. Lithos still enforces
+            // the selected provider's passthrough policy; provider-name errors
+            // and unavailable known models never enter this fallback.
+            let default = CatalogResolver.resolve_selection(None, None, catalog, available)?;
+            CatalogResolver.resolve_selection(
+                model,
+                Some(default.provider().id().as_str()),
+                catalog,
+                available,
+            )
+        }
+        result => result,
+    }
 }
