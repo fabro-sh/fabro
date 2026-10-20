@@ -24,7 +24,6 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use chrono::{DateTime, TimeZone as _, Utc};
-use fabro_redact::redact_jsonl_line;
 use fabro_types::{RunId, RunStreamItem, RunStreamItemKind};
 use fabro_util::terminal::Styles;
 use serde_json::Value;
@@ -248,8 +247,8 @@ pub(crate) fn resolves_question(item: &RunStreamItem, question_id: &str) -> bool
 /// The raw line `run events` prints for an item: the envelope as JSON,
 /// redacted.
 pub(crate) fn raw_line(item: &RunStreamItem) -> Result<String> {
-    let line = serde_json::to_string(item)?;
-    Ok(redact_jsonl_line(&line))
+    let redacted = fabro_redact::redact_run_stream_item(item.clone());
+    Ok(serde_json::to_string(&redacted)?)
 }
 
 /// What the pretty printer remembers between items: when each firing
@@ -1337,5 +1336,24 @@ mod tests {
         assert_eq!(decoded.run_id, event.run_id);
         assert_eq!(decoded.stream_seq, event.stream_seq);
         assert_eq!(decoded.item["record"]["body"]["value"], "REDACTED");
+    }
+
+    #[test]
+    fn raw_lines_preserve_generated_run_references() {
+        let run_id = "01M5228EHCT0P73Z4BYGDRWJNS";
+        for (kind, field, text) in [
+            (
+                "run.created",
+                "web_url",
+                format!("http://localhost:3000/runs/{run_id}"),
+            ),
+            ("run.branch", "run_branch", format!("fabro/run/{run_id}")),
+        ] {
+            let mut event = platform(1, &json!({"kind": kind, field: text}));
+            event.run_id = run_id.parse().expect("a valid run ID");
+            let line = raw_line(&event).expect("a redacted line");
+            let decoded: RunStreamItem = serde_json::from_str(&line).expect("a valid stream item");
+            assert_eq!(decoded, event);
+        }
     }
 }

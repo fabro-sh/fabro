@@ -2586,6 +2586,7 @@ name = "fabro-redact"
 version = "0.392.0-nightly.0"
 dependencies = [
  "aho-corasick",
+ "fabro-types",
  "pebble-coding-agent",
  "ref-cast",
  "regex",

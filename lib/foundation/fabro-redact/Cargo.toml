@@ -14,6 +14,7 @@ workspace = true
 
 [dependencies]
 aho-corasick.workspace = true
+fabro-types = { path = "../fabro-types" }
 # The `Redactor` seam pebble's coding agent and its sandbox-driver adapter
 # call on text a process wrote; `SecretRedactor` is this crate's scanner
 # behind it.

@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use fabro_api::types::PaginatedRunStreamList;
 use fabro_petri::petri::EVENT_CONTRACT_VERSION;
-use fabro_redact::redact_json_value;
 use fabro_types::RunStreamItem;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::time::{self, Instant};
@@ -17,7 +16,7 @@ use super::super::{
     ApiError, AppState, BroadcastStream, Event, HashSet, IntoResponse, Json, KeepAlive,
     PaginationMeta, Path, Query, RequireRunManagementTarget, RequiredUser, Response, Router, RunId,
     Sse, State, StatusCode, StreamExt, UnboundedReceiverStream, broadcast, get, mpsc,
-    parse_run_id_path, redact_jsonl_line,
+    parse_run_id_path,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -158,9 +157,10 @@ async fn list_run_stream(state: &AppState, id: RunId, after: u64, limit: usize) 
             // The same items the attached stream serves, redacted the same
             // way, so a client that pages the listing after a stream sees
             // what the stream showed.
-            for item in &mut items {
-                item.item = redact_json_value(std::mem::take(&mut item.item));
-            }
+            let items = items
+                .into_iter()
+                .map(fabro_redact::redact_run_stream_item)
+                .collect();
             Json(PaginatedRunStreamList {
                 data:                   items,
                 meta:                   PaginationMeta {
@@ -178,8 +178,7 @@ async fn list_run_stream(state: &AppState, id: RunId, after: u64, limit: usize) 
 }
 
 fn sse_event_from_stream_item(item: &RunStreamItem) -> Option<Event> {
-    let data = serde_json::to_string(item).ok()?;
-    let data = redact_jsonl_line(&data);
+    let data = serde_json::to_string(&fabro_redact::redact_run_stream_item(item.clone())).ok()?;
     Some(Event::default().data(data))
 }
 
@@ -319,5 +318,51 @@ async fn attach_run_events(
     match ensure_run_exists(&state, &id).await {
         Ok(()) => attach_run_stream(state, id, params.after).await,
         Err(response) => response,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::convert::Infallible;
+
+    use axum::body;
+    use fabro_types::RunStreamItemKind;
+    use serde_json::json;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn sse_preserves_generated_run_references_and_redacts_content() {
+        let run_id = "01M5228EHCT0P73Z4BYGDRWJNS";
+        for (kind, field, text) in [
+            (
+                "run.created",
+                "web_url",
+                format!("http://localhost:3000/runs/{run_id}"),
+            ),
+            ("run.branch", "run_branch", format!("fabro/run/{run_id}")),
+        ] {
+            let item = RunStreamItem {
+                run_id:      run_id.parse().unwrap(),
+                stream_seq:  1,
+                kind:        RunStreamItemKind::Platform,
+                id:          "1".to_string(),
+                recorded_at: 0,
+                item:        json!({"record": {"kind": kind, field: text, "content": run_id}}),
+            };
+            let event = sse_event_from_stream_item(&item).unwrap();
+            let response =
+                Sse::new(tokio_stream::iter([Ok::<_, Infallible>(event)])).into_response();
+            let bytes = body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let wire = std::str::from_utf8(&bytes).unwrap();
+            let data = wire.trim().strip_prefix("data:").unwrap().trim();
+            let decoded: RunStreamItem = serde_json::from_str(data).unwrap();
+            assert_eq!(decoded.run_id, item.run_id);
+            assert_eq!(decoded.item["record"][field], text);
+            assert_eq!(decoded.item["record"]["content"], "REDACTED");
+            assert_eq!(decoded, fabro_redact::redact_run_stream_item(item));
+        }
     }
 }

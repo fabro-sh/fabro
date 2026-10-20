@@ -65,7 +65,6 @@ use fabro_petri::controls::{RunControls, SteerError};
 use fabro_petri::projector::Projector;
 use fabro_petri::providers::SandboxProviderConfig;
 use fabro_petri::prune::{self, PruneError, PruneRequest};
-use fabro_redact::redact_jsonl_line;
 use fabro_slack::client::{PostedMessage as SlackPostedMessage, SlackClient};
 use fabro_slack::config::{
     SlackCredentialResolution,

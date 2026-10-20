@@ -68,6 +68,13 @@ Clients read `GET /runs/{id}/events?after=<stream_seq>` for a page and the
 attach stream for live items; `fabro-client` exposes `list_run_stream`,
 `list_run_stream_until` and `attach_run_stream`.
 
+Public stream output uses `fabro-redact::redact_run_stream_item` for the
+listing, SSE, and CLI raw output. It preserves the envelope's run ID in
+the generated `run.created.web_url` and `run.branch.run_branch` so entropy
+scanning cannot break these references. Other content is scanned normally,
+including arbitrary occurrences of the same ID; credential patterns still
+apply to the complete generated fields.
+
 When matching items:
 
 - A Petri event's name is `item.record.body.event` (`run.started`,
