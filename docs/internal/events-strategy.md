@@ -32,6 +32,16 @@ Tracing logs are separate. Tracing is developer diagnostics; the stream is
 the product-facing record other systems consume. If something must be
 visible after a reattach, it has to be a record, not a log line.
 
+`run.failure_details` records sanitized supporting diagnostics for a specific
+failure without deciding the run's status. The projector attaches the existing
+`FailureDetail` only when its recorded engine message and finalization code
+match the terminal failure. Either log can arrive first. Git checkout,
+checkpoint, and final publication failures use this path; checkpoint pushes
+that will be retried do not record terminal diagnostics. Command output is a
+bounded tail (8 KiB per stream), with explicit truncation flags, not a complete
+command log. The run state API, CLI conclusion, and run details page expose it;
+tracing carries the summary rather than command output.
+
 ## Recording a fact
 
 Petri's own facts need nothing from Fabro: the engine records them and the

@@ -39,7 +39,7 @@ use std::str::FromStr;
 use chrono::{DateTime, TimeZone as _, Utc};
 pub(crate) use coordinator::{finished_status, stall_message};
 use fabro_store::StagePosition;
-use fabro_store::platform_records::StoredPlatformRecord;
+use fabro_store::platform_records::{RunFailureDetailsRecord, StoredPlatformRecord};
 use fabro_types::{
     FailureReason, RunControlAction, RunDiff, RunId, RunProjection, RunStatus, StageId,
     StageProjection,
@@ -105,49 +105,55 @@ pub struct RecordHealth {
 pub struct FoldState {
     /// Stages by firing.
     #[serde(default)]
-    pub stages:           BTreeMap<FiringKey, StageRef>,
+    pub stages:            BTreeMap<FiringKey, StageRef>,
     /// Labels taken, so a second firing with the same name and visit gets
     /// its own.
     #[serde(default)]
-    pub labels:           BTreeSet<String>,
+    pub labels:            BTreeSet<String>,
     #[serde(default)]
-    pub invocations:      BTreeMap<u64, InvocationRef>,
+    pub invocations:       BTreeMap<u64, InvocationRef>,
     /// Which invocation each execution belongs to.
     #[serde(default)]
-    pub executions:       BTreeMap<u64, u64>,
+    pub executions:        BTreeMap<u64, u64>,
     /// Open questions by id: the firing that asked.
     #[serde(default)]
-    pub questions:        BTreeMap<String, FiringKey>,
+    pub questions:         BTreeMap<String, FiringKey>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub root:             Option<u64>,
+    pub root:              Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub started_at:       Option<u64>,
+    pub started_at:        Option<u64>,
     /// The run's recorded finish, when Petri recorded one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub finished:         Option<String>,
+    pub finished:          Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finalization_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_message:   Option<String>,
+    #[serde(default)]
+    pub failure_details:   Vec<RunFailureDetailsRecord>,
     /// The run branch and base sha, when they arrive before `run.started`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub run_branch:       Option<String>,
+    pub run_branch:        Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_sha:         Option<String>,
+    pub base_sha:          Option<String>,
     #[serde(default)]
-    pub checkpoints:      u32,
+    pub checkpoints:       u32,
     /// The run's diff as its `run.diff` record gave it, whichever side of
     /// the run's finish it arrived on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub run_diff:         Option<RunDiff>,
+    pub run_diff:          Option<RunDiff>,
     #[serde(default)]
-    pub health:           RecordHealth,
+    pub health:            RecordHealth,
     /// Firings whose attempt has recorded a finish: what a position-keyed
     /// platform record may be streamed behind.
     #[serde(default)]
-    pub finished_firings: BTreeSet<FiringKey>,
+    pub finished_firings:  BTreeSet<FiringKey>,
     /// Whether the run's sandbox still exists after its release
     /// (`scope.released` `retained`): kept stopped, or deleted. Absent until
     /// the root invocation's lease was released. The view carries the same
     /// fact as `RunSandboxInstance.retained`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sandbox_retained: Option<bool>,
+    pub sandbox_retained:  Option<bool>,
 }
 
 impl FoldState {
@@ -179,6 +185,26 @@ impl RunView {
         match item {
             Item::Platform(record) => self.fold_platform(record, stream_seq),
             Item::Petri(event) => self.fold_petri(event),
+        }
+        self.attach_failure_details();
+    }
+
+    fn attach_failure_details(&mut self) {
+        let Some(failure) = self
+            .projection
+            .as_mut()
+            .and_then(|projection| projection.conclusion.as_mut())
+            .and_then(|conclusion| conclusion.failure.as_mut())
+        else {
+            return;
+        };
+        // Match the actual terminal error and its channel, not just the most
+        // recent diagnostic. Retried pushes and unrelated failures cannot leak in.
+        if let Some(record) = self.state.failure_details.iter().rev().find(|record| {
+            record.finalization_code == self.state.finalization_code
+                && Some(&record.message) == self.state.failure_message.as_ref()
+        }) {
+            failure.detail = record.detail.clone();
         }
     }
 

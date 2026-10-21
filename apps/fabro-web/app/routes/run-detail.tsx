@@ -51,6 +51,7 @@ import {
   RunDetailDockedControls,
 } from "./run-detail/docked-controls";
 import { RunDetailHeader } from "./run-detail/header";
+import { RunFailureDetails } from "./run-detail/failure-details";
 import {
   createLifecycleToastState,
   lifecycleActionVisibility,
@@ -381,6 +382,8 @@ export default function RunDetail({ params }: { params: { id: string } }) {
               askTrigger,
             }}
           />
+
+          <RunFailureDetails failure={runStateQuery.data?.conclusion?.failure?.detail} />
 
           {retryDialogOpen && (
             <RetryRunDialog

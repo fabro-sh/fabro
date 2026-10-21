@@ -268,6 +268,23 @@ pub(crate) fn print_run_conclusion(
     if let Some(ref failure) = conclusion.failure {
         let rendered = render_with_causes(&failure.detail.message, &failure.detail.causes);
         fabro_util::printerr!(printer, "Failure:   {}", styles.red.apply_to(rendered));
+        if let Some(output) = &failure.detail.exec_output_tail {
+            for (label, text, truncated) in [
+                ("Standard error", &output.stderr, output.stderr_truncated),
+                ("Standard output", &output.stdout, output.stdout_truncated),
+            ] {
+                if text.is_none() && !truncated {
+                    continue;
+                }
+                fabro_util::printerr!(printer, "{label}:");
+                if truncated {
+                    fabro_util::printerr!(printer, "[earlier output omitted]");
+                }
+                if let Some(text) = text {
+                    fabro_util::printerr!(printer, "{text}");
+                }
+            }
+        }
     }
 
     if pushed_branch.is_some() || pr_url.is_some() {

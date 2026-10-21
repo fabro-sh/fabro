@@ -14,11 +14,12 @@ use fabro_checkpoint::trailer::{self, Trailer};
 use fabro_store::platform_records::{DecisionRef, OperationKey};
 use fabro_types::settings::run::{RunCheckpointSettings, RunNamespace};
 use fabro_types::{DiffSummary, GitIdentitySource, SandboxProviderKind};
-use petri_runtime::executor::{ExecEnv, OutputMode, ProcessSpec, Sig};
+use petri_runtime::executor::{EnvError, ExecEnv, OutputMode, ProcessSpec, Sig};
 use petri_runtime::ir::LogStream;
 use tokio::process::Command;
 use tokio::{fs, time};
 
+use crate::diagnostics::CommandOutput;
 use crate::source::{RunSource, SourceRevision};
 
 /// The failure class of a stage whose checkpoint commit failed: fatal to
@@ -187,12 +188,21 @@ pub enum CheckpointError {
         workspace: String,
         path:      PathBuf,
     },
-    #[error("git {action} failed ({status}): {detail}")]
+    #[error("git {action} failed ({status})")]
     Command {
         action: String,
         status: String,
-        detail: String,
+        output: CommandOutput,
     },
+    #[error("git {action}: {status}")]
+    Sandbox {
+        action: String,
+        status: &'static str,
+        #[source]
+        source: EnvError,
+    },
+    #[error("the sandbox offered no byte stream for git {action}")]
+    NoOutput { action: String },
     #[error("git {action} could not run")]
     Spawn {
         action: String,
@@ -257,7 +267,7 @@ impl Site {
             Err(CheckpointError::Command {
                 action: "push".to_owned(),
                 status: "non-zero exit".to_owned(),
-                detail: detail(&output.stderr),
+                output: CommandOutput::capture(&output.stdout, &output.stderr, env),
             })
         }
     }
@@ -441,21 +451,15 @@ impl RunWorkspaces {
             args.push(depth);
         }
         args.extend([remote, "--", refspec]);
-        let output = Self::run_with(
-            site,
-            "fetch",
-            &args,
-            &source.fetch_env().await,
-            SOURCE_FETCH_TIMEOUT,
-        )
-        .await?;
+        let env = source.fetch_env().await;
+        let output = Self::run_with(site, "fetch", &args, &env, SOURCE_FETCH_TIMEOUT).await?;
         if output.success {
             Ok(())
         } else {
             Err(CheckpointError::Command {
                 action: "fetch".to_string(),
                 status: "non-zero exit".to_string(),
-                detail: detail(&output.stderr),
+                output: CommandOutput::capture(&output.stdout, &output.stderr, &env),
             })
         }
     }
@@ -814,7 +818,7 @@ impl RunWorkspaces {
             Err(CheckpointError::Command {
                 action: action.to_string(),
                 status: "non-zero exit".to_string(),
-                detail: detail(&output.stderr),
+                output: CommandOutput::capture(&output.stdout, &output.stderr, &[]),
             })
         }
     }
@@ -934,18 +938,16 @@ impl RunWorkspaces {
         let mut handle = env
             .spawn(spec)
             .await
-            .map_err(|error| CheckpointError::Command {
+            .map_err(|error| CheckpointError::Sandbox {
                 action: action.to_string(),
-                status: "spawn failed".to_string(),
-                detail: error.to_string(),
+                status: "spawn failed",
+                source: error,
             })?;
         let Some(mut chunks) = handle.bytes() else {
             let _ = handle.signal(Sig::Kill).await;
             let _ = handle.wait().await;
-            return Err(CheckpointError::Command {
+            return Err(CheckpointError::NoOutput {
                 action: action.to_string(),
-                status: "no output stream".to_string(),
-                detail: "the sandbox offered no byte stream for the command".to_string(),
             });
         };
         let drain = tokio::spawn(async move {
@@ -962,10 +964,10 @@ impl RunWorkspaces {
         let status = handle
             .wait()
             .await
-            .map_err(|error| CheckpointError::Command {
+            .map_err(|error| CheckpointError::Sandbox {
                 action: action.to_string(),
-                status: "wait failed".to_string(),
-                detail: error.to_string(),
+                status: "wait failed",
+                source: error,
             })?;
         let (stdout, stderr) = drain.await.unwrap_or_default();
         if status.timed_out {
@@ -998,24 +1000,6 @@ fn numstat_summary(numstat: &str) -> DiffSummary {
         summary.deletions += deletions.parse::<i64>().unwrap_or(0);
     }
     summary
-}
-
-/// The tail of git's stderr for an error message: what the run's record
-/// carries about the failure, bounded.
-fn detail(stderr: &[u8]) -> String {
-    const LIMIT: usize = 512;
-    let text = String::from_utf8_lossy(stderr);
-    let text = text.trim();
-    if text.is_empty() {
-        return "no output".to_string();
-    }
-    let start = text.len().saturating_sub(LIMIT);
-    let start = text
-        .char_indices()
-        .map(|(index, _)| index)
-        .find(|index| *index >= start)
-        .unwrap_or(0);
-    text[start..].to_string()
 }
 
 #[cfg(test)]
@@ -1334,12 +1318,5 @@ mod tests {
             }
         );
         assert_eq!(numstat_summary(""), DiffSummary::default());
-    }
-
-    #[test]
-    fn detail_keeps_the_tail_of_long_output() {
-        let long = "x".repeat(600);
-        assert_eq!(detail(long.as_bytes()).len(), 512);
-        assert_eq!(detail(b""), "no output");
     }
 }

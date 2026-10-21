@@ -102,6 +102,9 @@ impl RunView {
                 finalization_failure,
             } => {
                 self.state.finished = Some(status.to_string());
+                self.state.finalization_code = finalization_failure
+                    .as_ref()
+                    .map(|failure| failure.code.to_string());
                 self.conclude(
                     status.to_string().as_str(),
                     finalization_failure.as_ref(),
@@ -161,6 +164,7 @@ impl RunView {
             .map(|failure| failure.message.clone())
             .or_else(|| root.and_then(|root| stall_message(root.cancel_reason.as_ref())))
             .or_else(|| root.and_then(|root| root.failure.clone()));
+        self.state.failure_message.clone_from(&failure_message);
         let run_status = finished_status(status, finalization_failure);
         let (outcome, failure) = match run_status {
             RunStatus::Failed {

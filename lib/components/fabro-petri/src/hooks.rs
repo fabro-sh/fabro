@@ -89,7 +89,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use fabro_store::platform_records::{
     ArtifactCollectedRecord, CheckpointRecord, GitIdentityRecord, OperationKey, RunBranchRecord,
-    RunDiffRecord,
+    RunDiffRecord, RunFailureDetailsRecord,
 };
 use fabro_store::{PlatformRecord, PlatformRecordKind, StagePosition};
 use fabro_types::settings::run::RunNamespace;
@@ -120,10 +120,10 @@ use crate::checkpoint::{
 };
 use crate::fork::{self, ForkError};
 use crate::platform_records::{PlatformRecordError, PlatformRecords};
-use crate::projection;
 use crate::recovery::{self, Plan, RecoveryError, RestoreTarget};
 use crate::source::RunSource;
 use crate::workspace::{self, WorkspaceLookup, WorkspaceLookupError};
+use crate::{diagnostics, projection};
 
 /// The note kind the hooks record on a firing about its checkpoint.
 pub const CHECKPOINT_NOTE: &str = "fabro.checkpoint";
@@ -264,14 +264,15 @@ pub struct Publication {
 /// The platform's end-of-run publication: what a successful run's work does
 /// after its last stage and before its terminal record, such as pushing the
 /// run branch and opening a pull request. An `Err` fails the run with the
-/// message, as a failed publish did on the legacy executor.
+/// message, as a failed publish did on the legacy executor. This is internal
+/// application orchestration: errors retain their sources through finalization.
 #[async_trait::async_trait]
 pub trait RunPublisher: Send + Sync {
     /// Push one checkpoint. A failure is retried by later checkpoints and
     /// final publication, which must succeed for the run to succeed.
-    async fn push(&self, site: &Site, branch: &str, sha: &str) -> Result<(), String>;
+    async fn push(&self, site: &Site, branch: &str, sha: &str) -> anyhow::Result<()>;
 
-    async fn publish(&self, publication: &Publication) -> Result<(), String>;
+    async fn publish(&self, publication: &Publication) -> anyhow::Result<()>;
 }
 
 impl HooksSpec {
@@ -546,6 +547,33 @@ impl FabroHooks {
     #[must_use]
     pub fn checkpoint_failure(&self) -> Option<String> {
         sync::lock(&self.failure).clone()
+    }
+
+    async fn record_failure_details(
+        &self,
+        error: &(dyn std::error::Error + Send + Sync + 'static),
+        message: &str,
+        finalization_code: Option<&str>,
+    ) -> Result<(), HookError> {
+        let Some(detail) = diagnostics::failure_detail(error) else {
+            return Ok(());
+        };
+        self.records
+            .append(
+                &self.run_id,
+                &PlatformRecord::RunFailureDetails(RunFailureDetailsRecord {
+                    message: message.to_string(),
+                    finalization_code: finalization_code.map(str::to_owned),
+                    detail,
+                }),
+                None,
+            )
+            .await
+            .map_err(|source| HookError::Write {
+                kind: "run.failure_details",
+                source,
+            })?;
+        Ok(())
     }
 
     /// The run's workspaces on this host, as the hooks reach them.
@@ -862,15 +890,26 @@ impl FabroHooks {
             }
             Ok(None) => Ok(()),
             Err(error) => {
+                let rendered = collect_chain(&error).join(": ");
                 warn!(
                     run_id = %self.run_id,
                     workspace,
-                    error = %error,
+                    error = %rendered,
                     "the run's repository could not be checked out"
                 );
-                Err(ScopeAcquiredError::new(format!(
-                    "the run's repository could not be checked out: {error}"
-                )))
+                let message = format!("the run's repository could not be checked out: {rendered}");
+                // Petri adds this context when a scope acquisition fails. Match
+                // its rendered execution failure exactly, never by substring.
+                self.record_failure_details(
+                    &error,
+                    &format!(
+                        "could not acquire the environment: host scope_acquired failed: {message}"
+                    ),
+                    None,
+                )
+                .await
+                .map_err(|error| ScopeAcquiredError::new(error.render()))?;
+                Err(ScopeAcquiredError::new(message))
             }
         }
     }
@@ -1533,6 +1572,9 @@ impl ExecutionHooks for FabroHooks {
                     error = %message,
                     "checkpoint failed; the run ends"
                 );
+                self.record_failure_details(&error, &message, Some(CHECKPOINT_FAILED_CLASS))
+                    .await
+                    .map_err(|error| PrepareError::fatal(error.render()))?;
                 self.fail_run(&message);
                 prepared.adjustment.status = Some(Status::Failure(
                     FailureInfo::new(message.clone()).with_class(CHECKPOINT_FAILED_CLASS),
@@ -1618,11 +1660,7 @@ impl ExecutionHooks for FabroHooks {
         context: &HookContext,
         finished: RunFinished,
     ) -> Result<(), FinalizationFailure> {
-        let diff = self.record_run_diff().await.map_err(|error| {
-            let message = error.render();
-            warn!(run_id = %self.run_id, error = %message, "the run's diff was not recorded");
-            message
-        });
+        let diff = self.record_run_diff().await;
         // A failed checkpoint fails the run whatever its execution status,
         // and its work is never published.
         if let Some(message) = self.checkpoint_failure() {
@@ -1630,8 +1668,13 @@ impl ExecutionHooks for FabroHooks {
         }
         let publication = match diff {
             Ok(publication) => publication,
-            Err(message) => {
+            Err(error) => {
+                let message = error.render();
+                warn!(run_id = %self.run_id, error = %message, "the run's diff was not recorded");
                 if self.publisher.is_some() && finished.status == RunStatus::Success {
+                    self.record_failure_details(&error, &message, Some("publish_failed"))
+                        .await
+                        .map_err(|error| projection::publish_failure(error.render()))?;
                     return Err(projection::publish_failure(message));
                 }
                 None
@@ -1644,14 +1687,14 @@ impl ExecutionHooks for FabroHooks {
                         "the run has no recorded branch and checkpoint to publish",
                     )
                 })?;
-                publisher.publish(&publication).await.map_err(|message| {
-                    warn!(
-                        run_id = %self.run_id,
-                        error = %message,
-                        "the run's publication failed"
-                    );
-                    projection::publish_failure(message)
-                })?;
+                if let Err(error) = publisher.publish(&publication).await {
+                    let message = format!("{error:#}");
+                    warn!(run_id = %self.run_id, error = %message, "the run's publication failed");
+                    self.record_failure_details(error.as_ref(), &message, Some("publish_failed"))
+                        .await
+                        .map_err(|error| projection::publish_failure(error.render()))?;
+                    return Err(projection::publish_failure(message));
+                }
                 info!(
                     run_id = %self.run_id,
                     branch = publication.run_branch,

@@ -19,6 +19,8 @@ workspace = true
 test-support = ["dep:petri_testkit", "dep:tempfile"]
 
 [dependencies]
+base64.workspace = true
+fabro-redact = { path = "../../foundation/fabro-redact" }
 fabro-github = { path = "../fabro-github" }
 percent-encoding.workspace = true
 smol_str.workspace = true

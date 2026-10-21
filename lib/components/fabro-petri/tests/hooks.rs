@@ -719,6 +719,31 @@ async fn a_failed_checkpoint_ends_the_run_with_no_route() {
         .clone()
         .expect("the finish commits the checkpoint failure");
     assert_eq!(committed.code, CHECKPOINT_FAILED_CLASS);
+    let details = harness
+        .records
+        .records(&harness.run_id)
+        .into_iter()
+        .find_map(|stored| match stored.record {
+            PlatformRecord::RunFailureDetails(record) => Some(record),
+            _ => None,
+        })
+        .expect("checkpoint output is durable");
+    assert_eq!(details.message, committed.message);
+    assert_eq!(
+        details.finalization_code.as_deref(),
+        Some(CHECKPOINT_FAILED_CLASS)
+    );
+    assert!(
+        details
+            .detail
+            .exec_output_tail
+            .as_ref()
+            .unwrap()
+            .stderr
+            .as_ref()
+            .unwrap()
+            .contains("invalid gitfile format")
+    );
     let stored = engine::outcome_of(&*harness.store, &harness.run_id.to_string())
         .await
         .expect("the finished run reads back");
@@ -1217,6 +1242,34 @@ async fn an_unavailable_revision_fails_the_checkout() {
     assert!(error.to_string().contains("git fetch failed"), "{error}");
 }
 
+#[tokio::test]
+async fn checkout_failure_details_match_the_terminal_engine_message() {
+    let mut harness = Harness::new().await;
+    harness.source.as_mut().unwrap().revision = SourceRevision::Branch("missing".to_string());
+    let outcome = harness.run(&workflow("", "start -> exit"), SETTINGS).await;
+    assert_eq!(outcome.status, RunStatus::Failed, "{outcome:?}");
+    let details = harness
+        .records
+        .records(&harness.run_id)
+        .into_iter()
+        .find_map(|stored| match stored.record {
+            PlatformRecord::RunFailureDetails(record) => Some(record),
+            _ => None,
+        })
+        .expect("checkout output is durable");
+    assert_eq!(details.message, outcome.failure.unwrap());
+    assert!(details.finalization_code.is_none());
+    assert!(
+        details
+            .detail
+            .exec_output_tail
+            .unwrap()
+            .stderr
+            .unwrap()
+            .contains("missing")
+    );
+}
+
 /// A publisher that records what it was handed and answers as told.
 struct RecordingPublisher {
     pushed:    std::sync::Mutex<Vec<(Site, String, String)>>,
@@ -1247,19 +1300,21 @@ fn file_source(origin: &Path, branch: &str, depth: Option<u32>) -> RunSource {
 
 #[async_trait::async_trait]
 impl RunPublisher for RecordingPublisher {
-    async fn push(&self, site: &Site, branch: &str, sha: &str) -> Result<(), String> {
+    async fn push(&self, site: &Site, branch: &str, sha: &str) -> anyhow::Result<()> {
         self.pushed
             .lock()
             .unwrap()
             .push((site.clone(), branch.to_string(), sha.to_string()));
         Ok(())
     }
-    async fn publish(&self, publication: &Publication) -> Result<(), String> {
+    async fn publish(&self, publication: &Publication) -> anyhow::Result<()> {
         self.published
             .lock()
             .expect("the ledger locks")
             .push(publication.clone());
-        self.fail.clone().map_or(Ok(()), Err)
+        self.fail
+            .clone()
+            .map_or(Ok(()), |message| Err(anyhow::anyhow!(message)))
     }
 }
 
@@ -1396,9 +1451,67 @@ struct OriginPublisher {
     pushed: std::sync::Mutex<Vec<String>>,
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn rejected_git_publication_retains_output_in_durable_failure_details() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let mut harness = Harness::new().await;
+    let (origin, _) = upstream(&harness.run_dir.with_file_name("rejecting-upstream"), 1).await;
+    let hook = origin.join("hooks/pre-receive");
+    let rejection = format!(
+        "GH013: Repository rule violations found.\n{}\nCannot create ref due to creations being restricted.\n",
+        "rule explanation\n".repeat(80)
+    );
+    fs::write(
+        &hook,
+        format!("#!/bin/sh\ncat >&2 <<'REJECTION'\n{rejection}REJECTION\nexit 1\n"),
+    )
+    .await
+    .unwrap();
+    fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755))
+        .await
+        .unwrap();
+    harness.source = Some(file_source(&origin, "main", Some(1)));
+    harness.sandboxed = true;
+    harness.publisher = Some(Arc::new(OriginPublisher {
+        origin: origin.to_str().unwrap().to_owned(),
+        pushed: std::sync::Mutex::new(Vec::new()),
+    }));
+    let outcome = harness
+        .run(
+            &published_workflow("script=\"echo edited >> README.md\""),
+            SETTINGS,
+        )
+        .await;
+    assert!(outcome.publish_failed, "{outcome:?}");
+    let records = harness.records.records(&harness.run_id);
+    let details: Vec<_> = records
+        .iter()
+        .filter_map(|stored| match &stored.record {
+            PlatformRecord::RunFailureDetails(record) => Some(record),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        details.len(),
+        1,
+        "checkpoint pushes are retried, not terminal failures"
+    );
+    let record = details[0];
+    assert_eq!(record.message, outcome.failure.unwrap());
+    assert_eq!(record.finalization_code.as_deref(), Some("publish_failed"));
+    let output = record.detail.exec_output_tail.as_ref().unwrap();
+    let stderr = output.stderr.as_ref().unwrap();
+    assert!(stderr.contains("GH013: Repository rule violations found."));
+    assert!(stderr.contains("Cannot create ref due to creations being restricted."));
+    assert!(!output.stderr_truncated);
+    assert!(!record.detail.message.contains("GH013"));
+}
+
 #[async_trait::async_trait]
 impl RunPublisher for OriginPublisher {
-    async fn push(&self, site: &Site, branch: &str, sha: &str) -> Result<(), String> {
+    async fn push(&self, site: &Site, branch: &str, sha: &str) -> anyhow::Result<()> {
         assert!(
             matches!(site, Site::Sandbox(_)),
             "push runs through the sandbox environment"
@@ -1409,13 +1522,12 @@ impl RunPublisher for OriginPublisher {
             &[],
             std::time::Duration::from_secs(30),
         )
-        .await
-        .map_err(|error| error.to_string())?;
+        .await?;
         self.pushed.lock().unwrap().push(sha.to_owned());
         Ok(())
     }
 
-    async fn publish(&self, publication: &Publication) -> Result<(), String> {
+    async fn publish(&self, publication: &Publication) -> anyhow::Result<()> {
         self.push(
             &publication.site,
             &publication.run_branch,
@@ -1666,11 +1778,11 @@ struct GatedPublisher {
 
 #[async_trait::async_trait]
 impl RunPublisher for GatedPublisher {
-    async fn push(&self, site: &Site, branch: &str, sha: &str) -> Result<(), String> {
+    async fn push(&self, site: &Site, branch: &str, sha: &str) -> anyhow::Result<()> {
         self.inner.push(site, branch, sha).await
     }
 
-    async fn publish(&self, publication: &Publication) -> Result<(), String> {
+    async fn publish(&self, publication: &Publication) -> anyhow::Result<()> {
         self.entered.notify_one();
         self.release
             .acquire()
