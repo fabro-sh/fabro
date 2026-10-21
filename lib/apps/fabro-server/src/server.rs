@@ -1575,6 +1575,9 @@ impl AppState {
             daytona_api_key.map(|key| self.daytona_credentials(key)),
             |name| self.config_env_lookup(name),
         )
+        .with_plugins(&self.server_settings().server.sandbox.providers, |name| {
+            self.config_env_lookup(name)
+        })
     }
 
     /// [`Self::sandbox_provider_config`] for a server-side prune of

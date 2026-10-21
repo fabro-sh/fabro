@@ -81,6 +81,9 @@ impl_combine_or_option!(
     ServerAuthMethod,
     WebhookStrategy,
     LogFilter,
+    // A whole template, such as a sandbox provider's `process_spec`: a higher
+    // layer's replaces a lower one's rather than merging into it.
+    serde_json::Value,
 );
 
 impl Combine for Option<Vec<String>> {

@@ -194,3 +194,23 @@ opt-level = 2
 opt-level = 2
 [profile.dev.package.regex-syntax]
 opt-level = 2
+
+# TEMPORARY, drop before merge: Petri main with lithoscomputer/petri#122 and the
+# registered-provider resources PR on top. Remove once both land and the
+# internal-dependency update moves the `petri_*` pins past them.
+[patch."https://github.com/lithoscomputer/petri.git"]
+petri-attractor-steps = { git = "https://github.com/thewoolleyman/petri.git", branch = "fabro-integration-registered" }
+petri-driver = { git = "https://github.com/thewoolleyman/petri.git", branch = "fabro-integration-registered" }
+petri-engine = { git = "https://github.com/thewoolleyman/petri.git", branch = "fabro-integration-registered" }
+petri-execution = { git = "https://github.com/thewoolleyman/petri.git", branch = "fabro-integration-registered" }
+petri-executor = { git = "https://github.com/thewoolleyman/petri.git", branch = "fabro-integration-registered" }
+petri-executor-sandbox = { git = "https://github.com/thewoolleyman/petri.git", branch = "fabro-integration-registered" }
+petri-frontend = { git = "https://github.com/thewoolleyman/petri.git", branch = "fabro-integration-registered" }
+petri-frontend-attractor = { git = "https://github.com/thewoolleyman/petri.git", branch = "fabro-integration-registered" }
+petri-frontend-fabro = { git = "https://github.com/thewoolleyman/petri.git", branch = "fabro-integration-registered" }
+petri-frontend-native = { git = "https://github.com/thewoolleyman/petri.git", branch = "fabro-integration-registered" }
+petri-ir = { git = "https://github.com/thewoolleyman/petri.git", branch = "fabro-integration-registered" }
+petri-runtime = { git = "https://github.com/thewoolleyman/petri.git", branch = "fabro-integration-registered" }
+petri-steps = { git = "https://github.com/thewoolleyman/petri.git", branch = "fabro-integration-registered" }
+petri-store = { git = "https://github.com/thewoolleyman/petri.git", branch = "fabro-integration-registered" }
+petri-testkit = { git = "https://github.com/thewoolleyman/petri.git", branch = "fabro-integration-registered" }

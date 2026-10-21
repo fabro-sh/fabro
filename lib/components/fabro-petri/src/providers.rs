@@ -9,18 +9,23 @@
 //! [`bare_runtime`], so none falls back to launching a provider plugin,
 //! which a release build cannot verify.
 
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_static::EnvVars;
+use fabro_types::SandboxProviderKind;
+use fabro_types::settings::server::{SandboxPluginSettings, ServerSandboxProvidersSettings};
 use petri_runtime::{
-    InProcessProviders, ProviderContext, ProviderFactory, ProviderNetwork, Runtime, fingerprint,
+    InProcessProviders, ProviderContext, ProviderFactory, ProviderNetwork, ProviderRegistrations,
+    Runtime, fingerprint,
 };
-use sandbox_driver::{AuthError, Error, ProviderKind, SandboxProvider};
+use sandbox_driver::{AuthError, Error, ProviderKind, SandboxProvider, SandboxSpec};
 use sandbox_driver_daytona::{DaytonaConfig, DaytonaProvider};
 use sandbox_driver_docker::DockerProvider;
 use sandbox_driver_host::HostProvider;
+use sandbox_driver_protocol::PluginConfig;
 
 const USER_AGENT: &str = concat!("fabro-server/", env!("CARGO_PKG_VERSION"));
 
@@ -99,6 +104,17 @@ pub struct SandboxProviderConfig {
     docker_host:         Option<String>,
     docker_host_address: Option<String>,
     daytona:             Option<DaytonaCredentials>,
+    /// The server's enabled third-party providers, each as Petri registers
+    /// it, or why its settings cannot be registered.
+    plugins:             BTreeMap<SandboxProviderKind, Result<RegisteredPlugin, String>>,
+}
+
+/// A third-party provider as Petri registers it: how its plugin launches,
+/// and the template its process scopes are built from.
+#[derive(Clone, Debug)]
+struct RegisteredPlugin {
+    config:       PluginConfig,
+    process_spec: SandboxSpec,
 }
 
 impl SandboxProviderConfig {
@@ -123,8 +139,96 @@ impl SandboxProviderConfig {
             docker_host_address: lookup(EnvVars::PETRI_SANDBOX_DOCKER_HOST_ADDRESS)
                 .filter(|value| !value.trim().is_empty()),
             daytona,
+            plugins: BTreeMap::new(),
         }
     }
+
+    /// This configuration with the server's enabled third-party providers
+    /// from `server.sandbox.providers`. Petri launches a registered plugin
+    /// with exactly the environment it is given, so each name in a
+    /// provider's `inherit_env` is resolved here, from `lookup`.
+    #[must_use]
+    pub fn with_plugins(
+        mut self,
+        providers: &ServerSandboxProvidersSettings,
+        lookup: impl Fn(&str) -> Option<String>,
+    ) -> Self {
+        self.plugins = providers
+            .enabled_plugins()
+            .map(|(kind, settings)| (kind.clone(), registered_plugin(kind, settings, &lookup)))
+            .collect();
+        self
+    }
+
+    /// Why `kind`'s provider cannot be registered for a run; `None` for a
+    /// bundled kind and for a provider that registers.
+    pub(crate) fn registration_problem(&self, kind: &SandboxProviderKind) -> Option<String> {
+        if kind.bundled().is_some() {
+            return None;
+        }
+        match self.plugins.get(kind) {
+            None => Some(format!(
+                "sandbox provider `{kind}` is not an enabled provider in server.sandbox.providers"
+            )),
+            Some(Err(problem)) => Some(problem.clone()),
+            Some(Ok(_)) => None,
+        }
+    }
+
+    /// The built-in providers, linked in process, and every third-party
+    /// provider that registers.
+    fn registrations(&self) -> ProviderRegistrations {
+        let mut registrations = ProviderRegistrations::linked(built_in_providers(self));
+        for (kind, plugin) in &self.plugins {
+            let Ok(plugin) = plugin else { continue };
+            if let Err(error) =
+                registrations.register_plugin(plugin.config.clone(), plugin.process_spec.clone())
+            {
+                tracing::warn!(provider = %kind, %error, "sandbox provider not registered");
+            }
+        }
+        registrations
+    }
+}
+
+/// `kind`'s settings as Petri registers them, checked as Petri checks them.
+fn registered_plugin(
+    kind: &SandboxProviderKind,
+    settings: &SandboxPluginSettings,
+    lookup: &impl Fn(&str) -> Option<String>,
+) -> Result<RegisteredPlugin, String> {
+    let invalid = |reason: String| format!("sandbox provider `{kind}`: {reason}");
+    let provider_kind =
+        ProviderKind::try_new(kind.as_str()).map_err(|error| invalid(error.to_string()))?;
+    let template = settings
+        .process_spec
+        .clone()
+        .ok_or_else(|| invalid("`process_spec` is required".to_string()))?;
+    let process_spec: SandboxSpec = serde_json::from_value(template).map_err(|error| {
+        invalid(format!(
+            "`process_spec` is not a sandbox specification: {error}"
+        ))
+    })?;
+    let mut env = settings.env.clone();
+    for name in &settings.inherit_env {
+        if let Some(value) = lookup(name) {
+            env.entry(name.clone()).or_insert(value);
+        }
+    }
+    let mut config = PluginConfig::new(provider_kind);
+    config.path = settings.path.as_deref().map(PathBuf::from);
+    config.sha256.clone_from(&settings.sha256);
+    config.dev = settings.dev;
+    config.args.clone_from(&settings.args);
+    config.env = env;
+    let plugin = RegisteredPlugin {
+        config,
+        process_spec,
+    };
+    ProviderRegistrations::new()
+        .register_plugin(plugin.config.clone(), plugin.process_spec.clone())
+        .map_err(|error| invalid(error.to_string()))?;
+    Ok(plugin)
 }
 
 /// Petri's standard runtime with Fabro's built-in providers installed.
@@ -135,7 +239,7 @@ pub fn standard_runtime(config: &SandboxProviderConfig) -> Runtime {
         reason = "the one place a standard runtime is built, with the built-in providers installed"
     )]
     let runtime = Runtime::standard();
-    runtime.in_process_providers(built_in_providers(config))
+    runtime.sandbox_providers(config.registrations())
 }
 
 /// Petri's bare runtime with Fabro's built-in providers installed.
@@ -146,7 +250,7 @@ pub fn bare_runtime(config: &SandboxProviderConfig) -> Runtime {
         reason = "the one place a bare runtime is built, with the built-in providers installed"
     )]
     let runtime = Runtime::bare();
-    runtime.in_process_providers(built_in_providers(config))
+    runtime.sandbox_providers(config.registrations())
 }
 
 /// The Docker connection used by both the server and Petri. The driver reads
@@ -288,7 +392,95 @@ impl ProviderFactory for DaytonaFactory {
 
 #[cfg(test)]
 mod tests {
+    use fabro_types::settings::server::ServerSandboxProviderSettings;
+
     use super::*;
+
+    fn kubernetes() -> SandboxProviderKind {
+        SandboxProviderKind::try_new("kubernetes").expect("a valid kind")
+    }
+
+    fn providers(settings: SandboxPluginSettings) -> ServerSandboxProvidersSettings {
+        let mut providers = ServerSandboxProvidersSettings::default();
+        providers
+            .entries
+            .insert(kubernetes(), ServerSandboxProviderSettings {
+                enabled: true,
+                plugin:  Some(settings),
+            });
+        providers
+    }
+
+    fn plugin_settings() -> SandboxPluginSettings {
+        SandboxPluginSettings {
+            path: Some("/usr/local/bin/sandbox-driver-kubernetes".to_string()),
+            dev: true,
+            args: vec!["--config".to_string(), "/etc/k8s.toml".to_string()],
+            env: BTreeMap::from([("KUBE_NAMESPACE".to_string(), "factory".to_string())]),
+            inherit_env: vec!["HOME".to_string(), "UNSET".to_string()],
+            process_spec: Some(serde_json::json!({
+                "source": {"image": {"reference": "ghcr.io/acme/runner:1"}},
+                "resources": {"cpu_cores": 1, "memory_mb": 1024},
+            })),
+            ..SandboxPluginSettings::default()
+        }
+    }
+
+    #[test]
+    fn a_configured_plugin_registers_with_its_inherited_variables_resolved() {
+        let config = SandboxProviderConfig::default()
+            .with_plugins(&providers(plugin_settings()), |name| {
+                (name == "HOME").then(|| "/home/fabro".to_string())
+            });
+        assert_eq!(config.registration_problem(&kubernetes()), None);
+        let Some(Ok(plugin)) = config.plugins.get(&kubernetes()) else {
+            panic!("the plugin registers");
+        };
+        // Petri launches a registered plugin with exactly this environment.
+        assert!(plugin.config.inherit_env.is_empty());
+        assert_eq!(
+            plugin.config.env.get("HOME").map(String::as_str),
+            Some("/home/fabro")
+        );
+        assert_eq!(
+            plugin.config.env.get("KUBE_NAMESPACE").map(String::as_str),
+            Some("factory")
+        );
+        assert!(!plugin.config.env.contains_key("UNSET"));
+        assert_eq!(plugin.config.args, vec!["--config", "/etc/k8s.toml"]);
+        assert_eq!(plugin.process_spec.resources.cpu_cores, Some(1));
+    }
+
+    #[test]
+    fn a_plugin_without_a_usable_template_or_path_is_reported_not_registered() {
+        let missing = SandboxPluginSettings {
+            process_spec: None,
+            ..plugin_settings()
+        };
+        let relative = SandboxPluginSettings {
+            path: Some("sandbox-driver-kubernetes".to_string()),
+            ..plugin_settings()
+        };
+        for (settings, expected) in [(missing, "process_spec"), (relative, "absolute")] {
+            let config =
+                SandboxProviderConfig::default().with_plugins(&providers(settings), |_| None);
+            let problem = config
+                .registration_problem(&kubernetes())
+                .expect("the provider does not register");
+            assert!(problem.contains(expected), "{problem}");
+        }
+        let unconfigured = SandboxProviderConfig::default()
+            .registration_problem(&kubernetes())
+            .expect("an unconfigured kind is reported");
+        assert!(
+            unconfigured.contains("server.sandbox.providers"),
+            "{unconfigured}"
+        );
+        assert_eq!(
+            SandboxProviderConfig::default().registration_problem(&SandboxProviderKind::DOCKER),
+            None
+        );
+    }
 
     #[test]
     fn docker_fingerprint_keeps_the_plugin_namespace_for_unset_and_configured_hosts() {

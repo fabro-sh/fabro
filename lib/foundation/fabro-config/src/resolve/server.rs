@@ -66,7 +66,9 @@ pub fn resolve_server(layer: &ServerLayer, errors: &mut Vec<ResolveError>) -> Se
     }
 }
 
-fn resolve_sandbox(
+/// `server.sandbox` alone. A run worker reads only its sandbox providers,
+/// so it resolves this section without the rest of the server namespace.
+pub fn resolve_sandbox(
     layer: Option<&ServerSandboxLayer>,
     errors: &mut Vec<ResolveError>,
 ) -> ServerSandboxSettings {
@@ -93,12 +95,13 @@ fn resolve_sandbox(
         entries.insert(kind.clone(), ServerSandboxProviderSettings {
             enabled: layer.enabled.unwrap_or(true),
             plugin:  Some(SandboxPluginSettings {
-                path:        layer.path.clone(),
-                sha256:      layer.sha256.clone(),
-                dev:         layer.dev.unwrap_or(false),
-                args:        layer.args.clone().unwrap_or_default(),
-                env:         layer.env.clone().unwrap_or_default(),
-                inherit_env: layer.inherit_env.clone().unwrap_or_default(),
+                path:         layer.path.clone(),
+                sha256:       layer.sha256.clone(),
+                dev:          layer.dev.unwrap_or(false),
+                args:         layer.args.clone().unwrap_or_default(),
+                env:          layer.env.clone().unwrap_or_default(),
+                inherit_env:  layer.inherit_env.clone().unwrap_or_default(),
+                process_spec: layer.process_spec.clone(),
             }),
         });
     }
@@ -120,6 +123,7 @@ fn reject_plugin_fields_for_bundled(
         args,
         env,
         inherit_env,
+        process_spec,
     } = layer;
     let set = [
         ("path", plugin_path.is_some()),
@@ -128,6 +132,7 @@ fn reject_plugin_fields_for_bundled(
         ("args", args.is_some()),
         ("env", env.is_some()),
         ("inherit_env", inherit_env.is_some()),
+        ("process_spec", process_spec.is_some()),
     ];
     for (field, is_set) in set {
         if is_set {
