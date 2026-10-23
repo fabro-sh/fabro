@@ -554,11 +554,12 @@ impl FabroHooks {
         error: &(dyn std::error::Error + Send + Sync + 'static),
         message: &str,
         finalization_code: Option<&str>,
-    ) -> Result<(), HookError> {
+    ) {
         let Some(detail) = diagnostics::failure_detail(error) else {
-            return Ok(());
+            return;
         };
-        self.records
+        if let Err(error) = self
+            .records
             .append(
                 &self.run_id,
                 &PlatformRecord::RunFailureDetails(RunFailureDetailsRecord {
@@ -569,11 +570,16 @@ impl FabroHooks {
                 None,
             )
             .await
-            .map_err(|source| HookError::Write {
-                kind: "run.failure_details",
-                source,
-            })?;
-        Ok(())
+        {
+            // Display names the storage boundary only; its source may contain
+            // a response body or command output and must not enter tracing.
+            warn!(
+                run_id = %self.run_id,
+                finalization_code,
+                error = %error,
+                "supporting failure details could not be recorded"
+            );
+        }
     }
 
     /// The run's workspaces on this host, as the hooks reach them.
@@ -582,12 +588,19 @@ impl FabroHooks {
         &self.workspaces
     }
 
-    fn fail_run(&self, message: &str) {
-        let mut failure = sync::lock(&self.failure);
-        if failure.is_none() {
-            *failure = Some(message.to_string());
-        }
-        drop(failure);
+    async fn fail_run(&self, error: &HookError, message: &str) {
+        // Select before any await: concurrent checkpoints can have identical
+        // summaries but different output. Only the winner may persist details.
+        // This remains true even if its append fails or loses its response.
+        let selected = {
+            let mut failure = sync::lock(&self.failure);
+            if failure.is_none() {
+                *failure = Some(message.to_string());
+                true
+            } else {
+                false
+            }
+        };
         if let Some(handle) = self.handle.get() {
             info!(run_id = %self.run_id, "cancelling the Petri run after a failed checkpoint");
             handle.cancel_root_for(CancelReason::Control);
@@ -596,6 +609,10 @@ impl FabroHooks {
                 run_id = %self.run_id,
                 "no coordinator handle is attached; the failed checkpoint cannot cancel the run"
             );
+        }
+        if selected {
+            self.record_failure_details(error, message, Some(CHECKPOINT_FAILED_CLASS))
+                .await;
         }
     }
 
@@ -907,8 +924,7 @@ impl FabroHooks {
                     ),
                     None,
                 )
-                .await
-                .map_err(|error| ScopeAcquiredError::new(error.render()))?;
+                .await;
                 Err(ScopeAcquiredError::new(message))
             }
         }
@@ -1572,10 +1588,7 @@ impl ExecutionHooks for FabroHooks {
                     error = %message,
                     "checkpoint failed; the run ends"
                 );
-                self.record_failure_details(&error, &message, Some(CHECKPOINT_FAILED_CLASS))
-                    .await
-                    .map_err(|error| PrepareError::fatal(error.render()))?;
-                self.fail_run(&message);
+                self.fail_run(&error, &message).await;
                 prepared.adjustment.status = Some(Status::Failure(
                     FailureInfo::new(message.clone()).with_class(CHECKPOINT_FAILED_CLASS),
                 ));
@@ -1673,8 +1686,7 @@ impl ExecutionHooks for FabroHooks {
                 warn!(run_id = %self.run_id, error = %message, "the run's diff was not recorded");
                 if self.publisher.is_some() && finished.status == RunStatus::Success {
                     self.record_failure_details(&error, &message, Some("publish_failed"))
-                        .await
-                        .map_err(|error| projection::publish_failure(error.render()))?;
+                        .await;
                     return Err(projection::publish_failure(message));
                 }
                 None
@@ -1691,8 +1703,7 @@ impl ExecutionHooks for FabroHooks {
                     let message = format!("{error:#}");
                     warn!(run_id = %self.run_id, error = %message, "the run's publication failed");
                     self.record_failure_details(error.as_ref(), &message, Some("publish_failed"))
-                        .await
-                        .map_err(|error| projection::publish_failure(error.render()))?;
+                        .await;
                     return Err(projection::publish_failure(message));
                 }
                 info!(
@@ -1761,7 +1772,7 @@ mod tests {
 
     use fabro_store::{ArtifactStore, StoredPlatformRecord};
     use object_store::memory::InMemory;
-    use tokio::sync::Barrier;
+    use tokio::sync::{Barrier, Semaphore};
 
     use super::*;
     use crate::artifacts::StoreArtifactWriter;
@@ -1802,6 +1813,148 @@ mod tests {
             kind: PlatformRecordKind,
         ) -> Result<Vec<StoredPlatformRecord>, PlatformRecordError> {
             self.records.read_kind(run_id, kind).await
+        }
+    }
+
+    /// Hold the selected diagnostic append while a competing checkpoint fails.
+    struct GatedFailureRecords {
+        records: MemoryPlatformRecords,
+        entered: Semaphore,
+        release: Semaphore,
+        reject:  bool,
+    }
+
+    #[async_trait::async_trait]
+    impl PlatformRecords for GatedFailureRecords {
+        async fn append(
+            &self,
+            run_id: &RunId,
+            record: &PlatformRecord,
+            position: Option<StagePosition>,
+        ) -> Result<StoredPlatformRecord, PlatformRecordError> {
+            self.entered.add_permits(1);
+            self.release.acquire().await.unwrap().forget();
+            if self.reject {
+                return Err(PlatformRecordError::Store(fabro_store::Error::Io(
+                    std::io::Error::other("diagnostic storage unavailable"),
+                )));
+            }
+            self.records.append(run_id, record, position).await
+        }
+
+        async fn read_kind(
+            &self,
+            run_id: &RunId,
+            kind: PlatformRecordKind,
+        ) -> Result<Vec<StoredPlatformRecord>, PlatformRecordError> {
+            self.records.read_kind(run_id, kind).await
+        }
+    }
+
+    #[tokio::test]
+    async fn competing_checkpoint_failures_keep_selected_output_through_replay() {
+        use fabro_types::{RunProjection, test_support as types_support};
+        use petri_execution::events::RunEvent;
+
+        use crate::diagnostics::CommandOutput;
+        use crate::projection::{Item, RunView};
+
+        for (selected, competing) in [
+            ("first output", "second output"),
+            ("second output", "first output"),
+        ] {
+            for reject in [false, true] {
+                let root = tempfile::tempdir().unwrap();
+                let run = RunId::new();
+                let records = Arc::new(GatedFailureRecords {
+                    records: MemoryPlatformRecords::new(),
+                    entered: Semaphore::new(0),
+                    release: Semaphore::new(0),
+                    reject,
+                });
+                let hooks = artifact_hooks(
+                    root.path(),
+                    run,
+                    records.clone(),
+                    Arc::new(StoreArtifactWriter::new(ArtifactStore::new(
+                        Arc::new(InMemory::new()),
+                        "artifacts",
+                    ))),
+                );
+                let failure = |output: &str| HookError::Commit {
+                    node:   "same-child-node".to_string(),
+                    source: CheckpointError::Command {
+                        action: "commit".to_string(),
+                        status: "exit status: 1".to_string(),
+                        output: CommandOutput::capture(b"", output.as_bytes(), &[]),
+                    },
+                };
+                let first = failure(selected);
+                let second = failure(competing);
+                let message = first.render();
+                assert_eq!(message, second.render());
+                tokio::join!(hooks.fail_run(&first, &message), async {
+                    records.entered.acquire().await.unwrap().forget();
+                    // The second failure arrives while the first append is
+                    // suspended. It must neither append nor win selection.
+                    hooks.fail_run(&second, &message).await;
+                    records.release.add_permits(1);
+                },);
+                assert_eq!(
+                    hooks.checkpoint_failure().as_deref(),
+                    Some(message.as_str())
+                );
+                let durable: Vec<StoredPlatformRecord> = serde_json::from_slice(
+                    &serde_json::to_vec(&records.records.records(&run)).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(durable.len(), usize::from(!reject));
+                let finish: RunEvent = serde_json::from_value(serde_json::json!({
+                    "id": {"log": "coordinator", "seq": 1, "index": 0},
+                    "recorded_at": 1000,
+                    "record": {
+                        "seq": 1, "origin": "external", "recorded_at": 1000,
+                        "body": {"event": "run.finished", "status": "cancelled",
+                            "finalization_failure": {"code": CHECKPOINT_FAILED_CLASS, "message": message}},
+                    },
+                })).unwrap();
+                let mut conclusions = Vec::new();
+                for details_first in [false, true] {
+                    let mut view = RunView::new();
+                    view.projection = Some(RunProjection::new(
+                        "test".to_string(),
+                        types_support::test_run_spec(),
+                        chrono::Utc::now(),
+                    ));
+                    if !details_first {
+                        view.fold(&Item::Petri(&finish), 1);
+                    }
+                    for record in &durable {
+                        view.fold(&Item::Platform(record), 2);
+                    }
+                    // Rehydrate persisted fold state, as a restarted projector
+                    // does between batches, before the other stream catches up.
+                    view.state =
+                        serde_json::from_value(serde_json::to_value(&view.state).unwrap()).unwrap();
+                    view.projection =
+                        serde_json::from_value(serde_json::to_value(&view.projection).unwrap())
+                            .unwrap();
+                    if details_first {
+                        view.fold(&Item::Petri(&finish), 3);
+                    }
+                    let conclusion = view.projection.unwrap().conclusion.unwrap();
+                    let detail = &conclusion.failure.as_ref().unwrap().detail;
+                    assert_eq!(
+                        detail
+                            .exec_output_tail
+                            .as_ref()
+                            .and_then(|tail| tail.stderr.as_deref()),
+                        (!reject).then_some(selected)
+                    );
+                    conclusions.push(serde_json::to_value(conclusion).unwrap());
+                }
+                assert_eq!(conclusions[0], conclusions[1]);
+            }
         }
     }
 

@@ -287,6 +287,8 @@ impl PlatformRecord {
 /// Supporting details for an exact rendered failure. Finalization diagnostics
 /// also name the host's failure code, so execution/cancellation cannot inherit
 /// unrelated publication output. A successful run never consumes this record.
+/// Producers must select the terminal failure before appending: matching text
+/// is a guard, not an identity for competing failures with the same summary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunFailureDetailsRecord {
     /// Exact rendered message handed to the engine, used only for association.

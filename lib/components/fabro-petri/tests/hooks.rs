@@ -104,6 +104,7 @@ struct Harness {
     /// What a successful run's work does when it ends.
     publisher:      Option<Arc<dyn RunPublisher>>,
     fail_run_diff:  bool,
+    fail_details:   bool,
     _root:          tempfile::TempDir,
 }
 
@@ -132,6 +133,7 @@ impl Harness {
             sandboxed: false,
             publisher: None,
             fail_run_diff: false,
+            fail_details: false,
             _root: root,
         }
     }
@@ -140,6 +142,8 @@ impl Harness {
         HooksSpec {
             records:         if self.fail_run_diff {
                 Arc::new(RejectRunDiff(self.records.clone()))
+            } else if self.fail_details {
+                Arc::new(RejectFailureDetails(self.records.clone()))
             } else {
                 self.records.clone()
             },
@@ -694,7 +698,17 @@ async fn a_failed_stage_is_committed_and_its_route_sees_the_files() {
 /// without resuming.
 #[tokio::test]
 async fn a_failed_checkpoint_ends_the_run_with_no_route() {
-    let harness = Harness::new().await;
+    checkpoint_failure_with_diagnostic_storage(false).await;
+}
+
+#[tokio::test]
+async fn diagnostic_write_failure_preserves_checkpoint_cancellation_and_finalization() {
+    checkpoint_failure_with_diagnostic_storage(true).await;
+}
+
+async fn checkpoint_failure_with_diagnostic_storage(fail_details: bool) {
+    let mut harness = Harness::new().await;
+    harness.fail_details = fail_details;
     let workflow = workflow(
         "  wreck [shape=parallelogram, script=\"rm -rf .git && echo garbage > .git && echo wrecked \
          > out.txt\"]\n  next [shape=parallelogram, script=\"echo next > next.txt\"]\n  fix \
@@ -726,24 +740,29 @@ async fn a_failed_checkpoint_ends_the_run_with_no_route() {
         .find_map(|stored| match stored.record {
             PlatformRecord::RunFailureDetails(record) => Some(record),
             _ => None,
-        })
-        .expect("checkpoint output is durable");
-    assert_eq!(details.message, committed.message);
-    assert_eq!(
-        details.finalization_code.as_deref(),
-        Some(CHECKPOINT_FAILED_CLASS)
-    );
-    assert!(
-        details
-            .detail
-            .exec_output_tail
-            .as_ref()
-            .unwrap()
-            .stderr
-            .as_ref()
-            .unwrap()
-            .contains("invalid gitfile format")
-    );
+        });
+    if fail_details {
+        assert!(details.is_none());
+    } else {
+        let details = details.expect("checkpoint output is durable");
+        assert_eq!(details.message, committed.message);
+        assert_eq!(
+            details.finalization_code.as_deref(),
+            Some(CHECKPOINT_FAILED_CLASS)
+        );
+        assert!(
+            details
+                .detail
+                .exec_output_tail
+                .as_ref()
+                .expect("command output is attached")
+                .stderr
+                .as_ref()
+                .expect("Git wrote stderr")
+                .contains("invalid gitfile format")
+        );
+    }
+    assert_eq!(committed.message, failure);
     let stored = engine::outcome_of(&*harness.store, &harness.run_id.to_string())
         .await
         .expect("the finished run reads back");
@@ -1244,8 +1263,22 @@ async fn an_unavailable_revision_fails_the_checkout() {
 
 #[tokio::test]
 async fn checkout_failure_details_match_the_terminal_engine_message() {
+    checkout_failure_with_diagnostic_storage(false).await;
+}
+
+#[tokio::test]
+async fn diagnostic_write_failure_preserves_checkout_failure() {
+    checkout_failure_with_diagnostic_storage(true).await;
+}
+
+async fn checkout_failure_with_diagnostic_storage(fail_details: bool) {
     let mut harness = Harness::new().await;
-    harness.source.as_mut().unwrap().revision = SourceRevision::Branch("missing".to_string());
+    harness.fail_details = fail_details;
+    harness
+        .source
+        .as_mut()
+        .expect("the fixture has a source")
+        .revision = SourceRevision::Branch("missing".to_string());
     let outcome = harness.run(&workflow("", "start -> exit"), SETTINGS).await;
     assert_eq!(outcome.status, RunStatus::Failed, "{outcome:?}");
     let details = harness
@@ -1255,17 +1288,35 @@ async fn checkout_failure_details_match_the_terminal_engine_message() {
         .find_map(|stored| match stored.record {
             PlatformRecord::RunFailureDetails(record) => Some(record),
             _ => None,
-        })
-        .expect("checkout output is durable");
-    assert_eq!(details.message, outcome.failure.unwrap());
+        });
+    let message = outcome
+        .failure
+        .as_deref()
+        .expect("the run has a primary failure");
+    assert!(message.starts_with("could not acquire the environment: host scope_acquired failed: the run's repository could not be checked out:"), "{message}");
+    assert!(message.contains("git fetch failed"), "{message}");
+    assert_eq!(harness.inspection().await.finalization_failure, None);
+    let stored = engine::outcome_of(&*harness.store, &harness.run_id.to_string())
+        .await
+        .expect("the finished run reads back");
+    assert_eq!(stored.failure, outcome.failure);
+    if fail_details {
+        assert!(details.is_none());
+        return;
+    }
+    let details = details.expect("checkout output is durable");
+    assert_eq!(
+        details.message,
+        outcome.failure.expect("the run has a primary failure")
+    );
     assert!(details.finalization_code.is_none());
     assert!(
         details
             .detail
             .exec_output_tail
-            .unwrap()
+            .expect("command output is attached")
             .stderr
-            .unwrap()
+            .expect("Git wrote stderr")
             .contains("missing")
     );
 }
@@ -1454,9 +1505,21 @@ struct OriginPublisher {
 #[cfg(unix)]
 #[tokio::test]
 async fn rejected_git_publication_retains_output_in_durable_failure_details() {
+    rejected_publication_with_diagnostic_storage(false).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn diagnostic_write_failure_preserves_git_publication_failure() {
+    rejected_publication_with_diagnostic_storage(true).await;
+}
+
+#[cfg(unix)]
+async fn rejected_publication_with_diagnostic_storage(fail_details: bool) {
     use std::os::unix::fs::PermissionsExt as _;
 
     let mut harness = Harness::new().await;
+    harness.fail_details = fail_details;
     let (origin, _) = upstream(&harness.run_dir.with_file_name("rejecting-upstream"), 1).await;
     let hook = origin.join("hooks/pre-receive");
     let rejection = format!(
@@ -1468,14 +1531,17 @@ async fn rejected_git_publication_retains_output_in_durable_failure_details() {
         format!("#!/bin/sh\ncat >&2 <<'REJECTION'\n{rejection}REJECTION\nexit 1\n"),
     )
     .await
-    .unwrap();
+    .expect("the rejecting hook is written");
     fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755))
         .await
-        .unwrap();
+        .expect("the rejecting hook is executable");
     harness.source = Some(file_source(&origin, "main", Some(1)));
     harness.sandboxed = true;
     harness.publisher = Some(Arc::new(OriginPublisher {
-        origin: origin.to_str().unwrap().to_owned(),
+        origin: origin
+            .to_str()
+            .expect("the fixture path is UTF-8")
+            .to_owned(),
         pushed: std::sync::Mutex::new(Vec::new()),
     }));
     let outcome = harness
@@ -1493,16 +1559,44 @@ async fn rejected_git_publication_retains_output_in_durable_failure_details() {
             _ => None,
         })
         .collect();
+    let committed = harness
+        .inspection()
+        .await
+        .finalization_failure
+        .expect("publication failure is committed");
+    assert_eq!(committed.code, "publish_failed");
+    assert_eq!(Some(&committed.message), outcome.failure.as_ref());
+    assert!(
+        committed.message.contains("git push failed"),
+        "{}",
+        committed.message
+    );
+    let stored = engine::outcome_of(&*harness.store, &harness.run_id.to_string())
+        .await
+        .expect("the finished run reads back");
+    assert_eq!(stored.failure, outcome.failure);
+    assert!(stored.publish_failed);
+    if fail_details {
+        assert!(details.is_empty());
+        return;
+    }
     assert_eq!(
         details.len(),
         1,
         "checkpoint pushes are retried, not terminal failures"
     );
     let record = details[0];
-    assert_eq!(record.message, outcome.failure.unwrap());
+    assert_eq!(
+        record.message,
+        outcome.failure.expect("the run has a primary failure")
+    );
     assert_eq!(record.finalization_code.as_deref(), Some("publish_failed"));
-    let output = record.detail.exec_output_tail.as_ref().unwrap();
-    let stderr = output.stderr.as_ref().unwrap();
+    let output = record
+        .detail
+        .exec_output_tail
+        .as_ref()
+        .expect("command output is attached");
+    let stderr = output.stderr.as_ref().expect("Git wrote stderr");
     assert!(stderr.contains("GH013: Repository rule violations found."));
     assert!(stderr.contains("Cannot create ref due to creations being restricted."));
     assert!(!output.stderr_truncated);
@@ -1713,6 +1807,34 @@ async fn ordinary_recovery_refuses_a_missing_workspace() {
         !path.exists(),
         "normal resume does not recreate the checkout"
     );
+}
+
+/// Reject only supporting attachments so the engine can still commit the
+/// primary failure and all required lifecycle records.
+struct RejectFailureDetails(Arc<MemoryPlatformRecords>);
+
+#[async_trait::async_trait]
+impl PlatformRecords for RejectFailureDetails {
+    async fn append(
+        &self,
+        run_id: &RunId,
+        record: &PlatformRecord,
+        position: Option<fabro_store::StagePosition>,
+    ) -> Result<fabro_store::StoredPlatformRecord, PlatformRecordError> {
+        if matches!(record, PlatformRecord::RunFailureDetails(_)) {
+            return Err(PlatformRecordError::Store(fabro_store::Error::Io(
+                std::io::Error::other("diagnostic storage unavailable"),
+            )));
+        }
+        self.0.append(run_id, record, position).await
+    }
+    async fn read_kind(
+        &self,
+        run_id: &RunId,
+        kind: PlatformRecordKind,
+    ) -> Result<Vec<fabro_store::StoredPlatformRecord>, PlatformRecordError> {
+        self.0.read_kind(run_id, kind).await
+    }
 }
 
 struct RejectRunDiff(Arc<MemoryPlatformRecords>);

@@ -121,3 +121,10 @@ error reaches the engine and interrupts the run's lifetime. The worker
 records no terminal lifecycle transition for that interruption. The server
 resumes the run from its durable records, up to three times per server
 process; a fourth interruption fails the run.
+
+Supporting `run.failure_details` attachments are best-effort: losing an
+attachment must not replace the primary Git failure or prevent checkpoint
+cancellation and finalization. A failed append emits a warning with safe
+storage-boundary metadata. Checkpoint hooks select the terminal failure before
+appending and persist only its attachment, so competing failures with the same
+summary cannot replace the selected output.

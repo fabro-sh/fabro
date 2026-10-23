@@ -1559,6 +1559,18 @@ async fn required_finalization_projects_only_the_committed_overall_result() {
             )
             .await
             .unwrap();
+        let mut wrong_code = later.clone();
+        wrong_code.finalization_code = Some("checkpoint_failed".to_string());
+        wrong_code.detail.exec_output_tail.as_mut().unwrap().stderr =
+            Some("wrong channel".to_string());
+        platform
+            .append(
+                &scenario.run_id,
+                &PlatformRecord::RunFailureDetails(wrong_code),
+                None,
+            )
+            .await
+            .unwrap();
         projector.signal(scenario.run_id);
         projector.settle(scenario.run_id).await;
         let updated = petri_support::stored_projection(&scenario.pool, scenario.run_id)
