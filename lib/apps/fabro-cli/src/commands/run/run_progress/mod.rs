@@ -11,6 +11,8 @@ mod petri;
 mod renderer;
 mod stage_display;
 mod styles;
+#[cfg(test)]
+mod tests;
 
 use event::ProgressEvent;
 use info_display::InfoDisplay;

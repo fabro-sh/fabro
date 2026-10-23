@@ -25,12 +25,13 @@ use std::time::Duration;
 use anyhow::{Context as _, Result};
 use chrono::{DateTime, TimeZone as _, Utc};
 use fabro_redact::redact_jsonl_line;
-use fabro_types::{RunId, RunStreamItem, RunStreamItemKind};
+use fabro_types::{RunId, RunStreamItem, RunStreamItemKind, StageOutcome};
 use fabro_util::terminal::Styles;
 use serde_json::Value;
 use tokio::time;
 use tracing::debug;
 
+use super::stage_presentation::StagePresentation;
 use crate::args::EventsArgs;
 use crate::server_client;
 use crate::shared::{format_duration_ms, format_usd_micros};
@@ -338,22 +339,29 @@ pub(crate) fn format_pretty(
             let status = outcome.get("status").and_then(Value::as_str).unwrap_or("?");
             let duration = format_duration_ms(elapsed.unwrap_or(0));
             if !executed || status == "skipped" {
+                let presentation = StagePresentation::new(StageOutcome::Skipped, styles);
                 return Some(format!(
                     "{ts} {} {}  {}",
-                    styles.dim.apply_to("\u{2298}"),
+                    presentation.glyph,
                     styles.bold.apply_to(label),
-                    styles.dim.apply_to("skipped"),
+                    presentation.label.unwrap_or_default(),
                 ));
             }
             match status {
                 "success" | "partial_success" => {
+                    let outcome_kind = if status == "partial_success" {
+                        StageOutcome::PartiallySucceeded
+                    } else {
+                        StageOutcome::Succeeded
+                    };
+                    let presentation = StagePresentation::new(outcome_kind, styles);
                     let mut line = format!(
                         "{ts} {} {}",
-                        styles.green.apply_to("\u{2713}"),
+                        presentation.glyph,
                         styles.bold.apply_to(label),
                     );
-                    if status == "partial_success" {
-                        let _ = write!(line, "  {}", styles.yellow.apply_to("partial"));
+                    if let Some(label) = presentation.label {
+                        let _ = write!(line, "  {label}");
                     }
                     let _ = write!(line, "  {duration}");
                     if let Some(usage) = usage_summary(outcome, styles) {
@@ -362,13 +370,19 @@ pub(crate) fn format_pretty(
                     Some(line)
                 }
                 other => {
+                    let presentation = StagePresentation::new(
+                        StageOutcome::Failed {
+                            retry_requested: false,
+                        },
+                        styles,
+                    );
                     let error = outcome
                         .pointer("/failure/message")
                         .and_then(Value::as_str)
                         .unwrap_or(other);
                     Some(format!(
                         "{ts} {} {}  {}",
-                        styles.red.apply_to("\u{2717}"),
+                        presentation.glyph,
                         styles.bold.apply_to(label),
                         styles.red.apply_to(error),
                     ))

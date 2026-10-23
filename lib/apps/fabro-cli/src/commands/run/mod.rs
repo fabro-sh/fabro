@@ -33,6 +33,7 @@ pub(crate) mod run_progress;
 pub(crate) mod runner;
 mod selection;
 pub(crate) mod ssh;
+mod stage_presentation;
 pub(crate) mod start;
 pub(crate) mod steer;
 #[cfg(test)]

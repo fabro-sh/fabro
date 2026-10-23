@@ -9,6 +9,7 @@ use indicatif::ProgressBar;
 use super::event::ProgressUsage;
 use super::renderer::ProgressRenderer;
 use super::styles;
+use crate::commands::run::stage_presentation::StagePresentation;
 use crate::shared::{format_duration_ms, format_tokens_human};
 
 const MAX_TOOL_CALLS: usize = 5;
@@ -138,14 +139,11 @@ impl StageDisplay {
         status: &str,
         usage: Option<&ProgressUsage>,
     ) {
-        let succeeded = status.parse::<StageOutcome>().map_or_else(
-            |_| matches!(status, "succeeded" | "partially_succeeded"),
-            |status| {
-                matches!(
-                    status,
-                    StageOutcome::Succeeded | StageOutcome::PartiallySucceeded
-                )
-            },
+        let presentation = StagePresentation::new(
+            status.parse().unwrap_or(StageOutcome::Failed {
+                retry_requested: false,
+            }),
+            renderer.styles(),
         );
         let cost_str = usage
             .and_then(ProgressUsage::display_cost)
@@ -171,13 +169,14 @@ impl StageDisplay {
         } else {
             String::new()
         };
-        let prefix = format!("{cost_str}{}{stats_str}", format_duration_ms(duration_ms));
-        let glyph = if succeeded {
-            styles::green_check(renderer.styles())
-        } else {
-            styles::red_cross(renderer.styles())
-        };
-        self.finish_stage(renderer, node_id, name, &glyph, &prefix);
+        let label = presentation
+            .label
+            .map_or_else(String::new, |label| format!("{label}  "));
+        let prefix = format!(
+            "{label}{cost_str}{}{stats_str}",
+            format_duration_ms(duration_ms)
+        );
+        self.finish_stage(renderer, node_id, name, &presentation.glyph, &prefix);
     }
 
     pub(super) fn on_stage_failed(
@@ -187,13 +186,13 @@ impl StageDisplay {
         name: &str,
         error: &str,
     ) {
-        self.finish_stage(
-            renderer,
-            node_id,
-            name,
-            &styles::red_cross(renderer.styles()),
-            "",
+        let presentation = StagePresentation::new(
+            StageOutcome::Failed {
+                retry_requested: false,
+            },
+            renderer.styles(),
         );
+        self.finish_stage(renderer, node_id, name, &presentation.glyph, "");
         let summary = styles::last_line_truncated(error, 120);
         Self::insert_global_info_line(
             renderer,
