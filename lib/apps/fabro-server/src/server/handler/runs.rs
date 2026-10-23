@@ -47,7 +47,7 @@ use tracing::info;
 use super::super::{
     AppState, DeleteRunOutcome, ListResponse, RunExecutionMode, VariableError, answer_from_request,
     api_question_from_pending_interview, clamp_page_limit, clamp_page_offset, default_page_limit,
-    delete_run_internal, load_pending_interview, managed_run, parse_run_id_path,
+    delete_run_internal, load_pending_interview, main_event_mirror, managed_run, parse_run_id_path,
     parse_stage_id_path, petri_runs, reject_if_archived, run_records,
     submit_pending_interview_answer,
 };
@@ -778,7 +778,14 @@ async fn finalize_created_run(
     let created_at = created.run_id.created_at();
     // The run's summary row is the projector's: wait for the pass that
     // folds the run's first records before reading the run back.
-    state.petri_projector.settle(created.run_id).await;
+    if let Err(error) = main_event_mirror::mirror_created(&state, created.run_id).await {
+        tracing::error!(run_id = %created.run_id, error = %error, "Failed to mirror persisted run creation");
+        return intent_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "failed to persist run lifecycle event",
+            "run_persistence_failed",
+        );
+    }
     let summary = match state
         .stores
         .run_summaries
