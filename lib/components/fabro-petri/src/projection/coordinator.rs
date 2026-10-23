@@ -110,6 +110,7 @@ impl RunView {
                     finalization_failure.as_ref(),
                     at,
                 );
+                self.attach_failure_details();
             }
             // ── Sandbox: the retention outcome (VIEWS.md "Sandbox") ─────────
             // The instance stays on `Run.sandbox`: it names what ran, and

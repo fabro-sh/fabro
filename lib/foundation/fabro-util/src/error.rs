@@ -44,6 +44,11 @@ pub fn collect_chain(error: &(dyn std::error::Error + 'static)) -> Vec<String> {
     chain
 }
 
+/// The error and its causes on one line, for the boundaries that carry text.
+pub fn render_chain(error: &(dyn std::error::Error + 'static)) -> String {
+    collect_chain(error).join(": ")
+}
+
 pub fn render_with_causes(message: &str, causes: &[String]) -> String {
     if causes.is_empty() {
         return message.to_string();

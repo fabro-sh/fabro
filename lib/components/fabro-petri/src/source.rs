@@ -18,6 +18,8 @@
 use std::fmt;
 use std::sync::Arc;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use fabro_types::settings::run::{RunCloneSettings, RunMode, RunNamespace};
 use fabro_types::{GitRunTarget, RunTarget};
 
@@ -63,6 +65,25 @@ impl SourceCredential {
     #[must_use]
     pub fn encoded(&self) -> &str {
         &self.0
+    }
+
+    /// What must never appear in a command's recorded output: the encoded
+    /// value, and the password it encodes.
+    #[must_use]
+    pub fn sensitive_values(&self) -> Vec<String> {
+        let mut values = vec![self.0.clone()];
+        let password = STANDARD
+            .decode(&self.0)
+            .ok()
+            .and_then(|decoded| String::from_utf8(decoded).ok())
+            .and_then(|decoded| {
+                decoded
+                    .split_once(':')
+                    .map(|(_, password)| password.to_string())
+            })
+            .filter(|password| !password.is_empty());
+        values.extend(password);
+        values
     }
 
     /// The environment that has `git` present this credential as an
@@ -188,14 +209,18 @@ impl RunSource {
     /// The environment a `git` command that talks to the origin runs with:
     /// the credential as an `Authorization` header for the origin alone.
     pub async fn fetch_env(&self) -> Vec<(String, String)> {
-        let Some(credentials) = &self.credentials else {
-            return Vec::new();
-        };
-        credentials
-            .credential()
+        self.credential()
             .await
             .map(|credential| credential.header_env(&self.origin))
             .unwrap_or_default()
+    }
+
+    /// The credential a fetch presents, resolved now.
+    pub async fn credential(&self) -> Option<SourceCredential> {
+        match &self.credentials {
+            Some(credentials) => credentials.credential().await,
+            None => None,
+        }
     }
 
     /// The `--depth` argument of a fetch, when the history is limited.

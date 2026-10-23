@@ -94,9 +94,8 @@ use fabro_store::platform_records::{
 use fabro_store::{PlatformRecord, PlatformRecordKind, StagePosition};
 use fabro_types::settings::run::RunNamespace;
 use fabro_types::{ArtifactSource, BlobHash, DiffSummary, GitIdentity, RunId};
-use fabro_util::error::collect_chain;
-use fabro_util::sync;
 use fabro_util::workspace_glob::{WorkspaceGlobError, WorkspaceGlobSet};
+use fabro_util::{error, sync};
 use petri_execution::{CancelReason, CoordinatorHandle, InvocationId, RunKey, RunStore};
 use petri_runtime::driver::lifecycle::{
     AdmitAttempt, AttemptDecision, ExecutionHooks, HookContext, Note, PrepareError, PrepareResult,
@@ -225,7 +224,7 @@ impl HookError {
     /// text.
     #[must_use]
     pub fn render(&self) -> String {
-        collect_chain(self).join(": ")
+        error::render_chain(self)
     }
 }
 
@@ -907,7 +906,7 @@ impl FabroHooks {
             }
             Ok(None) => Ok(()),
             Err(error) => {
-                let rendered = collect_chain(&error).join(": ");
+                let rendered = error::render_chain(&error);
                 warn!(
                     run_id = %self.run_id,
                     workspace,
@@ -1852,12 +1851,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn competing_checkpoint_failures_keep_selected_output_through_replay() {
-        use fabro_types::{RunProjection, test_support as types_support};
-        use petri_execution::events::RunEvent;
-
+    async fn competing_checkpoint_failures_persist_only_the_selected_output() {
         use crate::diagnostics::CommandOutput;
-        use crate::projection::{Item, RunView};
 
         for (selected, competing) in [
             ("first output", "second output"),
@@ -1886,7 +1881,7 @@ mod tests {
                     source: CheckpointError::Command {
                         action: "commit".to_string(),
                         status: "exit status: 1".to_string(),
-                        output: CommandOutput::capture(b"", output.as_bytes(), &[]),
+                        output: CommandOutput::capture(b"", output.as_bytes(), None),
                     },
                 };
                 let first = failure(selected);
@@ -1904,56 +1899,26 @@ mod tests {
                     hooks.checkpoint_failure().as_deref(),
                     Some(message.as_str())
                 );
-                let durable: Vec<StoredPlatformRecord> = serde_json::from_slice(
-                    &serde_json::to_vec(&records.records.records(&run)).unwrap(),
-                )
-                .unwrap();
+                let durable = records.records.records(&run);
                 assert_eq!(durable.len(), usize::from(!reject));
-                let finish: RunEvent = serde_json::from_value(serde_json::json!({
-                    "id": {"log": "coordinator", "seq": 1, "index": 0},
-                    "recorded_at": 1000,
-                    "record": {
-                        "seq": 1, "origin": "external", "recorded_at": 1000,
-                        "body": {"event": "run.finished", "status": "cancelled",
-                            "finalization_failure": {"code": CHECKPOINT_FAILED_CLASS, "message": message}},
-                    },
-                })).unwrap();
-                let mut conclusions = Vec::new();
-                for details_first in [false, true] {
-                    let mut view = RunView::new();
-                    view.projection = Some(RunProjection::new(
-                        "test".to_string(),
-                        types_support::test_run_spec(),
-                        chrono::Utc::now(),
-                    ));
-                    if !details_first {
-                        view.fold(&Item::Petri(&finish), 1);
-                    }
-                    for record in &durable {
-                        view.fold(&Item::Platform(record), 2);
-                    }
-                    // Rehydrate persisted fold state, as a restarted projector
-                    // does between batches, before the other stream catches up.
-                    view.state =
-                        serde_json::from_value(serde_json::to_value(&view.state).unwrap()).unwrap();
-                    view.projection =
-                        serde_json::from_value(serde_json::to_value(&view.projection).unwrap())
-                            .unwrap();
-                    if details_first {
-                        view.fold(&Item::Petri(&finish), 3);
-                    }
-                    let conclusion = view.projection.unwrap().conclusion.unwrap();
-                    let detail = &conclusion.failure.as_ref().unwrap().detail;
+                if let Some(stored) = durable.first() {
+                    let PlatformRecord::RunFailureDetails(record) = &stored.record else {
+                        panic!("the selected failure's details are durable: {stored:?}");
+                    };
+                    assert_eq!(record.message, message);
                     assert_eq!(
-                        detail
+                        record.finalization_code.as_deref(),
+                        Some(CHECKPOINT_FAILED_CLASS)
+                    );
+                    assert_eq!(
+                        record
+                            .detail
                             .exec_output_tail
                             .as_ref()
                             .and_then(|tail| tail.stderr.as_deref()),
-                        (!reject).then_some(selected)
+                        Some(selected)
                     );
-                    conclusions.push(serde_json::to_value(conclusion).unwrap());
                 }
-                assert_eq!(conclusions[0], conclusions[1]);
             }
         }
     }

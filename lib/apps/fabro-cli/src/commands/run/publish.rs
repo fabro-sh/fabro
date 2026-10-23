@@ -337,14 +337,13 @@ async fn push(
     let mut url = repository.https_url();
     url.push_str(".git");
     let credential = basic(token);
-    let env = credential
-        .as_ref()
-        .map(|credential| credential.header_env(&url))
-        .unwrap_or_default();
     let refspec = format!("{sha}:refs/heads/{branch}");
     let mut attempt = 1;
     loop {
-        match site.push(&url, &refspec, &env, PUSH_TIMEOUT).await {
+        match site
+            .push(&url, &refspec, credential.as_ref(), PUSH_TIMEOUT)
+            .await
+        {
             Ok(()) => return Ok(()),
             Err(error) => {
                 // The adapter sanitized the attached output before returning.

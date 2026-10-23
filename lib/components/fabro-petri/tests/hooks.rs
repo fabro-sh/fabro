@@ -36,6 +36,7 @@ use fabro_petri::recovery::{self, Recovery, RecoveryRequest};
 use fabro_petri::runtime::RuntimeSpec;
 use fabro_petri::source::{RunSource, SourceRevision};
 use fabro_petri::test_support::{MemoryBlobs, MemoryPlatformRecords};
+use fabro_store::platform_records::RunFailureDetailsRecord;
 use fabro_store::{ArtifactStore, PlatformRecord, PlatformRecordKind};
 use fabro_types::settings::run::{
     EnvironmentNetworkSettings, EnvironmentResourcesSettings, RunCheckpointSettings, RunNamespace,
@@ -103,8 +104,8 @@ struct Harness {
     sandboxed:      bool,
     /// What a successful run's work does when it ends.
     publisher:      Option<Arc<dyn RunPublisher>>,
-    fail_run_diff:  bool,
-    fail_details:   bool,
+    /// A platform record kind the store refuses to append.
+    reject:         Option<PlatformRecordKind>,
     _root:          tempfile::TempDir,
 }
 
@@ -132,20 +133,16 @@ impl Harness {
             source: Some(file_source(&origin, "main", None)),
             sandboxed: false,
             publisher: None,
-            fail_run_diff: false,
-            fail_details: false,
+            reject: None,
             _root: root,
         }
     }
 
     fn hooks(&self, provider: &SandboxProviderKind) -> HooksSpec {
         HooksSpec {
-            records:         if self.fail_run_diff {
-                Arc::new(RejectRunDiff(self.records.clone()))
-            } else if self.fail_details {
-                Arc::new(RejectFailureDetails(self.records.clone()))
-            } else {
-                self.records.clone()
+            records:         match self.reject {
+                Some(kind) => Arc::new(RejectKind(self.records.clone(), kind)),
+                None => self.records.clone(),
             },
             git:             RunGitSettings {
                 host_workspaces: *provider == SandboxProviderKind::LOCAL && !self.sandboxed,
@@ -708,7 +705,7 @@ async fn diagnostic_write_failure_preserves_checkpoint_cancellation_and_finaliza
 
 async fn checkpoint_failure_with_diagnostic_storage(fail_details: bool) {
     let mut harness = Harness::new().await;
-    harness.fail_details = fail_details;
+    harness.reject = fail_details.then_some(PlatformRecordKind::RunFailureDetails);
     let workflow = workflow(
         "  wreck [shape=parallelogram, script=\"rm -rf .git && echo garbage > .git && echo wrecked \
          > out.txt\"]\n  next [shape=parallelogram, script=\"echo next > next.txt\"]\n  fix \
@@ -733,14 +730,7 @@ async fn checkpoint_failure_with_diagnostic_storage(fail_details: bool) {
         .clone()
         .expect("the finish commits the checkpoint failure");
     assert_eq!(committed.code, CHECKPOINT_FAILED_CLASS);
-    let details = harness
-        .records
-        .records(&harness.run_id)
-        .into_iter()
-        .find_map(|stored| match stored.record {
-            PlatformRecord::RunFailureDetails(record) => Some(record),
-            _ => None,
-        });
+    let details = failure_details(&harness).await.pop();
     if fail_details {
         assert!(details.is_none());
     } else {
@@ -1273,7 +1263,7 @@ async fn diagnostic_write_failure_preserves_checkout_failure() {
 
 async fn checkout_failure_with_diagnostic_storage(fail_details: bool) {
     let mut harness = Harness::new().await;
-    harness.fail_details = fail_details;
+    harness.reject = fail_details.then_some(PlatformRecordKind::RunFailureDetails);
     harness
         .source
         .as_mut()
@@ -1281,14 +1271,7 @@ async fn checkout_failure_with_diagnostic_storage(fail_details: bool) {
         .revision = SourceRevision::Branch("missing".to_string());
     let outcome = harness.run(&workflow("", "start -> exit"), SETTINGS).await;
     assert_eq!(outcome.status, RunStatus::Failed, "{outcome:?}");
-    let details = harness
-        .records
-        .records(&harness.run_id)
-        .into_iter()
-        .find_map(|stored| match stored.record {
-            PlatformRecord::RunFailureDetails(record) => Some(record),
-            _ => None,
-        });
+    let details = failure_details(&harness).await.pop();
     let message = outcome
         .failure
         .as_deref()
@@ -1519,7 +1502,7 @@ async fn rejected_publication_with_diagnostic_storage(fail_details: bool) {
     use std::os::unix::fs::PermissionsExt as _;
 
     let mut harness = Harness::new().await;
-    harness.fail_details = fail_details;
+    harness.reject = fail_details.then_some(PlatformRecordKind::RunFailureDetails);
     let (origin, _) = upstream(&harness.run_dir.with_file_name("rejecting-upstream"), 1).await;
     let hook = origin.join("hooks/pre-receive");
     let rejection = format!(
@@ -1551,14 +1534,7 @@ async fn rejected_publication_with_diagnostic_storage(fail_details: bool) {
         )
         .await;
     assert!(outcome.publish_failed, "{outcome:?}");
-    let records = harness.records.records(&harness.run_id);
-    let details: Vec<_> = records
-        .iter()
-        .filter_map(|stored| match &stored.record {
-            PlatformRecord::RunFailureDetails(record) => Some(record),
-            _ => None,
-        })
-        .collect();
+    let details = failure_details(&harness).await;
     let committed = harness
         .inspection()
         .await
@@ -1585,7 +1561,7 @@ async fn rejected_publication_with_diagnostic_storage(fail_details: bool) {
         1,
         "checkpoint pushes are retried, not terminal failures"
     );
-    let record = details[0];
+    let record = &details[0];
     assert_eq!(
         record.message,
         outcome.failure.expect("the run has a primary failure")
@@ -1613,7 +1589,7 @@ impl RunPublisher for OriginPublisher {
         site.push(
             &self.origin,
             &format!("{sha}:refs/heads/{branch}"),
-            &[],
+            None,
             std::time::Duration::from_secs(30),
         )
         .await?;
@@ -1809,47 +1785,36 @@ async fn ordinary_recovery_refuses_a_missing_workspace() {
     );
 }
 
-/// Reject only supporting attachments so the engine can still commit the
-/// primary failure and all required lifecycle records.
-struct RejectFailureDetails(Arc<MemoryPlatformRecords>);
-
-#[async_trait::async_trait]
-impl PlatformRecords for RejectFailureDetails {
-    async fn append(
-        &self,
-        run_id: &RunId,
-        record: &PlatformRecord,
-        position: Option<fabro_store::StagePosition>,
-    ) -> Result<fabro_store::StoredPlatformRecord, PlatformRecordError> {
-        if matches!(record, PlatformRecord::RunFailureDetails(_)) {
-            return Err(PlatformRecordError::Store(fabro_store::Error::Io(
-                std::io::Error::other("diagnostic storage unavailable"),
-            )));
-        }
-        self.0.append(run_id, record, position).await
-    }
-    async fn read_kind(
-        &self,
-        run_id: &RunId,
-        kind: PlatformRecordKind,
-    ) -> Result<Vec<fabro_store::StoredPlatformRecord>, PlatformRecordError> {
-        self.0.read_kind(run_id, kind).await
-    }
+/// The run's `run.failure_details` records, in order.
+async fn failure_details(harness: &Harness) -> Vec<RunFailureDetailsRecord> {
+    harness
+        .records
+        .read_kind(&harness.run_id, PlatformRecordKind::RunFailureDetails)
+        .await
+        .expect("the records read")
+        .into_iter()
+        .filter_map(|stored| match stored.record {
+            PlatformRecord::RunFailureDetails(record) => Some(record),
+            _ => None,
+        })
+        .collect()
 }
 
-struct RejectRunDiff(Arc<MemoryPlatformRecords>);
+/// Reject one record kind only, so the engine can still commit the primary
+/// failure and every required lifecycle record.
+struct RejectKind(Arc<MemoryPlatformRecords>, PlatformRecordKind);
 
 #[async_trait::async_trait]
-impl PlatformRecords for RejectRunDiff {
+impl PlatformRecords for RejectKind {
     async fn append(
         &self,
         run_id: &RunId,
         record: &PlatformRecord,
         position: Option<fabro_store::StagePosition>,
     ) -> Result<fabro_store::StoredPlatformRecord, PlatformRecordError> {
-        if matches!(record, PlatformRecord::RunDiff(_)) {
+        if record.kind() == self.1 {
             return Err(PlatformRecordError::Store(fabro_store::Error::Io(
-                std::io::Error::other("run diff unavailable"),
+                std::io::Error::other(format!("{} unavailable", self.1)),
             )));
         }
         self.0.append(run_id, record, position).await
@@ -1866,7 +1831,7 @@ impl PlatformRecords for RejectRunDiff {
 #[tokio::test]
 async fn a_run_diff_failure_cannot_silently_skip_publication() {
     let mut harness = Harness::new().await;
-    harness.fail_run_diff = true;
+    harness.reject = Some(PlatformRecordKind::RunDiff);
     let publisher = RecordingPublisher::new(None);
     harness.publisher = Some(publisher.clone());
     let graph = workflow(
@@ -1881,7 +1846,7 @@ async fn a_run_diff_failure_cannot_silently_skip_publication() {
             .failure
             .as_ref()
             .unwrap()
-            .contains("run diff unavailable")
+            .contains("run.diff unavailable")
     );
     let stored = engine::outcome_of(&*harness.store, &harness.run_id.to_string())
         .await

@@ -4,16 +4,15 @@ use std::borrow::Cow;
 use std::error::Error;
 use std::fmt;
 
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD;
-use fabro_redact::SecretRedactor;
 use fabro_types::{ExecOutputTail, FailureCategory, FailureDetail};
 use fabro_util::error;
+use pebble_coding_agent::char_boundary::ceil_char_boundary;
 use pebble_coding_agent::environment::{DEFAULT_EXEC_OUTPUT_TAIL_BYTES, ExecResult};
 use pebble_coding_agent::events::CommandTermination;
 use pebble_coding_agent::extensions::Redactor;
 
 use crate::checkpoint::CheckpointError;
+use crate::source::SourceCredential;
 
 /// Sanitized output for a failed command. Debug deliberately reports metadata
 /// only: attaching this to an error must not dump command output into tracing.
@@ -27,7 +26,15 @@ impl fmt::Debug for CommandOutput {
 }
 
 impl CommandOutput {
-    pub(crate) fn capture(stdout: &[u8], stderr: &[u8], env: &[(String, String)]) -> Self {
+    /// The bounded tail of a command's streams, with `credential` (the one
+    /// the command was handed) and recognizable secrets masked. The tail
+    /// starts on a whole line where one fits.
+    pub(crate) fn capture(
+        stdout: &[u8],
+        stderr: &[u8],
+        credential: Option<&SourceCredential>,
+    ) -> Self {
+        let redactor = ValueRedactor(credential.map(SourceCredential::sensitive_values));
         let result = ExecResult {
             stdout:      String::from_utf8_lossy(stdout).into_owned(),
             stderr:      String::from_utf8_lossy(stderr).into_owned(),
@@ -35,8 +42,9 @@ impl CommandOutput {
             termination: CommandTermination::Exited,
             duration_ms: 0,
         };
-        let mut tail =
-            result.output_tail(&GitRedactor::new(env), DEFAULT_EXEC_OUTPUT_TAIL_BYTES + 1);
+        // One byte over the limit through the shared sanitizer, so a tail
+        // that happens to start at a newline keeps its whole first line.
+        let mut tail = result.output_tail(&redactor, DEFAULT_EXEC_OUTPUT_TAIL_BYTES + 1);
         if let Some(tail) = &mut tail {
             for (text, truncated) in [
                 (&mut tail.stdout, &mut tail.stdout_truncated),
@@ -46,112 +54,78 @@ impl CommandOutput {
                     continue;
                 };
                 *truncated |= text.len() > DEFAULT_EXEC_OUTPUT_TAIL_BYTES;
-                if !*truncated {
-                    continue;
+                if *truncated {
+                    text.drain(..line_start(text, DEFAULT_EXEC_OUTPUT_TAIL_BYTES));
                 }
-                // Capture one extra byte through the shared sanitizer so an
-                // exact newline boundary does not discard a whole first line.
-                let mut start = text.len().saturating_sub(DEFAULT_EXEC_OUTPUT_TAIL_BYTES);
-                while !text.is_char_boundary(start) {
-                    start += 1;
-                }
-                let whole_line = start > 0 && text.as_bytes()[start - 1] == b'\n';
-                if !whole_line {
-                    if let Some(newline) = text[start..].find('\n') {
-                        if start + newline + 1 < text.len() {
-                            start += newline + 1;
-                        }
-                    }
-                }
-                text.drain(..start);
             }
         }
         Self(tail)
     }
 }
 
+/// Where a tail of at most `limit` bytes of `text` begins: at the first
+/// whole line within the limit, or mid-line when the limit holds no whole
+/// line.
+fn line_start(text: &str, limit: usize) -> usize {
+    let start = ceil_char_boundary(text, text.len().saturating_sub(limit));
+    if start == 0 || text.as_bytes()[start - 1] == b'\n' {
+        return start;
+    }
+    text[start..]
+        .find('\n')
+        .map(|newline| start + newline + 1)
+        .filter(|next| *next < text.len())
+        .unwrap_or(start)
+}
+
 /// The source chain remains typed until this projection boundary. Only command
 /// failures currently contribute output; other errors keep their existing path.
 pub(crate) fn failure_detail(error: &(dyn Error + 'static)) -> Option<FailureDetail> {
-    let causes = error::collect_chain(error);
-    let mut current = Some(error);
-    while let Some(error) = current {
-        if let Some(CheckpointError::Command { output, .. }) = error.downcast_ref() {
-            let mut detail = FailureDetail::new(causes[0].clone(), FailureCategory::Deterministic);
-            detail.causes = causes.into_iter().skip(1).collect();
-            detail.exec_output_tail.clone_from(&output.0);
-            return Some(detail);
-        }
-        current = error.source();
-    }
-    None
+    let mut sources = std::iter::successors(Some(error), |error| Error::source(*error));
+    let output = sources.find_map(|error| match error.downcast_ref()? {
+        CheckpointError::Command { output, .. } => Some(output),
+        _ => None,
+    })?;
+    let mut chain = error::collect_chain(error).into_iter();
+    let mut detail = FailureDetail::new(chain.next()?, FailureCategory::Deterministic);
+    detail.causes = chain.collect();
+    detail.exec_output_tail.clone_from(&output.0);
+    Some(detail)
 }
 
-// Explicit credentials must be removed before bounding: a cut through a token
-// must not defeat redaction. The scanner additionally masks recognizable
-// secrets.
-struct GitRedactor {
-    secrets: Vec<String>,
-}
+/// Known credentials are removed whole before the scanner and before
+/// bounding, so a cut through one cannot defeat redaction.
+struct ValueRedactor(Option<Vec<String>>);
 
-impl GitRedactor {
-    fn new(env: &[(String, String)]) -> Self {
-        let mut secrets = Vec::new();
-        for (key, value) in env {
-            if !key.starts_with("GIT_CONFIG_VALUE_") {
-                continue;
-            }
-            let Some(encoded) = value.strip_prefix("AUTHORIZATION: basic ") else {
-                continue;
-            };
-            if encoded.is_empty() {
-                continue;
-            }
-            secrets.push(encoded.to_string());
-            let Ok(decoded) = STANDARD.decode(encoded) else {
-                continue;
-            };
-            let Ok(decoded) = String::from_utf8(decoded) else {
-                continue;
-            };
-            if let Some((_, password)) = decoded.split_once(':') {
-                if !password.is_empty() {
-                    secrets.push(password.to_string());
-                }
-            }
-        }
-        secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
-        Self { secrets }
-    }
-}
-
-impl Redactor for GitRedactor {
+impl Redactor for ValueRedactor {
     fn redact<'a>(&self, text: &'a str) -> Cow<'a, str> {
-        let mut text = text.to_string();
-        for secret in &self.secrets {
-            text = text.replace(secret, "[REDACTED]");
+        let redacted =
+            fabro_redact::redact_string_with_values(text, self.0.as_deref().unwrap_or(&[]));
+        if redacted == text {
+            Cow::Borrowed(text)
+        } else {
+            Cow::Owned(redacted)
         }
-        Cow::Owned(SecretRedactor.redact(&text).into_owned())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::STANDARD;
+
     use super::*;
 
     #[test]
     fn command_diagnostics_keep_the_rejection_header_and_hide_credentials() {
         let token = "an-unrecognizable-test-password";
         let encoded = STANDARD.encode(format!("x-access-token:{token}"));
-        let env = vec![(
-            "GIT_CONFIG_VALUE_0".into(),
-            format!("AUTHORIZATION: basic {encoded}"),
-        )];
+        let credential = SourceCredential::from_encoded(&encoded).unwrap();
         let stderr = format!(
             "\x1b[31mremote: error: GH013: Repository rule violations found.\x1b[0m\n{}\nCannot create ref\n{token}\n{encoded}\n",
             "padding\n".repeat(100)
         );
-        let output = CommandOutput::capture(b"some stdout", stderr.as_bytes(), &env);
+        let output = CommandOutput::capture(b"some stdout", stderr.as_bytes(), Some(&credential));
         let tail = output.0.as_ref().unwrap();
         let text = tail.stderr.as_ref().unwrap();
         assert!(text.starts_with("remote: error: GH013:"));
@@ -167,7 +141,9 @@ mod tests {
     #[test]
     fn tails_are_bounded_readable_and_report_omitted_output() {
         let text = format!("{}\nremote: useful last line\n", "x".repeat(10_000));
-        let tail = CommandOutput::capture(b"", text.as_bytes(), &[]).0.unwrap();
+        let tail = CommandOutput::capture(b"", text.as_bytes(), None)
+            .0
+            .unwrap();
         assert_eq!(tail.stderr.as_deref(), Some("remote: useful last line\n"));
         assert!(tail.stderr_truncated);
         let exact_line = format!(
@@ -175,7 +151,7 @@ mod tests {
             "x".repeat(100),
             "y".repeat(DEFAULT_EXEC_OUTPUT_TAIL_BYTES)
         );
-        let tail = CommandOutput::capture(b"", exact_line.as_bytes(), &[])
+        let tail = CommandOutput::capture(b"", exact_line.as_bytes(), None)
             .0
             .unwrap();
         assert_eq!(
@@ -183,13 +159,13 @@ mod tests {
             DEFAULT_EXEC_OUTPUT_TAIL_BYTES
         );
         let unicode = "🦀".repeat(3000);
-        let tail = CommandOutput::capture(unicode.as_bytes(), b"\xfffailure", &[])
+        let tail = CommandOutput::capture(unicode.as_bytes(), b"\xfffailure", None)
             .0
             .unwrap();
         assert!(tail.stdout.as_ref().unwrap().len() <= DEFAULT_EXEC_OUTPUT_TAIL_BYTES);
         assert!(tail.stdout_truncated);
         assert_eq!(tail.stderr.as_deref(), Some("�failure"));
-        assert!(CommandOutput::capture(b"", b"", &[]).0.is_none());
+        assert!(CommandOutput::capture(b"", b"", None).0.is_none());
     }
 
     #[test]
@@ -197,7 +173,7 @@ mod tests {
         let error = anyhow::Error::new(CheckpointError::Command {
             action: "push".into(),
             status: "non-zero exit".into(),
-            output: CommandOutput::capture(b"", b"remote: rejected", &[]),
+            output: CommandOutput::capture(b"", b"remote: rejected", None),
         })
         .context("could not publish the run");
         let detail = failure_detail(error.as_ref()).unwrap();

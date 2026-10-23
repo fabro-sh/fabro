@@ -3,8 +3,8 @@ import { CopyButton } from "../../components/ui";
 
 /** Run diagnostics are independent of the command or adapter that failed. */
 export function RunFailureDetails({ failure }: { failure?: FailureDetail | null }) {
-  const output = failure?.exec_output_tail;
   if (!failure) return null;
+  const output = failure.exec_output_tail;
 
   const streams = [
     { label: "Standard error", text: output?.stderr, truncated: output?.stderr_truncated },

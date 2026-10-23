@@ -52,6 +52,20 @@ pub fn redact_string(s: &str) -> String {
     redact_regions(s, regions)
 }
 
+/// [`redact_string`], after every non-empty `value` is replaced outright.
+/// For the credentials a caller handed to a process: known secrets are
+/// removed whole before the scanner, so a partial scanner match cannot leave
+/// a fragment of one behind.
+pub fn redact_string_with_values(s: &str, values: &[String]) -> String {
+    let mut text = std::borrow::Cow::Borrowed(s);
+    for value in values.iter().filter(|value| !value.is_empty()) {
+        if text.contains(value.as_str()) {
+            text = std::borrow::Cow::Owned(text.replace(value, REDACTION_MARKER));
+        }
+    }
+    redact_string(&text)
+}
+
 /// Replace each region of `s` with [`REDACTION_MARKER`].
 ///
 /// Regions may be unsorted and overlapping; they are sorted by start and

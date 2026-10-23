@@ -183,12 +183,17 @@ impl RunView {
     /// Fold one item at its delivery sequence.
     pub fn fold(&mut self, item: &Item<'_>, stream_seq: u64) {
         match item {
-            Item::Platform(record) => self.fold_platform(record, stream_seq),
+            Item::Platform(record) => {
+                self.fold_platform(record, stream_seq);
+                self.attach_failure_details();
+            }
             Item::Petri(event) => self.fold_petri(event),
         }
-        self.attach_failure_details();
     }
 
+    /// Attach the recorded diagnostics that match the conclusion's failure.
+    /// Called when either input changes: a platform record folded, or the
+    /// run concluded.
     fn attach_failure_details(&mut self) {
         let Some(failure) = self
             .projection

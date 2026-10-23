@@ -20,7 +20,7 @@ use tokio::process::Command;
 use tokio::{fs, time};
 
 use crate::diagnostics::CommandOutput;
-use crate::source::{RunSource, SourceRevision};
+use crate::source::{RunSource, SourceCredential, SourceRevision};
 
 /// The failure class of a stage whose checkpoint commit failed: fatal to
 /// the run, and terminal for a restart.
@@ -250,14 +250,17 @@ impl Site {
         &self,
         url: &str,
         refspec: &str,
-        env: &[(String, String)],
+        credential: Option<&SourceCredential>,
         timeout: Duration,
     ) -> Result<(), CheckpointError> {
+        let env = credential
+            .map(|credential| credential.header_env(url))
+            .unwrap_or_default();
         let output = RunWorkspaces::run_with(
             self,
             "push",
             &["push", "--quiet", url, refspec],
-            env,
+            &env,
             timeout,
         )
         .await?;
@@ -267,7 +270,7 @@ impl Site {
             Err(CheckpointError::Command {
                 action: "push".to_owned(),
                 status: "non-zero exit".to_owned(),
-                output: CommandOutput::capture(&output.stdout, &output.stderr, env),
+                output: CommandOutput::capture(&output.stdout, &output.stderr, credential),
             })
         }
     }
@@ -451,7 +454,11 @@ impl RunWorkspaces {
             args.push(depth);
         }
         args.extend([remote, "--", refspec]);
-        let env = source.fetch_env().await;
+        let credential = source.credential().await;
+        let env = credential
+            .as_ref()
+            .map(|credential| credential.header_env(&source.origin))
+            .unwrap_or_default();
         let output = Self::run_with(site, "fetch", &args, &env, SOURCE_FETCH_TIMEOUT).await?;
         if output.success {
             Ok(())
@@ -459,7 +466,7 @@ impl RunWorkspaces {
             Err(CheckpointError::Command {
                 action: "fetch".to_string(),
                 status: "non-zero exit".to_string(),
-                output: CommandOutput::capture(&output.stdout, &output.stderr, &env),
+                output: CommandOutput::capture(&output.stdout, &output.stderr, credential.as_ref()),
             })
         }
     }
@@ -818,7 +825,7 @@ impl RunWorkspaces {
             Err(CheckpointError::Command {
                 action: action.to_string(),
                 status: "non-zero exit".to_string(),
-                output: CommandOutput::capture(&output.stdout, &output.stderr, &[]),
+                output: CommandOutput::capture(&output.stdout, &output.stderr, None),
             })
         }
     }
