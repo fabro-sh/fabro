@@ -1,6 +1,6 @@
 use fabro_types::SandboxProviderKind;
-use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{ApprovalMode, EnvironmentNetworkMode, RunGoal, RunMode};
+use fabro_types::settings::{Duration, InterpString};
 
 use crate::{MergeMap, SettingsLayer};
 
@@ -554,10 +554,7 @@ fn lifecycle_defaults_and_explicit_false_remain_compatible_across_providers() {
             !lifecycle.run_policy().stop_on_terminal,
             "omission inherits independently"
         );
-        assert_eq!(
-            lifecycle.auto_stop,
-            Some(fabro_types::settings::Duration::from_secs(1800))
-        );
+        assert_eq!(lifecycle.auto_stop, Some(Duration::from_secs(1800)));
     }
 }
 

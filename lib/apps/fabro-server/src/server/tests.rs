@@ -2158,7 +2158,7 @@ fn slack_service_ignores_server_env_tokens() {
 #[cfg(unix)]
 #[test]
 fn worker_command_uses_captured_server_connection_configuration() {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::ffi::OsStr;
 
     let storage_dir = tempfile::tempdir().unwrap();
     let changed = Arc::new(AtomicBool::new(false));
@@ -2203,12 +2203,9 @@ fn worker_command_uses_captured_server_connection_configuration() {
             "server.internal",
         ),
     ] {
-        assert_eq!(
-            env.get(std::ffi::OsStr::new(name)),
-            Some(&Some(std::ffi::OsStr::new(value)))
-        );
+        assert_eq!(env.get(OsStr::new(name)), Some(&Some(OsStr::new(value))));
     }
-    assert!(!env.contains_key(std::ffi::OsStr::new(EnvVars::DAYTONA_API_KEY)));
+    assert!(!env.contains_key(OsStr::new(EnvVars::DAYTONA_API_KEY)));
 }
 
 #[cfg(unix)]
