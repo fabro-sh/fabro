@@ -7,10 +7,11 @@ use fabro_types::settings::run::{
     ArtifactsSettings, GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings,
     McpServerSettings, McpTransport, MergeStrategy, NotificationProviderSettings,
     NotificationRouteSettings, PreparedStep, PreparedStepRun, PullRequestSettings,
-    ResolvedMcpEntry, RunAgentSettings, RunBranchSettings, RunCheckpointSettings, RunCloneSettings,
-    RunExecutionSettings, RunGitSettings, RunGoal, RunIntegrationsGithubSettings,
-    RunIntegrationsSettings, RunInterviewsSettings, RunModelControls, RunModelSettings,
-    RunNamespace, RunPrepareSettings, RunScmSettings, ScmGitHubSettings, TlsMode,
+    ResolvedMcpEntry, RunAgentSettings, RunBranchSettings, RunCheckpointSettings,
+    RunChildrenSettings, RunCloneSettings, RunExecutionSettings, RunGitSettings, RunGoal,
+    RunIntegrationsGithubSettings, RunIntegrationsSettings, RunInterviewsSettings,
+    RunModelControls, RunModelSettings, RunNamespace, RunPrepareSettings, RunScmSettings,
+    ScmGitHubSettings, TlsMode,
 };
 use fabro_util::workspace_glob::WorkspaceGlob;
 
@@ -18,10 +19,10 @@ use super::{ResolveError, resolve_run_environment};
 use crate::{
     EnvironmentLayer, HookAgentMarker, HookEntry, HookTlsMode, InterviewProviderLayer,
     InterviewsLayer, McpEntryLayer, MergeMap, ModelRefOrSplice, NotificationProviderLayer,
-    NotificationRouteLayer, RunAgentLayer, RunArtifactsLayer, RunCheckpointLayer, RunCloneLayer,
-    RunExecutionLayer, RunGitLayer, RunGoalLayer, RunIntegrationsGithubLayer, RunIntegrationsLayer,
-    RunLayer, RunModelLayer, RunPrepareLayer, RunPullRequestLayer, RunRunBranchLayer, RunScmLayer,
-    StickyMap, StringOrSplice,
+    NotificationRouteLayer, RunAgentLayer, RunArtifactsLayer, RunCheckpointLayer, RunChildrenLayer,
+    RunCloneLayer, RunExecutionLayer, RunGitLayer, RunGoalLayer, RunIntegrationsGithubLayer,
+    RunIntegrationsLayer, RunLayer, RunModelLayer, RunPrepareLayer, RunPullRequestLayer,
+    RunRunBranchLayer, RunScmLayer, StickyMap, StringOrSplice,
 };
 
 pub fn resolve_run(
@@ -74,6 +75,15 @@ pub fn resolve_run(
         pull_request,
         artifacts: resolve_artifacts(layer.artifacts.as_ref(), errors),
         integrations: resolve_integrations(layer.integrations.as_ref(), errors),
+        children: resolve_children(layer.children.as_ref()),
+    }
+}
+
+fn resolve_children(children: Option<&RunChildrenLayer>) -> RunChildrenSettings {
+    RunChildrenSettings {
+        auto_approve: children
+            .and_then(|children| children.auto_approve)
+            .unwrap_or(false),
     }
 }
 

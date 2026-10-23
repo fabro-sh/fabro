@@ -108,6 +108,9 @@ type = "sandbox"
 command = ["npx", "@playwright/mcp@latest", "--port", "3100", "--headless"]
 port = 3100
 
+[run.children]
+auto_approve = true
+
 [run.pull_request]
 enabled = true
 draft = false
@@ -488,6 +491,23 @@ For example, `.ai/reports/*.md` matches direct Markdown children of `.ai/reports
 Each collection reflects the post-stage workspace state rather than filesystem modification timestamps. A path with unchanged content is recorded only once per run; if its content changes, Fabro captures the new version.
 
 Fabro resolves the configured workspace root but does not recurse through symlinks below it while collecting artifacts. Dependency, cache, and build directories such as `.git`, `node_modules`, `target`, `.venv`, `.cache`, and `dist` are pruned. A collection is limited to 100 files, 10 MB per file, and 50 MB total.
+
+### `[run.children]`
+
+Configure how this workflow treats the [child runs](/execution/child-runs) its workers start.
+
+```toml title="run.toml"
+[run.children]
+auto_approve = true
+```
+
+| Field | Description | Default |
+|---|---|---|
+| `auto_approve` | Auto-approve children this workflow spawns at start | `false` |
+
+This setting belongs to the parent workflow and is the workflow half of the child auto-approval opt-in. A worker-started child only skips the operator approval checkpoint when the server also enables `[server.approvals] allow_child_auto_approval`; any other combination leaves the child pending approval. See [Child Runs — Start and approval](/execution/child-runs#start-and-approval).
+
+`auto_approve` here governs the child's lifecycle start. It is distinct from `args.auto_approve` on `fabro_run_create` (the child's own `[run.execution] approval` posture for agent interactions) and from `[run.execution] approval`, which applies to this run's own agent stages.
 
 ### `[run.agent]`
 

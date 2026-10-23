@@ -380,6 +380,7 @@ models/run-artifact.ts
 models/run-branch-settings.ts
 models/run-checkpoint-settings.ts
 models/run-checkpoint.ts
+models/run-children-settings.ts
 models/run-client-provenance.ts
 models/run-clone-settings.ts
 models/run-commit-parent.ts
@@ -485,6 +486,7 @@ models/secret-list-response.ts
 models/secret-metadata.ts
 models/secret-type.ts
 models/server-api-settings.ts
+models/server-approvals-settings.ts
 models/server-artifacts-settings.ts
 models/server-auth-github-settings.ts
 models/server-auth-method.ts

@@ -33,6 +33,8 @@ pub struct ServerLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scheduler:    Option<ServerSchedulerLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approvals:    Option<ServerApprovalsLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logging:      Option<ServerLoggingLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub integrations: Option<ServerIntegrationsLayer>,
@@ -193,6 +195,16 @@ pub struct ObjectStoreS3Layer {
 pub struct ServerSchedulerLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_concurrent_runs: Option<usize>,
+}
+
+/// `[server.approvals]` — server-owned approval policy.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[serde(deny_unknown_fields)]
+pub struct ServerApprovalsLayer {
+    /// Server half of the child auto-approval opt-in. The workflow half is
+    /// `[run.children] auto_approve` in the parent workflow's `workflow.toml`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_child_auto_approval: Option<bool>,
 }
 
 /// `[server.logging]` — process-owned logging configuration for the server.
