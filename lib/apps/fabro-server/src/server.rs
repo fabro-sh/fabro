@@ -151,7 +151,7 @@ use crate::sandbox_access::{
     SandboxInventory,
 };
 use crate::server_secrets::ServerSecrets;
-use crate::spawn_env::apply_render_graph_env;
+use crate::spawn_env::{SandboxConnectionEnv, apply_render_graph_env};
 use crate::worker_control::{
     LocalWorkerControlBus, WORKER_CONTROL_ACK_WAIT, WorkerControlAcks, WorkerControlBus,
     WorkerControlBusError,
@@ -3957,7 +3957,7 @@ fn worker_launch_spec(
         active_config_path: state.active_config_path().to_path_buf(),
         github_app_private_key,
         fabro_home: fabro_config::Home::from_env().root().to_path_buf(),
-        sandbox_connection_env: crate::spawn_env::SandboxConnectionEnv::from_lookup(|name| {
+        sandbox_connection_env: SandboxConnectionEnv::from_lookup(|name| {
             state.config_env_lookup(name)
         }),
     })
