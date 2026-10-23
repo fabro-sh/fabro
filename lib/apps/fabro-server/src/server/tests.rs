@@ -2157,6 +2157,62 @@ fn slack_service_ignores_server_env_tokens() {
 
 #[cfg(unix)]
 #[test]
+fn worker_command_uses_captured_server_connection_configuration() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let storage_dir = tempfile::tempdir().unwrap();
+    let changed = Arc::new(AtomicBool::new(false));
+    let lookup_changed = Arc::clone(&changed);
+    let state = worker_command_test_state_with_extra_config_and_env_lookup(
+        storage_dir.path(),
+        &["dev-token"],
+        Some(TEST_DEV_TOKEN),
+        "",
+        &[],
+        move |name| {
+            let value = match name {
+                EnvVars::DAYTONA_API_URL => "https://daytona.example/api",
+                EnvVars::DAYTONA_ORGANIZATION_ID => "server-organization",
+                EnvVars::PETRI_SANDBOX_DOCKER_HOST_ADDRESS => "server.internal",
+                _ => return None,
+            };
+            Some(if lookup_changed.load(Ordering::SeqCst) {
+                "changed-after-launch-capture".to_string()
+            } else {
+                value.to_string()
+            })
+        },
+    );
+    let spec = worker_launch_spec(
+        &state,
+        RunId::new(),
+        RunExecutionMode::Start,
+        storage_dir.path(),
+        false,
+        None,
+    )
+    .unwrap();
+    changed.store(true, Ordering::SeqCst);
+    let cmd = LocalWorkerRuntime::command_for_spec(&spec);
+    let env: HashMap<_, _> = cmd.as_std().get_envs().collect();
+    for (name, value) in [
+        (EnvVars::DAYTONA_API_URL, "https://daytona.example/api"),
+        (EnvVars::DAYTONA_ORGANIZATION_ID, "server-organization"),
+        (
+            EnvVars::PETRI_SANDBOX_DOCKER_HOST_ADDRESS,
+            "server.internal",
+        ),
+    ] {
+        assert_eq!(
+            env.get(std::ffi::OsStr::new(name)),
+            Some(&Some(std::ffi::OsStr::new(value)))
+        );
+    }
+    assert!(!env.contains_key(std::ffi::OsStr::new(EnvVars::DAYTONA_API_KEY)));
+}
+
+#[cfg(unix)]
+#[test]
 fn worker_command_uses_null_stdin_and_token_env() {
     let storage_dir = tempfile::tempdir().unwrap();
     let state = worker_command_test_state(storage_dir.path(), &["dev-token"], Some(TEST_DEV_TOKEN));

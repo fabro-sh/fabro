@@ -359,7 +359,7 @@ fabro create [OPTIONS] <WORKFLOW>
 | `--label <key=value>` | Attach a label to this run (repeatable, format: KEY=VALUE) |
 | `--model <model>` | Override default LLM model |
 | `--parent <run>` | Link this run to an existing orchestration parent run |
-| `--preserve-sandbox` | Keep the sandbox alive after the run finishes (for debugging) |
+| `--preserve-sandbox` | Skip sandbox pruning when deleting the run; does not disable terminal stop |
 | `--provider <provider>` | Override default LLM provider |
 | `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
 | `--target-branch <branch>` | Target working branch (default: remote default branch), pinned to its observed commit |
@@ -1114,7 +1114,7 @@ fabro run [OPTIONS] <WORKFLOW>
 | `--label <key=value>` | Attach a label to this run (repeatable, format: KEY=VALUE) |
 | `--model <model>` | Override default LLM model |
 | `--parent <run>` | Link this run to an existing orchestration parent run |
-| `--preserve-sandbox` | Keep the sandbox alive after the run finishes (for debugging) |
+| `--preserve-sandbox` | Skip sandbox pruning when deleting the run; does not disable terminal stop |
 | `--provider <provider>` | Override default LLM provider |
 | `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
 | `--target-branch <branch>` | Target working branch (default: remote default branch), pinned to its observed commit |

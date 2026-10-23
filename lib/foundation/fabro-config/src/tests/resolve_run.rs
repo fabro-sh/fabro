@@ -529,6 +529,39 @@ channel = "#ops"
 }
 
 #[test]
+fn lifecycle_defaults_and_explicit_false_remain_compatible_across_providers() {
+    for provider in ["local", "docker", "daytona"] {
+        let minimal = format!("[environments.default]\nprovider = \"{provider}\"\n");
+        let defaults = workflow_settings_from_toml_with_catalog("_version = 1", &minimal).unwrap();
+        let policy = defaults.run.environment.lifecycle.run_policy();
+        assert!(!policy.preserve);
+        assert!(policy.stop_on_terminal);
+
+        let catalog = format!(
+            "{minimal}\n[environments.default.lifecycle]\npreserve = true\nstop_on_terminal = false\nauto_stop = \"30m\"\n"
+        );
+        let resolved = workflow_settings_from_toml_with_catalog(
+            "_version = 1\n[run.environment.lifecycle]\npreserve = false\n",
+            &catalog,
+        )
+        .unwrap();
+        let lifecycle = resolved.run.environment.lifecycle;
+        assert!(
+            !lifecycle.run_policy().preserve,
+            "explicit false overrides the template"
+        );
+        assert!(
+            !lifecycle.run_policy().stop_on_terminal,
+            "omission inherits independently"
+        );
+        assert_eq!(
+            lifecycle.auto_stop,
+            Some(fabro_types::settings::Duration::from_secs(1800))
+        );
+    }
+}
+
+#[test]
 fn toml_run_environment_lifecycle_override_is_applied() {
     let settings = super::workflow_settings_from_toml(
         r"

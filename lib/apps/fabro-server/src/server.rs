@@ -2904,6 +2904,7 @@ async fn delete_run_sandbox_resource(
         .run
         .environment
         .lifecycle
+        .run_policy()
         .preserve;
     let Some(record) = projection
         .sandbox
@@ -3956,6 +3957,9 @@ fn worker_launch_spec(
         active_config_path: state.active_config_path().to_path_buf(),
         github_app_private_key,
         fabro_home: fabro_config::Home::from_env().root().to_path_buf(),
+        sandbox_connection_env: crate::spawn_env::SandboxConnectionEnv::from_lookup(|name| {
+            state.config_env_lookup(name)
+        }),
     })
 }
 
@@ -4425,7 +4429,14 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             let access = state.provider_access().await?;
             sandbox_access::stop_run_sandboxes(
                 &access,
-                &final_state.spec.settings.run.environment,
+                &final_state.spec.settings.run.environment.provider,
+                final_state
+                    .spec
+                    .settings
+                    .run
+                    .environment
+                    .lifecycle
+                    .run_policy(),
                 run_id,
             )
             .await
