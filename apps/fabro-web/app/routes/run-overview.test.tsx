@@ -142,4 +142,25 @@ describe("RunOverview", () => {
     const other = renderAt("/runs/run-b");
     expect(graphTransform(other)).toBe(initial);
   });
+
+  test("bounds platform records height so the graph keeps a flex share", () => {
+    currentGraphData = "<svg viewBox='0 0 100 100'></svg>";
+
+    const renderer = render();
+    const scroll = renderer.root.findAll(
+      (n) =>
+        typeof n.props?.className === "string" &&
+        n.props.className.includes("max-h-[min(40vh,16rem)]") &&
+        n.props.className.includes("overflow-y-auto"),
+    );
+    expect(scroll).toHaveLength(1);
+
+    const graph = renderer.root.findAll(
+      (n) =>
+        typeof n.props?.className === "string" &&
+        n.props.className.includes("graph-svg") &&
+        n.props.className.includes("flex-1"),
+    );
+    expect(graph).toHaveLength(1);
+  });
 });

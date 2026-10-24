@@ -154,8 +154,11 @@ export default function RunOverview() {
       </div>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 pb-[var(--fabro-interview-dock-clearance,0px)]">
-        <div className="shrink-0 space-y-4">
+        <div className="shrink-0">
           <RunSummaryPanel runId={id!} />
+        </div>
+        {/* Cap + scroll so a long checkpoint list cannot starve the graph. */}
+        <div className="min-h-0 max-h-[min(40vh,16rem)] shrink overflow-y-auto overflow-x-hidden">
           <PlatformRecordsPanel runId={id!} />
         </div>
         {graphSvg === undefined && graphQuery.isLoading ? (
