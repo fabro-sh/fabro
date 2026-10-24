@@ -27,9 +27,9 @@
 use std::sync::Arc;
 
 use fabro_types::{
-    ArtifactSource, BlobHash, DiffSummary, GitIdentity, PairId, PairTarget, Principal,
-    PullRequestCreationId, PullRequestLink, RunControlAction, RunId, RunNoticeLevel, RunSpec,
-    RunStatus,
+    ArtifactSource, BlobHash, DiffSummary, FailureDetail, GitIdentity, PairId, PairTarget,
+    Principal, PullRequestCreationId, PullRequestLink, RunControlAction, RunId, RunNoticeLevel,
+    RunSpec, RunStatus,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnection, SqliteRow};
@@ -109,6 +109,9 @@ pub enum PlatformRecordKind {
     #[serde(rename = "run.notice")]
     #[strum(serialize = "run.notice")]
     RunNotice,
+    #[serde(rename = "run.failure_details")]
+    #[strum(serialize = "run.failure_details")]
+    RunFailureDetails,
     #[serde(rename = "interview.answered")]
     #[strum(serialize = "interview.answered")]
     InterviewAnswered,
@@ -178,6 +181,10 @@ pub enum PlatformRecord {
     RunSuperseded(RunSupersededRecord),
     #[serde(rename = "run.notice")]
     RunNotice(RunNoticeRecord),
+    /// Sanitized diagnostics for a specific failure, without deciding run
+    /// status.
+    #[serde(rename = "run.failure_details")]
+    RunFailureDetails(RunFailureDetailsRecord),
     /// Who answered a question, beside the answer Petri recorded.
     #[serde(rename = "interview.answered")]
     InterviewAnswered(InterviewAnsweredRecord),
@@ -229,6 +236,7 @@ impl PlatformRecord {
             Self::RunUnarchived => PlatformRecordKind::RunUnarchived,
             Self::RunSuperseded(_) => PlatformRecordKind::RunSuperseded,
             Self::RunNotice(_) => PlatformRecordKind::RunNotice,
+            Self::RunFailureDetails(_) => PlatformRecordKind::RunFailureDetails,
             Self::InterviewAnswered(_) => PlatformRecordKind::InterviewAnswered,
             Self::RunBranch(_) => PlatformRecordKind::RunBranch,
             Self::GitIdentity(_) => PlatformRecordKind::GitIdentity,
@@ -262,6 +270,7 @@ impl PlatformRecord {
             | Self::RunUnarchived
             | Self::RunSuperseded(_)
             | Self::RunNotice(_)
+            | Self::RunFailureDetails(_)
             | Self::InterviewAnswered(_)
             | Self::RunBranch(_)
             | Self::GitIdentity(_)
@@ -273,6 +282,20 @@ impl PlatformRecord {
             | Self::RunPaired(_) => None,
         }
     }
+}
+
+/// Supporting details for an exact rendered failure. Finalization diagnostics
+/// also name the host's failure code, so execution/cancellation cannot inherit
+/// unrelated publication output. A successful run never consumes this record.
+/// Producers must select the terminal failure before appending: matching text
+/// is a guard, not an identity for competing failures with the same summary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunFailureDetailsRecord {
+    /// Exact rendered message handed to the engine, used only for association.
+    pub message:           String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finalization_code: Option<String>,
+    pub detail:            FailureDetail,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -845,6 +868,16 @@ mod tests {
                 code:    "sandbox.slow".to_string(),
                 message: "the sandbox took a while".to_string(),
             }),
+            PlatformRecordKind::RunFailureDetails => {
+                PlatformRecord::RunFailureDetails(RunFailureDetailsRecord {
+                    message:           "git push failed".to_string(),
+                    finalization_code: Some("publish_failed".to_string()),
+                    detail:            FailureDetail::new(
+                        "git push failed",
+                        fabro_types::FailureCategory::Deterministic,
+                    ),
+                })
+            }
             PlatformRecordKind::InterviewAnswered => {
                 PlatformRecord::InterviewAnswered(InterviewAnsweredRecord {
                     question:  "q-1".to_string(),

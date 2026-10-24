@@ -28,7 +28,7 @@ use fabro_petri::runtime::RuntimeSpec;
 use fabro_petri::{SqliteRunStore, providers, test_support as petri_support};
 use fabro_store::platform_records::{
     CheckpointRecord, PlatformRecord, PlatformRecordStore, RunCreatedRecord, RunDiffRecord,
-    RunLifecycleKind, RunLifecycleRecord,
+    RunFailureDetailsRecord, RunLifecycleKind, RunLifecycleRecord,
 };
 use fabro_store::{BlobStore, test_support};
 use fabro_types::{
@@ -1447,6 +1447,28 @@ async fn required_finalization_projects_only_the_committed_overall_result() {
                 .await
                 .unwrap();
         }
+        let diagnostic = RunFailureDetailsRecord {
+            message:           "the push was rejected".to_string(),
+            finalization_code: Some("publish_failed".to_string()),
+            detail:            fabro_types::FailureDetail {
+                exec_output_tail: Some(fabro_types::ExecOutputTail {
+                    stderr: Some("remote: repository rules rejected this push".to_string()),
+                    ..Default::default()
+                }),
+                ..fabro_types::FailureDetail::new(
+                    "the push was rejected",
+                    fabro_types::FailureCategory::Deterministic,
+                )
+            },
+        };
+        platform
+            .append(
+                &scenario.run_id,
+                &PlatformRecord::RunFailureDetails(diagnostic.clone()),
+                None,
+            )
+            .await
+            .unwrap();
         finalizer.release.add_permits(1);
         let report = task.await.unwrap();
         assert_eq!(report.state.folded_status(), PetriRunStatus::Success);
@@ -1481,6 +1503,14 @@ async fn required_finalization_projects_only_the_committed_overall_result() {
             rejection
         );
         assert_eq!(
+            conclusion
+                .failure
+                .as_ref()
+                .and_then(|failure| failure.detail.exec_output_tail.as_ref()),
+            rejection.and(diagnostic.detail.exec_output_tail.as_ref()),
+            "a successful retry must not inherit earlier diagnostic output",
+        );
+        assert_eq!(
             conclusion.status,
             if rejection.is_some() {
                 StageOutcome::Failed {
@@ -1502,6 +1532,61 @@ async fn required_finalization_projects_only_the_committed_overall_result() {
             Some(fabro_types::format_blob_ref(&patch_blob).as_str())
         );
         assert!(!conclusion.stages.is_empty());
+        assert_view_equals_rebuild(&scenario.pool, scenario.run_id).await;
+
+        // Diagnostics delivered after the terminal event must also fold, and
+        // unrelated errors must never replace the matching attachment.
+        let mut later = diagnostic.clone();
+        later.detail.exec_output_tail.as_mut().unwrap().stderr =
+            Some("later diagnostic delivery".to_string());
+        platform
+            .append(
+                &scenario.run_id,
+                &PlatformRecord::RunFailureDetails(later.clone()),
+                None,
+            )
+            .await
+            .unwrap();
+        let mut unrelated = later.clone();
+        unrelated.message = "a different failure".to_string();
+        unrelated.detail.exec_output_tail.as_mut().unwrap().stderr =
+            Some("wrong output".to_string());
+        platform
+            .append(
+                &scenario.run_id,
+                &PlatformRecord::RunFailureDetails(unrelated),
+                None,
+            )
+            .await
+            .unwrap();
+        let mut wrong_code = later.clone();
+        wrong_code.finalization_code = Some("checkpoint_failed".to_string());
+        wrong_code.detail.exec_output_tail.as_mut().unwrap().stderr =
+            Some("wrong channel".to_string());
+        platform
+            .append(
+                &scenario.run_id,
+                &PlatformRecord::RunFailureDetails(wrong_code),
+                None,
+            )
+            .await
+            .unwrap();
+        projector.signal(scenario.run_id);
+        projector.settle(scenario.run_id).await;
+        let updated = petri_support::stored_projection(&scenario.pool, scenario.run_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            updated
+                .conclusion
+                .as_ref()
+                .unwrap()
+                .failure
+                .as_ref()
+                .and_then(|failure| failure.detail.exec_output_tail.as_ref()),
+            rejection.and(later.detail.exec_output_tail.as_ref())
+        );
         assert_view_equals_rebuild(&scenario.pool, scenario.run_id).await;
 
         // A later worker lifecycle cannot replace the committed terminal
@@ -1538,7 +1623,7 @@ async fn required_finalization_projects_only_the_committed_overall_result() {
         assert_eq!(after.status, stored.status);
         assert_eq!(
             serde_json::to_value(after.conclusion).unwrap(),
-            serde_json::to_value(stored.conclusion).unwrap()
+            serde_json::to_value(updated.conclusion).unwrap()
         );
         assert_view_equals_rebuild(&scenario.pool, scenario.run_id).await;
     }

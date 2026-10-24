@@ -67,6 +67,7 @@ pub mod blobs;
 pub mod check;
 pub mod checkpoint;
 pub mod controls;
+pub mod diagnostics;
 pub mod engine;
 pub mod fork;
 mod git_identity;

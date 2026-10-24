@@ -7,7 +7,7 @@ use cli_table::{Cell, CellStruct, Style, Table};
 use fabro_api::types;
 use fabro_types::diagnostic::{Diagnostic, RelatedDiagnostic, Severity};
 use fabro_types::{
-    BlobRefEncoding, Conclusion, PullRequestLink, RunId, StageId, StageOutcome,
+    BlobRefEncoding, Conclusion, ExecOutputTail, PullRequestLink, RunId, StageId, StageOutcome,
     parse_blob_ref_encoded,
 };
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
@@ -268,6 +268,9 @@ pub(crate) fn print_run_conclusion(
     if let Some(ref failure) = conclusion.failure {
         let rendered = render_with_causes(&failure.detail.message, &failure.detail.causes);
         fabro_util::printerr!(printer, "Failure:   {}", styles.red.apply_to(rendered));
+        if let Some(output) = &failure.detail.exec_output_tail {
+            write_failure_output(output, printer.stderr());
+        }
     }
 
     if pushed_branch.is_some() || pr_url.is_some() {
@@ -281,6 +284,24 @@ pub(crate) fn print_run_conclusion(
         }
         if let Some(url) = pr_url {
             fabro_util::printerr!(printer, "{} {url}", styles.bold.apply_to("Pull request:"));
+        }
+    }
+}
+
+fn write_failure_output(output: &ExecOutputTail, mut writer: impl std::fmt::Write) {
+    for (label, text, truncated) in [
+        ("Standard error", &output.stderr, output.stderr_truncated),
+        ("Standard output", &output.stdout, output.stdout_truncated),
+    ] {
+        if text.is_none() && !truncated {
+            continue;
+        }
+        let _ = writeln!(writer, "{label}:");
+        if truncated {
+            let _ = writeln!(writer, "[earlier output omitted]");
+        }
+        if let Some(text) = text {
+            let _ = writeln!(writer, "{text}");
         }
     }
 }
@@ -421,4 +442,50 @@ async fn print_assets_with_client(
         ))
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conclusion_diagnostics_preserve_lines_and_explain_truncation() {
+        let output = ExecOutputTail {
+            stderr:           Some(
+                "remote: GH013 — repository rules\nCannot create ref.\n".to_string(),
+            ),
+            stdout:           Some("command output ✓".to_string()),
+            stderr_truncated: true,
+            stdout_truncated: false,
+        };
+        let mut rendered = String::new();
+        write_failure_output(&output, &mut rendered);
+        insta::assert_snapshot!(rendered, @"
+        Standard error:
+        [earlier output omitted]
+        remote: GH013 — repository rules
+        Cannot create ref.
+
+        Standard output:
+        command output ✓
+        ");
+    }
+
+    #[test]
+    fn conclusion_diagnostics_do_not_invent_output_for_older_runs() {
+        let mut rendered = String::new();
+        write_failure_output(&ExecOutputTail::default(), &mut rendered);
+        assert!(rendered.is_empty());
+        write_failure_output(
+            &ExecOutputTail {
+                stderr_truncated: true,
+                ..Default::default()
+            },
+            &mut rendered,
+        );
+        insta::assert_snapshot!(rendered, @"
+        Standard error:
+        [earlier output omitted]
+        ");
+    }
 }

@@ -48,6 +48,9 @@ impl RunView {
         touch(projection, at);
         match &stored.record {
             PlatformRecord::RunLifecycle(record) => fold_lifecycle(projection, record, at),
+            PlatformRecord::RunFailureDetails(record) => {
+                self.state.failure_details.push(record.clone());
+            }
             PlatformRecord::RunTitle(record) => projection.title.clone_from(&record.title),
             PlatformRecord::RunParent(record) => projection.parent_id = record.parent_id,
             PlatformRecord::RunArchived => projection.archived_at = Some(at),

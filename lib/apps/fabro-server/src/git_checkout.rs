@@ -527,7 +527,7 @@ async fn run_git_plan(plan: GitCommandPlan) -> Result<Vec<u8>, GitCommandError> 
         message.push_str(stdout.trim());
     }
     Err(GitCommandError::Exit {
-        message: redact_git_output(&message, &plan.sensitive_values),
+        message: fabro_redact::redact_string_with_values(&message, &plan.sensitive_values),
     })
 }
 
@@ -537,18 +537,6 @@ fn safe_command_label(plan: &GitCommandPlan) -> String {
     } else {
         format!("{} {}", plan.program, plan.args.join(" "))
     }
-}
-
-fn redact_git_output(text: &str, sensitive_values: &[String]) -> String {
-    let mut redacted = fabro_redact::redact_string(text);
-    for value in sensitive_values
-        .iter()
-        .map(String::as_str)
-        .filter(|value| !value.is_empty())
-    {
-        redacted = redacted.replace(value, "REDACTED");
-    }
-    redacted
 }
 
 #[cfg(test)]
@@ -828,7 +816,8 @@ mod tests {
             "fatal: could not read Username for https://github.com/fabro-sh/fabro.git; token={secret}; header={basic}"
         );
 
-        let redacted = redact_git_output(&message, &[secret.to_string(), basic.clone()]);
+        let redacted =
+            fabro_redact::redact_string_with_values(&message, &[secret.to_string(), basic.clone()]);
 
         assert!(!redacted.contains(secret), "token leaked: {redacted}");
         assert!(

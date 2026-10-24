@@ -89,14 +89,13 @@ use std::time::Duration;
 use bytes::Bytes;
 use fabro_store::platform_records::{
     ArtifactCollectedRecord, CheckpointRecord, GitIdentityRecord, OperationKey, RunBranchRecord,
-    RunDiffRecord,
+    RunDiffRecord, RunFailureDetailsRecord,
 };
 use fabro_store::{PlatformRecord, PlatformRecordKind, StagePosition};
 use fabro_types::settings::run::RunNamespace;
 use fabro_types::{ArtifactSource, BlobHash, DiffSummary, GitIdentity, RunId};
-use fabro_util::error::collect_chain;
-use fabro_util::sync;
 use fabro_util::workspace_glob::{WorkspaceGlobError, WorkspaceGlobSet};
+use fabro_util::{error, sync};
 use petri_execution::{CancelReason, CoordinatorHandle, InvocationId, RunKey, RunStore};
 use petri_runtime::driver::lifecycle::{
     AdmitAttempt, AttemptDecision, ExecutionHooks, HookContext, Note, PrepareError, PrepareResult,
@@ -120,10 +119,10 @@ use crate::checkpoint::{
 };
 use crate::fork::{self, ForkError};
 use crate::platform_records::{PlatformRecordError, PlatformRecords};
-use crate::projection;
 use crate::recovery::{self, Plan, RecoveryError, RestoreTarget};
 use crate::source::RunSource;
 use crate::workspace::{self, WorkspaceLookup, WorkspaceLookupError};
+use crate::{diagnostics, projection};
 
 /// The note kind the hooks record on a firing about its checkpoint.
 pub const CHECKPOINT_NOTE: &str = "fabro.checkpoint";
@@ -225,7 +224,7 @@ impl HookError {
     /// text.
     #[must_use]
     pub fn render(&self) -> String {
-        collect_chain(self).join(": ")
+        error::render_chain(self)
     }
 }
 
@@ -264,14 +263,15 @@ pub struct Publication {
 /// The platform's end-of-run publication: what a successful run's work does
 /// after its last stage and before its terminal record, such as pushing the
 /// run branch and opening a pull request. An `Err` fails the run with the
-/// message, as a failed publish did on the legacy executor.
+/// message, as a failed publish did on the legacy executor. This is internal
+/// application orchestration: errors retain their sources through finalization.
 #[async_trait::async_trait]
 pub trait RunPublisher: Send + Sync {
     /// Push one checkpoint. A failure is retried by later checkpoints and
     /// final publication, which must succeed for the run to succeed.
-    async fn push(&self, site: &Site, branch: &str, sha: &str) -> Result<(), String>;
+    async fn push(&self, site: &Site, branch: &str, sha: &str) -> anyhow::Result<()>;
 
-    async fn publish(&self, publication: &Publication) -> Result<(), String>;
+    async fn publish(&self, publication: &Publication) -> anyhow::Result<()>;
 }
 
 impl HooksSpec {
@@ -548,18 +548,58 @@ impl FabroHooks {
         sync::lock(&self.failure).clone()
     }
 
+    async fn record_failure_details(
+        &self,
+        error: &(dyn std::error::Error + Send + Sync + 'static),
+        message: &str,
+        finalization_code: Option<&str>,
+    ) {
+        let Some(detail) = diagnostics::failure_detail(error) else {
+            return;
+        };
+        if let Err(error) = self
+            .records
+            .append(
+                &self.run_id,
+                &PlatformRecord::RunFailureDetails(RunFailureDetailsRecord {
+                    message: message.to_string(),
+                    finalization_code: finalization_code.map(str::to_owned),
+                    detail,
+                }),
+                None,
+            )
+            .await
+        {
+            // Display names the storage boundary only; its source may contain
+            // a response body or command output and must not enter tracing.
+            warn!(
+                run_id = %self.run_id,
+                finalization_code,
+                error = %error,
+                "supporting failure details could not be recorded"
+            );
+        }
+    }
+
     /// The run's workspaces on this host, as the hooks reach them.
     #[must_use]
     pub fn workspaces(&self) -> &RunWorkspaces {
         &self.workspaces
     }
 
-    fn fail_run(&self, message: &str) {
-        let mut failure = sync::lock(&self.failure);
-        if failure.is_none() {
-            *failure = Some(message.to_string());
-        }
-        drop(failure);
+    async fn fail_run(&self, error: &HookError, message: &str) {
+        // Select before any await: concurrent checkpoints can have identical
+        // summaries but different output. Only the winner may persist details.
+        // This remains true even if its append fails or loses its response.
+        let selected = {
+            let mut failure = sync::lock(&self.failure);
+            if failure.is_none() {
+                *failure = Some(message.to_string());
+                true
+            } else {
+                false
+            }
+        };
         if let Some(handle) = self.handle.get() {
             info!(run_id = %self.run_id, "cancelling the Petri run after a failed checkpoint");
             handle.cancel_root_for(CancelReason::Control);
@@ -568,6 +608,10 @@ impl FabroHooks {
                 run_id = %self.run_id,
                 "no coordinator handle is attached; the failed checkpoint cannot cancel the run"
             );
+        }
+        if selected {
+            self.record_failure_details(error, message, Some(CHECKPOINT_FAILED_CLASS))
+                .await;
         }
     }
 
@@ -862,15 +906,25 @@ impl FabroHooks {
             }
             Ok(None) => Ok(()),
             Err(error) => {
+                let rendered = error::render_chain(&error);
                 warn!(
                     run_id = %self.run_id,
                     workspace,
-                    error = %error,
+                    error = %rendered,
                     "the run's repository could not be checked out"
                 );
-                Err(ScopeAcquiredError::new(format!(
-                    "the run's repository could not be checked out: {error}"
-                )))
+                let message = format!("the run's repository could not be checked out: {rendered}");
+                // Petri adds this context when a scope acquisition fails. Match
+                // its rendered execution failure exactly, never by substring.
+                self.record_failure_details(
+                    &error,
+                    &format!(
+                        "could not acquire the environment: host scope_acquired failed: {message}"
+                    ),
+                    None,
+                )
+                .await;
+                Err(ScopeAcquiredError::new(message))
             }
         }
     }
@@ -1533,7 +1587,7 @@ impl ExecutionHooks for FabroHooks {
                     error = %message,
                     "checkpoint failed; the run ends"
                 );
-                self.fail_run(&message);
+                self.fail_run(&error, &message).await;
                 prepared.adjustment.status = Some(Status::Failure(
                     FailureInfo::new(message.clone()).with_class(CHECKPOINT_FAILED_CLASS),
                 ));
@@ -1618,11 +1672,7 @@ impl ExecutionHooks for FabroHooks {
         context: &HookContext,
         finished: RunFinished,
     ) -> Result<(), FinalizationFailure> {
-        let diff = self.record_run_diff().await.map_err(|error| {
-            let message = error.render();
-            warn!(run_id = %self.run_id, error = %message, "the run's diff was not recorded");
-            message
-        });
+        let diff = self.record_run_diff().await;
         // A failed checkpoint fails the run whatever its execution status,
         // and its work is never published.
         if let Some(message) = self.checkpoint_failure() {
@@ -1630,8 +1680,12 @@ impl ExecutionHooks for FabroHooks {
         }
         let publication = match diff {
             Ok(publication) => publication,
-            Err(message) => {
+            Err(error) => {
+                let message = error.render();
+                warn!(run_id = %self.run_id, error = %message, "the run's diff was not recorded");
                 if self.publisher.is_some() && finished.status == RunStatus::Success {
+                    self.record_failure_details(&error, &message, Some("publish_failed"))
+                        .await;
                     return Err(projection::publish_failure(message));
                 }
                 None
@@ -1644,14 +1698,13 @@ impl ExecutionHooks for FabroHooks {
                         "the run has no recorded branch and checkpoint to publish",
                     )
                 })?;
-                publisher.publish(&publication).await.map_err(|message| {
-                    warn!(
-                        run_id = %self.run_id,
-                        error = %message,
-                        "the run's publication failed"
-                    );
-                    projection::publish_failure(message)
-                })?;
+                if let Err(error) = publisher.publish(&publication).await {
+                    let message = format!("{error:#}");
+                    warn!(run_id = %self.run_id, error = %message, "the run's publication failed");
+                    self.record_failure_details(error.as_ref(), &message, Some("publish_failed"))
+                        .await;
+                    return Err(projection::publish_failure(message));
+                }
                 info!(
                     run_id = %self.run_id,
                     branch = publication.run_branch,
@@ -1718,7 +1771,7 @@ mod tests {
 
     use fabro_store::{ArtifactStore, StoredPlatformRecord};
     use object_store::memory::InMemory;
-    use tokio::sync::Barrier;
+    use tokio::sync::{Barrier, Semaphore};
 
     use super::*;
     use crate::artifacts::StoreArtifactWriter;
@@ -1759,6 +1812,114 @@ mod tests {
             kind: PlatformRecordKind,
         ) -> Result<Vec<StoredPlatformRecord>, PlatformRecordError> {
             self.records.read_kind(run_id, kind).await
+        }
+    }
+
+    /// Hold the selected diagnostic append while a competing checkpoint fails.
+    struct GatedFailureRecords {
+        records: MemoryPlatformRecords,
+        entered: Semaphore,
+        release: Semaphore,
+        reject:  bool,
+    }
+
+    #[async_trait::async_trait]
+    impl PlatformRecords for GatedFailureRecords {
+        async fn append(
+            &self,
+            run_id: &RunId,
+            record: &PlatformRecord,
+            position: Option<StagePosition>,
+        ) -> Result<StoredPlatformRecord, PlatformRecordError> {
+            self.entered.add_permits(1);
+            self.release.acquire().await.unwrap().forget();
+            if self.reject {
+                return Err(PlatformRecordError::Store(fabro_store::Error::Io(
+                    std::io::Error::other("diagnostic storage unavailable"),
+                )));
+            }
+            self.records.append(run_id, record, position).await
+        }
+
+        async fn read_kind(
+            &self,
+            run_id: &RunId,
+            kind: PlatformRecordKind,
+        ) -> Result<Vec<StoredPlatformRecord>, PlatformRecordError> {
+            self.records.read_kind(run_id, kind).await
+        }
+    }
+
+    #[tokio::test]
+    async fn competing_checkpoint_failures_persist_only_the_selected_output() {
+        use crate::diagnostics::CommandOutput;
+
+        for (selected, competing) in [
+            ("first output", "second output"),
+            ("second output", "first output"),
+        ] {
+            for reject in [false, true] {
+                let root = tempfile::tempdir().unwrap();
+                let run = RunId::new();
+                let records = Arc::new(GatedFailureRecords {
+                    records: MemoryPlatformRecords::new(),
+                    entered: Semaphore::new(0),
+                    release: Semaphore::new(0),
+                    reject,
+                });
+                let hooks = artifact_hooks(
+                    root.path(),
+                    run,
+                    records.clone(),
+                    Arc::new(StoreArtifactWriter::new(ArtifactStore::new(
+                        Arc::new(InMemory::new()),
+                        "artifacts",
+                    ))),
+                );
+                let failure = |output: &str| HookError::Commit {
+                    node:   "same-child-node".to_string(),
+                    source: CheckpointError::Command {
+                        action: "commit".to_string(),
+                        status: "exit status: 1".to_string(),
+                        output: CommandOutput::capture(b"", output.as_bytes(), None),
+                    },
+                };
+                let first = failure(selected);
+                let second = failure(competing);
+                let message = first.render();
+                assert_eq!(message, second.render());
+                tokio::join!(hooks.fail_run(&first, &message), async {
+                    records.entered.acquire().await.unwrap().forget();
+                    // The second failure arrives while the first append is
+                    // suspended. It must neither append nor win selection.
+                    hooks.fail_run(&second, &message).await;
+                    records.release.add_permits(1);
+                },);
+                assert_eq!(
+                    hooks.checkpoint_failure().as_deref(),
+                    Some(message.as_str())
+                );
+                let durable = records.records.records(&run);
+                assert_eq!(durable.len(), usize::from(!reject));
+                if let Some(stored) = durable.first() {
+                    let PlatformRecord::RunFailureDetails(record) = &stored.record else {
+                        panic!("the selected failure's details are durable: {stored:?}");
+                    };
+                    assert_eq!(record.message, message);
+                    assert_eq!(
+                        record.finalization_code.as_deref(),
+                        Some(CHECKPOINT_FAILED_CLASS)
+                    );
+                    assert_eq!(
+                        record
+                            .detail
+                            .exec_output_tail
+                            .as_ref()
+                            .and_then(|tail| tail.stderr.as_deref()),
+                        Some(selected)
+                    );
+                }
+            }
         }
     }
 

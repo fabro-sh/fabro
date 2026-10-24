@@ -236,11 +236,11 @@ impl GitHubPublisher {
         context: GitHubContext<'_>,
         settings: &PullRequestSettings,
         publication: &Publication,
-    ) -> Result<(), String> {
+    ) -> Result<()> {
         let model = self
             .model()
             .await
-            .ok_or_else(|| "no LLM model is available to write the pull request".to_string())?;
+            .context("no LLM model is available to write the pull request")?;
         // The run so far, for the pull request's details: best effort.
         let run_state = self.client.get_run_state(&self.run_id).await.ok();
         let origin_url = self.repository.https_url();
@@ -264,7 +264,10 @@ impl GitHubPublisher {
             run_state:         run_state.as_ref(),
         })
         .await
-        .map_err(|err| format!("failed to create pull request: {err}"))?;
+        // The pull-request pipeline still returns a rendered error; Git's
+        // typed error path above remains intact through this publisher.
+        .map_err(anyhow::Error::msg)
+        .context("failed to create pull request")?;
         let link = &created.link;
         let record = PlatformRecord::PullRequestCreated(PullRequestCreatedRecord {
             number:    link.number,
@@ -278,25 +281,26 @@ impl GitHubPublisher {
         self.records
             .append(&self.run_id, &record, None)
             .await
-            .map_err(|err| format!("the pull request was opened but not recorded: {err}"))?;
+            .context("the pull request was opened but not recorded")?;
         Ok(())
     }
 }
 
 #[async_trait::async_trait]
 impl RunPublisher for GitHubPublisher {
-    async fn push(&self, site: &Site, branch: &str, sha: &str) -> Result<(), String> {
-        let tokens = self.push_tokens.as_ref().ok_or_else(|| {
-            "pushing the run branch requires the server's GitHub credentials".to_string()
-        })?;
+    async fn push(&self, site: &Site, branch: &str, sha: &str) -> Result<()> {
+        let tokens = self
+            .push_tokens
+            .as_ref()
+            .context("pushing the run branch requires the server's GitHub credentials")?;
         let resolved = tokens
             .resolve()
             .await
-            .map_err(|err| format!("no push credential for {}: {err:#}", self.repository))?;
+            .with_context(|| format!("no push credential for {}", self.repository))?;
         push(&self.repository, &resolved.token, site, branch, sha).await
     }
 
-    async fn publish(&self, publication: &Publication) -> Result<(), String> {
+    async fn publish(&self, publication: &Publication) -> Result<()> {
         self.push(
             &publication.site,
             &publication.run_branch,
@@ -312,7 +316,7 @@ impl RunPublisher for GitHubPublisher {
         let credentials = self
             .credentials
             .as_ref()
-            .ok_or_else(|| "GitHub credentials are unavailable".to_string())?;
+            .context("GitHub credentials are unavailable")?;
         let base_url = fabro_github::github_api_base_url();
         let context = GitHubContext::new(credentials, &base_url);
         Box::pin(self.open_pull_request(context, settings, publication)).await
@@ -329,39 +333,32 @@ async fn push(
     site: &Site,
     branch: &str,
     sha: &str,
-) -> Result<(), String> {
+) -> Result<()> {
     let mut url = repository.https_url();
     url.push_str(".git");
     let credential = basic(token);
-    let env = credential
-        .as_ref()
-        .map(|credential| credential.header_env(&url))
-        .unwrap_or_default();
     let refspec = format!("{sha}:refs/heads/{branch}");
-    let mut last = String::new();
-    for attempt in 1..=PUSH_ATTEMPTS {
-        match site.push(&url, &refspec, &env, PUSH_TIMEOUT).await {
+    let mut attempt = 1;
+    loop {
+        match site
+            .push(&url, &refspec, credential.as_ref(), PUSH_TIMEOUT)
+            .await
+        {
             Ok(()) => return Ok(()),
             Err(error) => {
-                last = error.to_string().replace(token.expose(), "***");
-                if let Some(credential) = &credential {
-                    last = last.replace(credential.encoded(), "***");
+                // The adapter sanitized the attached output before returning.
+                // Display contains only the summary; preserve the typed error.
+                warn!(attempt, branch, error = %error, "pushing the run branch failed");
+                if attempt == PUSH_ATTEMPTS {
+                    return Err(error).with_context(|| {
+                        format!("the run branch {branch} could not be pushed to {repository}")
+                    });
                 }
             }
         }
-        warn!(
-            attempt,
-            branch,
-            error = last,
-            "pushing the run branch failed"
-        );
-        if attempt < PUSH_ATTEMPTS {
-            time::sleep(PUSH_RETRY_DELAY).await;
-        }
+        time::sleep(PUSH_RETRY_DELAY).await;
+        attempt += 1;
     }
-    Err(format!(
-        "the run branch {branch} could not be pushed to {repository}: {last}"
-    ))
 }
 
 #[cfg(test)]

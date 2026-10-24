@@ -778,6 +778,9 @@ fn format_platform_record(ts: &str, record: &Value, styles: &Styles) -> Option<S
                     .apply_to(format!("\u{00b7} {transition}{reason}"))
             ))
         }
+        // The conclusion renders diagnostic output once, after the engine's
+        // terminal result. Raw events still expose the durable attachment.
+        "run.failure_details" => None,
         "run.notice" => {
             let level = record
                 .get("level")
