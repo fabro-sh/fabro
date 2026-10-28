@@ -1,5 +1,5 @@
 digraph ImplementAndTest {
-    graph [goal="Implement the plan and make tests pass"]
+    graph [goal="Implement the plan and make tests pass", max_node_visits=6]
     rankdir=LR
 
     start [shape=Mdiamond, label="Start"]
@@ -11,5 +11,5 @@ digraph ImplementAndTest {
 
     start -> implement -> validate -> gate
     gate -> exit      [label="Pass", condition="outcome=succeeded"]
-    gate -> implement [label="Fix", max_visits=5]
+    gate -> implement [label="Fix"]
 }
