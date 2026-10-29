@@ -8836,7 +8836,7 @@ async fn render_graph_from_manifest_accepts_fabro_dotted_attributes() {
     let dot_source = r#"digraph X {
   start [shape=Mdiamond]
   exit [shape=Msquare]
-  a [label="A", acp.command="codex"]
+  a [label="A", backend="acp", acp.command="codex"]
   start -> a -> exit
 }"#;
 
