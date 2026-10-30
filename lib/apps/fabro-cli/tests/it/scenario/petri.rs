@@ -42,7 +42,9 @@ use fabro_types::RunId;
 use fabro_vault::{SecretType, Vault};
 
 use crate::cmd::support::created_run_id;
-use crate::support::{TEST_DEV_TOKEN, TEST_SESSION_SECRET, seed_dev_token_auth};
+use crate::support::{
+    TEST_DEV_TOKEN, TEST_SESSION_SECRET, pretty_stream_snapshot_filters, seed_dev_token_auth,
+};
 
 pub(super) const RUN_TIMEOUT: Duration = Duration::from_mins(1);
 pub(super) const POLL: Duration = Duration::from_millis(50);
@@ -1198,22 +1200,6 @@ fn stream_line_name(line: &serde_json::Value) -> String {
         .to_string()
 }
 
-/// The snapshot filters for `events --pretty` over a Petri run: clocks,
-/// durations and the run id vary per run.
-fn pretty_filters(context: &fabro_test::TestContext) -> Vec<(String, String)> {
-    let mut filters = context.filters();
-    filters.push((r"\b\d{2}:\d{2}:\d{2}\b".to_string(), "[CLOCK]".to_string()));
-    filters.push((
-        r"\b\d+(\.\d+)?(ms|s)\b".to_string(),
-        "[DURATION]".to_string(),
-    ));
-    filters.push((
-        r"Checkpoint [0-9a-f]{7}".to_string(),
-        "Checkpoint [SHA]".to_string(),
-    ));
-    filters
-}
-
 /// A finished Petri run reads back through the CLI: `events` prints the
 /// stream envelope raw, dense in `stream_seq`; `events --pretty` renders
 /// the stages by `<subject>.<verb>` with their labels and the platform
@@ -1273,12 +1259,12 @@ async fn a_finished_petri_run_reads_back_through_the_cli() {
 
     // Tail: the last two items only.
     let tail = cli(&context, &server, &["events", "--tail", "2", &run_id]);
-    assert_eq!(ndjson(&tail).len(), 2);
+    assert_eq!(ndjson(&tail), lines[lines.len() - 2..]);
 
     // Pretty: stages and platform records.
     let mut cmd = context.command();
     cmd.args(["events", "--pretty", "--server", &target, &run_id]);
-    fabro_snapshot!(pretty_filters(&context), cmd, @"
+    fabro_snapshot!(pretty_stream_snapshot_filters(&context), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----

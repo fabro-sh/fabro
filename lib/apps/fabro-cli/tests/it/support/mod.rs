@@ -13,6 +13,30 @@ use fabro_test::{EnvVars, TestContext, preserve_coverage_env};
 use fabro_types::{RunGraph, RunId, RunSpec, RunStreamItem, WorkflowSettings};
 pub(crate) use mcp_client::McpStdioTestClient;
 
+/// Snapshot a real run's pretty stream without depending on wall-clock values
+/// or the relative delivery of the platform and Petri startup records.
+pub(crate) fn pretty_stream_snapshot_filters(context: &TestContext) -> Vec<(String, String)> {
+    let mut filters = context.filters();
+    filters.push((r"\b\d{2}:\d{2}:\d{2}\b".to_string(), "[CLOCK]".to_string()));
+    filters.push((
+        r"\b\d+(\.\d+)?(ms|s)\b".to_string(),
+        "[DURATION]".to_string(),
+    ));
+    filters.push((
+        r"Checkpoint [0-9a-f]{7}\b".to_string(),
+        "Checkpoint [SHA]".to_string(),
+    ));
+    // Only move the independent `running` line ahead of Petri's start. Keep
+    // every line (including any intervening output) and all other ordering.
+    // Missing or repeated records must still fail the full transcript snapshot.
+    filters.push((
+        r"(?m)^(\[CLOCK\]   Engine: petri run started\n)((?:[^\n]*\n)*?)(\[CLOCK\]   · running\n)"
+            .to_string(),
+        "${3}${1}${2}".to_string(),
+    ));
+    filters
+}
+
 pub(crate) fn run_output_filters(context: &TestContext) -> Vec<(String, String)> {
     let mut filters = context.filters();
     filters.push((r"\b\d+(\.\d+)?(ms|s)\b".to_string(), "[TIME]".to_string()));
