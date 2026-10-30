@@ -156,12 +156,13 @@ pub(super) fn progress_events(
                 vec![ProgressEvent::LoopRestart {
                     from_node: node_id,
                     to_node:   to_node.to_string(),
+                    label:     view.selected_edge_label().map(str::to_owned),
                 }]
             } else {
                 vec![ProgressEvent::EdgeSelected {
                     from_node: node_id,
                     to_node:   to_node.to_string(),
-                    label:     None,
+                    label:     view.selected_edge_label().map(str::to_owned),
                     condition: derived
                         .get("transition")
                         .and_then(Value::as_str)

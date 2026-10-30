@@ -318,8 +318,13 @@ impl ProgressUI {
                     condition.as_deref(),
                 );
             }
-            ProgressEvent::LoopRestart { from_node, to_node } => {
-                self.info.on_loop_restart(renderer, &from_node, &to_node);
+            ProgressEvent::LoopRestart {
+                from_node,
+                to_node,
+                label,
+            } => {
+                self.info
+                    .on_loop_restart(renderer, &from_node, &to_node, label.as_deref());
             }
             ProgressEvent::RunNotice {
                 level,

@@ -4,6 +4,7 @@ use fabro_types::RunNoticeLevel;
 
 use super::renderer::ProgressRenderer;
 use super::styles;
+use crate::commands::run::petri_stream;
 use crate::shared::{format_duration_ms, tilde_path};
 
 pub(super) struct InfoDisplay {
@@ -72,16 +73,11 @@ impl InfoDisplay {
             return;
         }
 
-        let detail = if let Some(condition) = condition {
-            format!("  [{condition}]")
-        } else if let Some(label) = label {
-            format!("  \"{label}\"")
-        } else {
-            String::new()
-        };
+        let detail = condition.map_or_else(String::new, |condition| format!("  [{condition}]"));
+        let arrow = petri_stream::route_arrow(label);
         Self::insert_info_line(
             renderer,
-            &format!("\u{2192} {from_node} \u{2192} {to_node}{detail}"),
+            &format!("\u{2192} {from_node} {arrow} {to_node}{detail}"),
         );
     }
 
@@ -90,14 +86,16 @@ impl InfoDisplay {
         renderer: &ProgressRenderer,
         from_node: &str,
         to_node: &str,
+        label: Option<&str>,
     ) {
         if !self.verbose {
             return;
         }
 
+        let arrow = petri_stream::route_arrow(label);
         Self::insert_info_line(
             renderer,
-            &format!("\u{21ba} {from_node} \u{2192} {to_node}  (loop restart)"),
+            &format!("\u{21ba} {from_node} {arrow} {to_node}  (loop restart)"),
         );
     }
 
