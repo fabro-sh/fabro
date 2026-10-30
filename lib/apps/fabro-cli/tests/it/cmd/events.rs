@@ -1,7 +1,12 @@
-use fabro_test::{fabro_snapshot, json_elapsed_ms_snapshot_filters, test_context};
+use fabro_test::{apply_filters, fabro_snapshot, test_context};
+use httpmock::MockServer;
 use serde_json::Value;
 
-use super::support::{setup_detached_dry_run, setup_seeded_completed_dry_run};
+use super::support::{
+    remote_run_summary_json, run_stream_items, setup_detached_dry_run,
+    setup_seeded_completed_dry_run,
+};
+use crate::support::{pretty_stream_snapshot_filters, run_projection_json, unique_run_id};
 
 fn parse_ndjson(stdout: &[u8]) -> Vec<Value> {
     String::from_utf8(stdout.to_vec())
@@ -99,6 +104,12 @@ fn events_completed_run_outputs_raw_ndjson() {
 
     let events = parse_ndjson(&output.stdout);
     assert_events_belong_to_run(&events, &run.run_id);
+    let recorded: Vec<Value> = run_stream_items(&run.run_dir)
+        .into_iter()
+        .map(|item| serde_json::to_value(item).expect("stream item serializes"))
+        .collect();
+    assert_eq!(events, recorded, "events must preserve the recorded stream");
+    assert!(output.stderr.is_empty(), "{output:?}");
     assert_event_sequence_contains(&events, &[
         "run.created",
         "run.lifecycle",
@@ -111,64 +122,29 @@ fn events_completed_run_outputs_raw_ndjson() {
 }
 
 #[test]
-fn events_completed_run_reads_store_without_progress_jsonl() {
+fn events_tail_matches_recorded_stream_suffix() {
     let context = test_context!();
     let run = setup_seeded_completed_dry_run(&context);
+    let expected: Vec<Value> = run_stream_items(&run.run_dir)
+        .into_iter()
+        .map(|item| serde_json::to_value(item).expect("stream item serializes"))
+        .collect();
+    assert!(expected.len() > 2, "the fixture must exercise truncation");
 
-    let mut filters = json_elapsed_ms_snapshot_filters(context.filters());
-    filters.push((
-        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z".to_string(),
-        "[TIMESTAMP]".to_string(),
-    ));
-    filters.push((
-        r#""id":"[0-9a-f-]+""#.to_string(),
-        r#""id":"[EVENT_ID]""#.to_string(),
-    ));
-    filters.push((
-        r#""recorded_at":\d{13}"#.to_string(),
-        r#""recorded_at":[EPOCH_MS]"#.to_string(),
-    ));
-    let mut cmd = context.command();
-    cmd.args(["events", "--tail", "2", &run.run_id]);
-
-    fabro_snapshot!(filters, cmd, @r#"
-    success: true
-    exit_code: 0
-    ----- stdout -----
-    {"run_id":"[ULID]","stream_seq":67,"kind":"petri","id":"coordinator/7/0","recorded_at":[EPOCH_MS],"item":{"id":{"log":"coordinator","seq":7,"index":0},"origin":"external","context":{},"recorded_at":[EPOCH_MS],"record":{"seq":7,"origin":"external","recorded_at":[EPOCH_MS],"body":{"event":"run.finished","status":"success"}}}}
-    {"run_id":"[ULID]","stream_seq":68,"kind":"platform","id":"[EVENT_ID]","recorded_at":[EPOCH_MS],"item":{"seq":14,"recorded_at":[EPOCH_MS],"record":{"kind":"run.lifecycle","transition":"succeeded","status":{"kind":"succeeded","reason":"completed"}}}}
-    ----- stderr -----
-    "#);
-}
-
-#[test]
-fn events_tail_limits_output() {
-    let context = test_context!();
-    let run = setup_seeded_completed_dry_run(&context);
-    let mut filters = json_elapsed_ms_snapshot_filters(context.filters());
-    filters.push((
-        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z".to_string(),
-        "[TIMESTAMP]".to_string(),
-    ));
-    filters.push((
-        r#""id":"[0-9a-f-]+""#.to_string(),
-        r#""id":"[EVENT_ID]""#.to_string(),
-    ));
-    filters.push((
-        r#""recorded_at":\d{13}"#.to_string(),
-        r#""recorded_at":[EPOCH_MS]"#.to_string(),
-    ));
-    let mut cmd = context.command();
-    cmd.args(["events", "--tail", "2", &run.run_id]);
-
-    fabro_snapshot!(filters, cmd, @r#"
-    success: true
-    exit_code: 0
-    ----- stdout -----
-    {"run_id":"[ULID]","stream_seq":67,"kind":"petri","id":"coordinator/7/0","recorded_at":[EPOCH_MS],"item":{"id":{"log":"coordinator","seq":7,"index":0},"origin":"external","context":{},"recorded_at":[EPOCH_MS],"record":{"seq":7,"origin":"external","recorded_at":[EPOCH_MS],"body":{"event":"run.finished","status":"success"}}}}
-    {"run_id":"[ULID]","stream_seq":68,"kind":"platform","id":"[EVENT_ID]","recorded_at":[EPOCH_MS],"item":{"seq":14,"recorded_at":[EPOCH_MS],"record":{"kind":"run.lifecycle","transition":"succeeded","status":{"kind":"succeeded","reason":"completed"}}}}
-    ----- stderr -----
-    "#);
+    for tail in [0, 1, 2, expected.len() + 1] {
+        let output = context
+            .command()
+            .args(["events", "--tail", &tail.to_string(), &run.run_id])
+            .output()
+            .expect("events should execute");
+        assert!(output.status.success(), "{output:?}");
+        assert!(output.stderr.is_empty(), "{output:?}");
+        assert_eq!(
+            parse_ndjson(&output.stdout),
+            expected[expected.len().saturating_sub(tail)..],
+            "--tail {tail} must preserve the recorded suffix, including cursors and payloads"
+        );
+    }
 }
 
 #[test]
@@ -190,16 +166,7 @@ fn events_since_filters_output() {
 fn events_pretty_formats_small_run() {
     let context = test_context!();
     let run = setup_seeded_completed_dry_run(&context);
-    let mut filters = context.filters();
-    filters.push((r"\b\d{2}:\d{2}:\d{2}\b".to_string(), "[CLOCK]".to_string()));
-    filters.push((
-        r"\b\d+(\.\d+)?(ms|s)\b".to_string(),
-        "[DURATION]".to_string(),
-    ));
-    filters.push((
-        r"Checkpoint [0-9a-f]{7}\b".to_string(),
-        "Checkpoint [SHA]".to_string(),
-    ));
+    let filters = pretty_stream_snapshot_filters(&context);
     let mut cmd = context.command();
     cmd.args(["events", "--pretty", &run.run_id]);
 
@@ -236,6 +203,120 @@ fn events_pretty_formats_small_run() {
     [CLOCK]   · succeeded
     ----- stderr -----
     ");
+}
+
+#[test]
+fn events_preserve_each_valid_startup_interleaving() {
+    let context = test_context!();
+    let run_id = unique_run_id();
+    let status = serde_json::json!({"kind": "running"});
+    let records = [
+        (
+            "platform",
+            "6",
+            serde_json::json!({
+                "seq": 6, "recorded_at": 0,
+                "record": {"kind": "run.lifecycle", "transition": "running", "status": status}
+            }),
+        ),
+        (
+            "petri",
+            "coordinator/0/0",
+            serde_json::json!({
+                "record": {"body": {"event": "run.started"}}
+            }),
+        ),
+        (
+            "petri",
+            "execution 0/0/1",
+            serde_json::json!({
+                "subject": {"node": {"name": "Start", "meta": {"kind": "start"}}},
+                "derived": {"event": "visit.started"}
+            }),
+        ),
+    ];
+    let rendered = [
+        "00:00:00   · running\n",
+        "00:00:00   Engine: petri run started\n",
+        "00:00:00 ▶ Start\n",
+    ];
+    for order in [[0, 1, 2], [1, 0, 2], [1, 2, 0]] {
+        let items: Vec<Value> = order
+            .iter()
+            .enumerate()
+            .map(|(index, source)| {
+                let (kind, id, item) = &records[*source];
+                serde_json::json!({
+                    "run_id": run_id, "stream_seq": index + 6, "kind": kind,
+                    "id": id, "recorded_at": 0, "item": item
+                })
+            })
+            .collect();
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method("GET").path("/api/v1/runs/resolve");
+            then.status(200).json_body(remote_run_summary_json(
+                &run_id,
+                "Startup",
+                "startup",
+                "Startup",
+                &status,
+                "2026-10-30T12:00:00Z",
+            ));
+        });
+        server.mock(|when, then| {
+            when.method("GET")
+                .path(format!("/api/v1/runs/{run_id}/state"));
+            then.status(200)
+                .json_body(run_projection_json(&run_id, &status));
+        });
+        server.mock(|when, then| {
+            when.method("GET")
+                .path(format!("/api/v1/runs/{run_id}/events"));
+            then.status(200).json_body(serde_json::json!({
+                "data": items, "meta": {"has_more": false}, "event_contract_version": 3
+            }));
+        });
+        let raw = context
+            .command()
+            .args(["events", "--server", &server.base_url(), &run_id])
+            .output()
+            .expect("events should execute");
+        assert!(raw.status.success(), "{raw:?}");
+        assert!(raw.stderr.is_empty(), "{raw:?}");
+        assert_eq!(parse_ndjson(&raw.stdout), items, "order {order:?}");
+
+        let pretty = context
+            .command()
+            .args([
+                "events",
+                "--pretty",
+                "--server",
+                &server.base_url(),
+                &run_id,
+            ])
+            .output()
+            .expect("pretty events should execute");
+        assert!(pretty.status.success(), "{pretty:?}");
+        assert!(pretty.stderr.is_empty(), "{pretty:?}");
+        let stdout = String::from_utf8(pretty.stdout).expect("pretty output is UTF-8");
+        let expected: String = order.iter().map(|index| rendered[*index]).collect();
+        assert_eq!(
+            stdout, expected,
+            "pretty output must retain delivery order {order:?}"
+        );
+        // Canonicalize only the snapshot, after checking both real output modes.
+        insta::allow_duplicates! {
+            insta::assert_snapshot!(
+                apply_filters(&stdout, &pretty_stream_snapshot_filters(&context)),
+                @"
+            [CLOCK]   · running
+            [CLOCK]   Engine: petri run started
+            [CLOCK] ▶ Start
+            "
+            );
+        }
+    }
 }
 
 #[test]
