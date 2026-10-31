@@ -67,7 +67,7 @@ use std::time::Duration;
 use fabro_db::DbPool;
 use fabro_store::platform_records::{PlatformRecordStore, now_ms};
 use fabro_store::{RunProjection, RunSummaryStore};
-use fabro_types::{RunId, RunStreamItem};
+use fabro_types::{GitHubHost, RunId, RunStreamItem};
 use fabro_util::error::collect_chain;
 use fabro_util::sync;
 use petri_execution::events::{EventId, EventSource, RunEvent};
@@ -236,6 +236,8 @@ pub struct Projector {
     /// stream grew. A wake-up for the stream's readers, never a source of
     /// facts; a reader that lags re-reads from its cursor.
     committed:         broadcast::Sender<RunId>,
+    /// The GitHub deployment run origins are classified against.
+    github_host:       GitHubHost,
 }
 
 impl std::fmt::Debug for Projector {
@@ -250,7 +252,14 @@ impl Projector {
     /// passes its one pool twice.
     #[must_use]
     pub fn new(records: DbPool, views: DbPool) -> Arc<Self> {
+        Self::with_github_host(records, views, GitHubHost::default())
+    }
+
+    /// [`Projector::new`] classifying run origins against `github_host`.
+    #[must_use]
+    pub fn with_github_host(records: DbPool, views: DbPool, github_host: GitHubHost) -> Arc<Self> {
         Arc::new(Self {
+            github_host,
             store: SqliteRunStore::new(records.clone()),
             platform: PlatformRecordStore::new(views.clone()),
             records,
@@ -725,9 +734,14 @@ impl Projector {
             .map_err(ProjectError::Database)?;
         }
         if let Some(projection) = view.projection.as_ref() {
-            RunSummaryStore::write_petri_run_row_on_connection(&mut tx, &run_id, projection)
-                .await
-                .map_err(ProjectError::Store)?;
+            RunSummaryStore::write_petri_run_row_on_connection(
+                &mut tx,
+                &self.github_host,
+                &run_id,
+                projection,
+            )
+            .await
+            .map_err(ProjectError::Store)?;
         }
         tx.commit().await.map_err(ProjectError::Database)?;
         Ok(true)

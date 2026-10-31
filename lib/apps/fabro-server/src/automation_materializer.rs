@@ -128,6 +128,7 @@ pub(crate) struct ProductionAutomationRunMaterializer {
     remote_resolver: Arc<dyn AutomationGitRemoteResolver>,
     repo_cache:      Arc<GitRepoCache>,
     version_store:   WorkflowVersionStore,
+    host:            fabro_types::GitHubHost,
 }
 
 /// Where to fetch a repository from and how to authenticate.
@@ -143,9 +144,9 @@ trait AutomationGitRemoteResolver: Send + Sync {
 }
 
 struct ServerGitHubRemoteResolver {
-    credentials:  Option<fabro_github::GitHubCredentials>,
-    api_base_url: String,
-    http_client:  Option<fabro_http::HttpClient>,
+    credentials: Option<fabro_github::GitHubCredentials>,
+    host:        fabro_types::GitHubHost,
+    http_client: Option<fabro_http::HttpClient>,
 }
 
 #[async_trait]
@@ -154,12 +155,12 @@ impl AutomationGitRemoteResolver for ServerGitHubRemoteResolver {
         let auth = git_checkout::resolve_git_read_auth_config(
             self.credentials.as_ref(),
             repo,
-            &self.api_base_url,
+            &self.host,
             self.http_client.clone(),
         )
         .await?;
         Ok(GitRemote {
-            clone_url: git_checkout::github_clone_url(repo),
+            clone_url: git_checkout::github_clone_url(repo, &self.host),
             auth,
         })
     }
@@ -168,7 +169,7 @@ impl AutomationGitRemoteResolver for ServerGitHubRemoteResolver {
 impl ProductionAutomationRunMaterializer {
     pub(crate) fn new(
         github_credentials: Option<fabro_github::GitHubCredentials>,
-        github_api_base_url: String,
+        github_host: fabro_types::GitHubHost,
         http_client: Option<fabro_http::HttpClient>,
         repo_cache: Arc<GitRepoCache>,
         version_store: WorkflowVersionStore,
@@ -176,11 +177,12 @@ impl ProductionAutomationRunMaterializer {
         Self {
             remote_resolver: Arc::new(ServerGitHubRemoteResolver {
                 credentials: github_credentials,
-                api_base_url: github_api_base_url,
+                host: github_host.clone(),
                 http_client,
             }),
             repo_cache,
             version_store,
+            host: github_host,
         }
     }
 
@@ -232,13 +234,13 @@ impl AutomationRunMaterializer for ProductionAutomationRunMaterializer {
     ) -> Result<AutomationRunMaterialized, RunMaterializeError> {
         let validated_target = input
             .target
-            .validate()
+            .validate(&self.host)
             .map_err(|source| RunMaterializeError::InvalidTarget { source })?;
         let target_repo = validated_target.repository().clone();
         let mut exact_target = validated_target.into_target();
         let workflow_source = input
             .workflow_source
-            .map(GitRunTarget::validate)
+            .map(|source| source.validate(&self.host))
             .transpose()
             .map_err(|source| RunMaterializeError::InvalidWorkflowSource { source })?;
         // A workflow source naming the target's exact coordinate shares its
@@ -772,7 +774,7 @@ mod tests {
     ) -> ProductionAutomationRunMaterializer {
         ProductionAutomationRunMaterializer::new(
             None,
-            "https://api.github.com".to_string(),
+            fabro_types::GitHubHost::default(),
             None,
             Arc::new(GitRepoCache::new(root.join("cache"))),
             store,

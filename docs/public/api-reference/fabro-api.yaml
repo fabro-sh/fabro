@@ -6638,12 +6638,17 @@ components:
       required:
         - canonical_url
         - object_store_local_root
+        - github_web_url
       properties:
         canonical_url:
           type: string
           format: uri
         object_store_local_root:
           type: string
+        github_web_url:
+          type: string
+          description: Web origin of the GitHub deployment the install targets, without a trailing slash.
+          example: https://github.com
 
     InstallLlmValidationResponse:
       description: Successful response from install-time LLM credential validation.
@@ -15674,7 +15679,17 @@ components:
         - client_id
         - slug
         - webhooks
+        - web_url
+        - api_url
       properties:
+        web_url:
+          type: string
+          description: Web origin of the GitHub deployment, without a trailing slash.
+          example: https://github.com
+        api_url:
+          type: string
+          description: REST API base URL of the GitHub deployment, without a trailing slash.
+          example: https://api.github.com
         enabled:
           type: boolean
         strategy:

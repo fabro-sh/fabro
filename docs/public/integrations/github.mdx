@@ -121,6 +121,7 @@ slug = "fabro-a3f2"
 | `app_id` | Numeric GitHub App ID |
 | `client_id` | OAuth Client ID for the app |
 | `slug` | App slug, used for linking to the GitHub App settings page |
+| `web_url`, `api_url` | Optional. Target GitHub Enterprise Server or Enterprise Cloud instead of github.com; see [GitHub Enterprise Server and GitHub Enterprise Cloud](#github-enterprise-server-and-github-enterprise-cloud) |
 
 ### Server vault
 
@@ -173,6 +174,75 @@ fabro install github
 ```
 
 This walks through just the GitHub setup steps — choosing a strategy, registering an app, or storing a token — and restarts the server when done. Stale settings and secrets from the previous strategy are cleaned up automatically.
+
+## GitHub Enterprise Server and GitHub Enterprise Cloud
+
+Fabro talks to github.com by default. To use a GitHub Enterprise Server (GHES) instance, or a GitHub Enterprise Cloud tenant with data residency (`https://<subdomain>.ghe.com`), set the web origin of that deployment. Fabro derives every other URL from it.
+
+```toml title="settings.toml"
+[server.integrations.github]
+web_url = "https://ghe.example.com"
+# api_url = "https://ghe.example.com/api/v3"   # optional override
+```
+
+| Setting | Environment override | Description |
+|---|---|---|
+| `server.integrations.github.web_url` | `GITHUB_WEB_URL` | Web origin of the GitHub deployment, for example `https://ghe.example.com`. Defaults to `https://github.com`. Must be `https` and must not contain a path, query or fragment (plain `http` is accepted only for loopback hosts such as `localhost` and `127.0.0.1`). |
+| `server.integrations.github.api_url` | `GITHUB_BASE_URL` | REST API base URL. Optional: when unset it is derived from `web_url` as shown below. May be plain `http` on any host, for example to reach GitHub through a proxy or a mock; `web_url` must still be `https`. |
+
+The environment variables win over `settings.toml`. `GITHUB_WEB_URL` alone re-derives the API URL from the new web origin; `GITHUB_BASE_URL` alone replaces only the API URL.
+
+The server reads the host once at startup, so changing `web_url` or `api_url` takes effect only after a server restart.
+
+### Derived URLs
+
+| | github.com | GitHub Enterprise Cloud (`https://octocorp.ghe.com`) | GitHub Enterprise Server (`https://ghe.example.com`) |
+|---|---|---|---|
+| REST API | `https://api.github.com` | `https://api.octocorp.ghe.com` | `https://ghe.example.com/api/v3` |
+| GraphQL | `https://api.github.com/graphql` | `https://api.octocorp.ghe.com/graphql` | `https://ghe.example.com/api/graphql` |
+| OAuth | `https://github.com/login/oauth/...` | `https://octocorp.ghe.com/login/oauth/...` | `https://ghe.example.com/login/oauth/...` |
+| Repository clone URL | `https://github.com/owner/repo` | `https://octocorp.ghe.com/owner/repo` | `https://ghe.example.com/owner/repo` |
+| Pull request link | `https://github.com/owner/repo/pull/7` | `https://octocorp.ghe.com/owner/repo/pull/7` | `https://ghe.example.com/owner/repo/pull/7` |
+| Commit email domain | `users.noreply.github.com` | `users.noreply.octocorp.ghe.com` | `users.noreply.ghe.example.com` |
+
+A host named exactly `github.com` is treated as github.com, `ghe.com` or `*.ghe.com` as GitHub Enterprise Cloud, and any other host as GitHub Enterprise Server.
+
+### Where the host is read
+
+The server, the run worker and the CLI all need to agree on the host:
+
+- The **server** reads `web_url` and `api_url` from its `settings.toml` and the environment overrides above. The server passes `GITHUB_WEB_URL` and `GITHUB_BASE_URL` on to run workers it starts.
+- The **run worker** reads the same `settings.toml` (through `FABRO_HOME`) and the same environment variables.
+- The **CLI** reads the host from the local `settings.toml` or from `GITHUB_WEB_URL`; it does not ask a remote server. If you run `fabro` against a remote server, set the same `web_url` in your local `settings.toml` (or export `GITHUB_WEB_URL`) so repository URLs, `fabro install` and `fabro doctor` target the enterprise host.
+
+Put `web_url` in `settings.toml` before running `fabro install`. The installer does not persist the host, so `GITHUB_WEB_URL` alone is not enough: a server restarted without that variable falls back to github.com. The installer uses it for `gh auth token --hostname <host>`, for the GitHub App manifest registration and for the links it prints. The `App:` link it prints points at `/github-apps/<slug>` on GitHub Enterprise Server and at `/apps/<slug>` on github.com and GitHub Enterprise Cloud.
+
+### Authentication
+
+- **Tokens.** Personal access tokens, fine-grained tokens and OAuth tokens use the same `ghp_`, `github_pat_`, `gho_`, `ghu_` and `ghs_` formats on GHES and GHEC. `fabro install` runs `gh auth token --hostname <host>`, so run `gh auth login --hostname ghe.example.com` first.
+- **GitHub App.** `fabro install` registers the App through the manifest flow against `<web_url>/settings/apps/new` (or the organization equivalent) and exchanges the code on the host's API. This needs a GHES version that supports GitHub App manifests. If your instance does not, register the App by hand and set `app_id`, `client_id` and `slug` under `[server.integrations.github]`, then store the private key and client secret as described in [Server vault](#server-vault).
+- **Browser sign-in.** OAuth login redirects to `<web_url>/login/oauth/authorize`, and sessions record the enterprise host as the identity issuer.
+
+### Custom certificate authorities
+
+Enterprise hosts often use a certificate from a private CA. Fabro always verifies TLS certificates and has no setting to disable verification.
+
+Fabro's HTTP client uses rustls with the platform certificate verifier:
+
+- **Linux:** `SSL_CERT_FILE` and `SSL_CERT_DIR` are honoured, in addition to the system trust store. The server passes both on to the run workers it starts.
+- **macOS:** the system Keychain is used. **Windows:** the Windows certificate store is used. The variables are not read on either platform, so install the CA in the system store.
+- **Sandboxes:** containers do not inherit the host's trust store. Bake the CA into the sandbox image, or set `SSL_CERT_FILE` and `GIT_SSL_CAINFO` in the sandbox environment so Git and the `gh` CLI trust it.
+
+### The `gh` CLI in sandboxes
+
+The `gh` CLI reads `GITHUB_TOKEN` only for github.com. For any other host Fabro also injects `GH_HOST=<host>` and `GH_ENTERPRISE_TOKEN=<token>` next to `GITHUB_TOKEN`, so `gh pr list` and similar commands in command stages work without `gh auth login`. Git's credential helper and the `git@<host>:` and `ssh://git@<host>/` rewrites are scoped to the configured host.
+
+### Known limitations
+
+- One GitHub host per server. Repositories on any other host (including github.com when `web_url` points at an enterprise host) are rejected.
+- Features that an older GHES release does not provide, such as newer App permissions or auto-merge, surface as the error GitHub returns.
+- Avatars and the Content Security Policy follow the configured host: for a non-github.com host, `img-src` allows the web origin and `https://avatars.<host>` instead of `avatars.githubusercontent.com`. A GHES instance that serves avatars from another origin shows broken avatar images.
+- The Fabro CLI release channel and documentation links stay on github.com.
 
 ## `token` mode
 

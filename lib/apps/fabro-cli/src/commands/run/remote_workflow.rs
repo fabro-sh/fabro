@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::{Context as _, bail};
 use fabro_manifest::CollectedWorkflowClosure;
 use fabro_proc::ProcessError;
-use fabro_types::{GitHubRepositorySlug, GitRunTarget, repository};
+use fabro_types::{GitHubHost, GitHubRepositorySlug, GitRunTarget, repository};
 use tokio::process::Command;
 use tokio::{fs, signal as tokio_signal, task};
 use tokio_util::sync::CancellationToken;
@@ -69,17 +69,19 @@ pub(super) enum RemoteWorkflowError {
 /// the same Git configuration: the user's global and system config applies,
 /// repository-local config from wherever the CLI was invoked does not.
 pub(super) struct NativeGit {
+    host:                   GitHubHost,
     timeout:                Duration,
     #[cfg(test)]
     pub(super) environment: Vec<(String, String)>,
 }
 
 impl NativeGit {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(host: GitHubHost) -> Self {
         Self {
-            timeout:                  Duration::from_mins(2),
+            host,
+            timeout: Duration::from_mins(2),
             #[cfg(test)]
-            environment:              Vec::new(),
+            environment: Vec::new(),
         }
     }
 
@@ -157,7 +159,7 @@ impl NativeGit {
         patterns: &[String],
         cancel: &CancellationToken,
     ) -> anyhow::Result<String> {
-        let url = repository.https_url();
+        let url = repository.https_url(&self.host);
         let mut args = vec!["ls-remote", "--symref", &url];
         args.extend(patterns.iter().map(String::as_str));
         let bytes = self.command("metadata lookup", root, &args, cancel).await?;
@@ -193,7 +195,7 @@ impl NativeGit {
             tag: None,
             sha: Some(sha),
         };
-        Ok(target.validate()?.into_target())
+        Ok(target.validate(&self.host)?.into_target())
     }
 
     /// Resolve `revision` to a commit SHA using metadata lookups run from
@@ -298,7 +300,7 @@ impl NativeGit {
                 "--depth=1",
                 "--no-tags",
                 "--no-recurse-submodules",
-                &repository.https_url(),
+                &repository.https_url(&self.host),
                 sha,
             ],
             cancel,
@@ -570,7 +572,7 @@ mod tests {
                 ),
             )
             .unwrap();
-            let mut git = NativeGit::new();
+            let mut git = NativeGit::new(GitHubHost::default());
             git.environment = vec![
                 ("GIT_CONFIG_GLOBAL".into(), config.to_str().unwrap().into()),
                 ("GIT_CONFIG_NOSYSTEM".into(), "1".into()),
@@ -1081,7 +1083,7 @@ mod tests {
         let path = root.path().join("git");
         std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let mut git = NativeGit::new();
+        let mut git = NativeGit::new(GitHubHost::default());
         git.environment
             .push(("PATH".into(), root.path().to_str().unwrap().into()));
         (root, git)

@@ -2114,7 +2114,7 @@ fn slack_app_state_with_settings_and_secret_sources(
         preloaded_vault: vault,
         server_secrets: load_test_server_secrets(server_env_path, server_secret_env),
         env_lookup: default_env_lookup(),
-        github_api_base_url: None,
+        github_host: None,
         active_config_path: tempfile::tempdir().unwrap().path().join("settings.toml"),
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
         sandbox_inventory: None,
@@ -5102,7 +5102,9 @@ fn create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
         preloaded_vault,
         server_secrets: load_test_server_secrets(server_env_path, HashMap::new()),
         env_lookup: Arc::new(env_lookup),
-        github_api_base_url,
+        github_host: github_api_base_url.map(|url| {
+            fabro_types::GitHubHost::new(&url, Some(&url)).expect("mock GitHub URL should be valid")
+        }),
         active_config_path,
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
         sandbox_inventory: None,
@@ -6300,6 +6302,60 @@ slug = "fabro"
         .and_then(|value| value.to_str().ok())
         .unwrap();
     assert!(location.starts_with("https://github.com/login/oauth/authorize?"));
+}
+
+#[tokio::test]
+async fn auth_login_github_redirects_to_the_configured_enterprise_host() {
+    let source = r#"
+_version = 1
+
+[server.auth]
+methods = ["github"]
+
+[server.web]
+enabled = true
+url = "http://localhost:3000"
+
+[server.auth.github]
+allowed_usernames = ["octocat"]
+
+[server.integrations.github]
+app_id = "123"
+client_id = "Iv1.testclient"
+slug = "fabro"
+web_url = "https://ghe.example.com"
+"#;
+    let app = build_router(
+        test_app_state_with_session_key(
+            server_settings_from_toml(source),
+            manifest_run_defaults_from_toml(source),
+            Some("github-redirect-test-key-0123456789"),
+        ),
+        AuthMode::Enabled(ConfiguredAuth {
+            methods:    vec![ServerAuthMethod::Github],
+            dev_token:  None,
+            jwt_key:    None,
+            jwt_issuer: None,
+        }),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/auth/login/github")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let response = checked_response!(response, StatusCode::SEE_OTHER).await;
+    let location = response
+        .headers()
+        .get(axum::http::header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .unwrap();
+    assert!(location.starts_with("https://ghe.example.com/login/oauth/authorize?"));
 }
 
 #[tokio::test]
@@ -10808,7 +10864,7 @@ methods = ["dev-token"]
         preloaded_vault,
         server_secrets: ServerSecrets::load(server_env_path, HashMap::new()).unwrap(),
         env_lookup: default_env_lookup(),
-        github_api_base_url: None,
+        github_host: None,
         active_config_path: tempfile::tempdir().unwrap().path().join("settings.toml"),
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
         sandbox_inventory: None,
@@ -10866,7 +10922,7 @@ fn slack_service_respects_disabled_server_config_even_with_vault_tokens() {
             HashMap::new(),
         ),
         env_lookup: default_env_lookup(),
-        github_api_base_url: None,
+        github_host: None,
         active_config_path: tempfile::tempdir().unwrap().path().join("settings.toml"),
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
         sandbox_inventory: None,

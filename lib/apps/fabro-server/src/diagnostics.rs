@@ -399,7 +399,7 @@ async fn check_github_app(state: &AppState) -> CheckResult {
         };
         let probe = timeout(
             EXTERNAL_SERVICE_PROBE_TIMEOUT,
-            http.get(format!("{}/user", fabro_github::github_api_base_url()))
+            http.get(format!("{}/user", state.github_host.api_url()))
                 .header("Authorization", format!("Bearer {token}"))
                 .header("Accept", "application/vnd.github+json")
                 .header("User-Agent", "fabro-server")
@@ -549,7 +549,7 @@ async fn check_github_app(state: &AppState) -> CheckResult {
     };
     let auth_result = timeout(
         EXTERNAL_SERVICE_PROBE_TIMEOUT,
-        fabro_github::get_authenticated_app(&http, &jwt, &fabro_github::github_api_base_url()),
+        fabro_github::get_authenticated_app(&http, &jwt, state.github_host.api_url()),
     )
     .await;
     match auth_result {

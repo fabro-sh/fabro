@@ -30,7 +30,7 @@ use fabro_static::EnvVars;
 use fabro_store::ArtifactStore;
 use fabro_types::settings::server::ObjectStoreSettings;
 use fabro_types::settings::{is_wildcard_host, validate_public_url_with_label};
-use fabro_types::{SandboxProviderKind, ServerSettings};
+use fabro_types::{GitHubHost, SandboxProviderKind, ServerSettings};
 use fabro_util::version::FABRO_VERSION;
 use fabro_util::{Home, session_secret};
 use fabro_vault::SecretType as VaultSecretType;
@@ -52,7 +52,7 @@ use crate::sandbox_access::{
 };
 use crate::serve::{self, DEFAULT_TCP_PORT};
 use crate::server_secrets::{ServerSecrets, process_env_snapshot};
-use crate::{security_headers, server, static_files};
+use crate::{csp, security_headers, server, static_files};
 
 #[derive(Clone)]
 pub struct InstallAppState {
@@ -65,6 +65,7 @@ pub struct InstallAppState {
     first_operator:     Arc<Mutex<Option<InstallOperatorFingerprint>>>,
     finish_in_progress: Arc<AtomicBool>,
     upstreams:          InstallUpstreamConfig,
+    github_host:        GitHubHost,
     static_asset_root:  Option<Arc<Path>>,
     on_finish:          Option<Arc<dyn Fn() + Send + Sync>>,
     finish_hook:        Option<InstallFinishHook>,
@@ -91,7 +92,6 @@ struct InstallOperatorFingerprint {
     remote_ip:  Option<String>,
 }
 
-pub const DEFAULT_INSTALL_GITHUB_API_BASE_URL: &str = "https://api.github.com";
 const DEFAULT_INSTALL_TCP_LISTEN_ADDRESS: &str = "127.0.0.1:32276";
 const REDACTED_SECRET_VALUE: &str = "[REDACTED]";
 const VALIDATION_TIMEOUT: Duration = Duration::from_secs(20);
@@ -115,6 +115,7 @@ impl InstallAppState {
             first_operator:     Arc::new(Mutex::new(None)),
             finish_in_progress: Arc::new(AtomicBool::new(false)),
             upstreams:          InstallUpstreamConfig::default(),
+            github_host:        GitHubHost::default(),
             static_asset_root:  None,
             on_finish:          None,
             finish_hook:        None,
@@ -157,6 +158,7 @@ impl InstallAppState {
             first_operator:     Arc::new(Mutex::new(None)),
             finish_in_progress: Arc::new(AtomicBool::new(false)),
             upstreams:          InstallUpstreamConfig::default(),
+            github_host:        GitHubHost::default(),
             static_asset_root:  None,
             on_finish:          None,
             finish_hook:        None,
@@ -200,6 +202,12 @@ impl InstallAppState {
         self.upstreams
             .provider_base_urls
             .insert(provider.into(), base_url.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_github_host(mut self, host: GitHubHost) -> Self {
+        self.github_host = host;
         self
     }
 
@@ -566,11 +574,12 @@ enum GitHubAppOwner {
 }
 
 impl GitHubAppOwner {
-    fn manifest_form_action(&self) -> String {
+    fn manifest_form_action(&self, host: &GitHubHost) -> String {
+        let web_url = host.web_url();
         match self {
-            Self::Personal => "https://github.com/settings/apps/new".to_string(),
+            Self::Personal => format!("{web_url}/settings/apps/new"),
             Self::Organization(org) => {
-                format!("https://github.com/organizations/{org}/settings/apps/new")
+                format!("{web_url}/organizations/{org}/settings/apps/new")
             }
         }
     }
@@ -602,6 +611,7 @@ impl TryFrom<GithubAppOwnerInput> for GitHubAppOwner {
 }
 
 pub fn build_install_router(state: InstallAppState) -> Router {
+    let csp_policy = Arc::new(csp::policy(&state.github_host));
     let static_asset_root = state.static_asset_root.clone();
 
     Router::new()
@@ -670,7 +680,10 @@ pub fn build_install_router(state: InstallAppState) -> Router {
         // router; a first-run setup over a slow link needs compression just
         // as much.
         .layer(server::compression_layer())
-        .layer(middleware::from_fn(security_headers::layer))
+        .layer(middleware::from_fn_with_state(
+            csp_policy,
+            security_headers::layer,
+        ))
 }
 
 struct InstallFinishGuard {
@@ -783,6 +796,7 @@ async fn get_install_session(
         "prefill": {
             "canonical_url": detect_canonical_url(&headers),
             "object_store_local_root": default_local_object_store_root(&state),
+            "github_web_url": state.github_host.web_url(),
         }
     }))
     .into_response()
@@ -1422,7 +1436,7 @@ async fn post_install_github_app_manifest(
 
     Json(serde_json::json!({
         "manifest": manifest,
-        "github_form_action": owner.manifest_form_action(),
+        "github_form_action": owner.manifest_form_action(&state.github_host),
         "state": state_token,
     }))
     .into_response()
@@ -2178,7 +2192,7 @@ async fn validate_github_token(state: &InstallAppState, token: &str) -> anyhow::
         .upstreams
         .github_api_base_url
         .clone()
-        .unwrap_or_else(|| DEFAULT_INSTALL_GITHUB_API_BASE_URL.to_string());
+        .unwrap_or_else(|| state.github_host.api_url().to_string());
     let endpoint = install_upstream_endpoint(&base_url, &["user"])?;
     let client = install_http_client_for_url(&base_url)?;
     let response = client
@@ -2210,7 +2224,7 @@ async fn exchange_github_app_manifest_code(
         .upstreams
         .github_api_base_url
         .clone()
-        .unwrap_or_else(|| DEFAULT_INSTALL_GITHUB_API_BASE_URL.to_string());
+        .unwrap_or_else(|| state.github_host.api_url().to_string());
     let endpoint = install_upstream_endpoint(&base_url, &["app-manifests", code, "conversions"])?;
     let client = install_http_client_for_url(&base_url)?;
     let response = client
@@ -2319,15 +2333,15 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        DEFAULT_INSTALL_GITHUB_API_BASE_URL, GitHubAppOwner, GithubAppInstall, GithubInstallState,
-        InstallAppState, InstallAwsCredentialPair, InstallFinishGuard,
-        InstallObjectStoreCredentialMode, InstallObjectStoreInput, InstallObjectStoreProvider,
-        InstallObjectStoreState, InstallSandboxProviderState, InstallSandboxState,
-        InstallTokenQuery, LlmProvidersInput, PendingInstall, ServerConfigInput, ServerSecrets,
-        build_github_app_manifest, classify_object_store_validation_error, detect_canonical_url,
-        install_catalog_provider, install_object_store_lookup, lock_unpoisoned,
-        post_install_finish, provider_base_url_override, resolve_install_object_store_state,
-        token_is_valid, write_artifact_store_metadata,
+        GitHubAppOwner, GitHubHost, GithubAppInstall, GithubInstallState, InstallAppState,
+        InstallAwsCredentialPair, InstallFinishGuard, InstallObjectStoreCredentialMode,
+        InstallObjectStoreInput, InstallObjectStoreProvider, InstallObjectStoreState,
+        InstallSandboxProviderState, InstallSandboxState, InstallTokenQuery, LlmProvidersInput,
+        PendingInstall, ServerConfigInput, ServerSecrets, build_github_app_manifest,
+        classify_object_store_validation_error, detect_canonical_url, install_catalog_provider,
+        install_object_store_lookup, lock_unpoisoned, post_install_finish,
+        provider_base_url_override, resolve_install_object_store_state, token_is_valid,
+        write_artifact_store_metadata,
     };
 
     #[test]
@@ -2529,10 +2543,38 @@ mod tests {
     }
 
     #[test]
-    fn install_github_requests_default_to_fixed_github_api_base_url() {
+    fn install_github_requests_default_to_the_host_api_url() {
+        let state = InstallAppState::for_test("expected");
+        assert_eq!(state.github_host.api_url(), "https://api.github.com");
+        let state =
+            state.with_github_host(GitHubHost::new("https://ghe.example.com", None).unwrap());
         assert_eq!(
-            DEFAULT_INSTALL_GITHUB_API_BASE_URL,
-            "https://api.github.com"
+            state.github_host.api_url(),
+            "https://ghe.example.com/api/v3"
+        );
+    }
+
+    #[test]
+    fn manifest_form_action_targets_the_host_web_origin() {
+        let github_com = GitHubHost::default();
+        let ghes = GitHubHost::new("https://ghe.example.com", None).unwrap();
+        let org = GitHubAppOwner::Organization("acme".to_string());
+
+        assert_eq!(
+            GitHubAppOwner::Personal.manifest_form_action(&github_com),
+            "https://github.com/settings/apps/new"
+        );
+        assert_eq!(
+            org.manifest_form_action(&github_com),
+            "https://github.com/organizations/acme/settings/apps/new"
+        );
+        assert_eq!(
+            GitHubAppOwner::Personal.manifest_form_action(&ghes),
+            "https://ghe.example.com/settings/apps/new"
+        );
+        assert_eq!(
+            org.manifest_form_action(&ghes),
+            "https://ghe.example.com/organizations/acme/settings/apps/new"
         );
     }
 

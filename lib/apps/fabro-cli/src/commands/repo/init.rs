@@ -11,6 +11,7 @@ use tokio::task::spawn_blocking;
 
 use crate::args::{RepoInitArgs, ServerTargetArgs};
 use crate::command_context::CommandContext;
+use crate::user_config;
 
 #[expect(
     clippy::disallowed_methods,
@@ -193,8 +194,11 @@ async fn check_github_app_installation(target: &ServerTargetArgs, base_ctx: &Com
     };
 
     // Convert SSH URL to HTTPS and parse owner/repo
+    let Ok(host) = user_config::github_host() else {
+        return; // Unreadable server settings — skip silently
+    };
     let https_url = fabro_github::ssh_url_to_https(&remote_url);
-    let Ok((owner, repo)) = fabro_github::parse_github_owner_repo(&https_url) else {
+    let Ok((owner, repo)) = fabro_github::parse_github_owner_repo(&host, &https_url) else {
         return; // Not a GitHub repo — skip silently
     };
 

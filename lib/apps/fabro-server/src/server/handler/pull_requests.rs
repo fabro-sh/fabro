@@ -6,6 +6,7 @@ use axum::http::{HeaderValue, header};
 use fabro_store::platform_records::{
     PlatformRecord, PullRequestLinkedRecord, PullRequestRequestedRecord,
 };
+use fabro_types::GitHubHost;
 
 use super::super::{
     ApiError, AppState, CloseRunPullRequestResponse, CreateRunPullRequestRequest, IntoResponse,
@@ -47,15 +48,22 @@ const PULL_REQUEST_CREATION_RETRY_AFTER: Duration = Duration::from_secs(1);
     clippy::disallowed_types,
     reason = "Pull-request API validates public github.com URLs; these raw URLs are not credential-bearing log output."
 )]
-fn parse_github_owner_repo_from_url(url: &str, kind: &str) -> Result<(String, String), ApiError> {
+fn parse_github_owner_repo_from_url(
+    host: &GitHubHost,
+    url: &str,
+    kind: &str,
+) -> Result<(String, String), ApiError> {
     let parsed = fabro_http::Url::parse(url)
         .map_err(|err| ApiError::bad_request(format!("Invalid {kind}: {err}")))?;
     match parsed.host_str() {
-        Some("github.com") => {}
-        Some(host) => {
+        Some(got) if got == host.hostname() => {}
+        Some(got) => {
             return Err(ApiError::with_code(
                 StatusCode::BAD_REQUEST,
-                format!("Pull request operations support github.com only (got {host})."),
+                format!(
+                    "Pull request operations support {} only (got {got}).",
+                    host.host()
+                ),
                 "unsupported_host",
             ));
         }
@@ -66,19 +74,40 @@ fn parse_github_owner_repo_from_url(url: &str, kind: &str) -> Result<(String, St
         }
     }
 
-    fabro_github::parse_github_owner_repo(url).map_err(|err| ApiError::bad_request(err.to_string()))
+    fabro_github::parse_github_owner_repo(host, url)
+        .map_err(|err| ApiError::bad_request(err.to_string()))
 }
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "Pull-request links are public GitHub URLs; the raw URL is only compared with the configured host."
+)]
 fn pull_request_record_from_link_request(
+    host: &GitHubHost,
     body: &LinkRunPullRequestRequest,
 ) -> Result<PullRequestLink, ApiError> {
-    PullRequestLink::from_github_url(body.html_url.trim()).map_err(|err| {
+    let reject = |err: String| {
         let code = if err.contains("GitHub pull request URL") {
             "unsupported_pull_request_provider"
         } else {
             "invalid_pull_request_url"
         };
         ApiError::with_code(StatusCode::BAD_REQUEST, err, code)
+    };
+    let raw_url = body.html_url.trim();
+    let off_host = fabro_http::Url::parse(raw_url)
+        .is_ok_and(|url| url.origin().ascii_serialization() != host.web_url());
+    if off_host {
+        return Err(reject(format!(
+            "Pull request link must be a GitHub pull request URL like {}/owner/repo/pull/123.",
+            host.web_url()
+        )));
+    }
+    let link = PullRequestLink::from_github_url(raw_url).map_err(reject)?;
+    // Store the canonical URL, not the caller's spelling of it.
+    Ok(PullRequestLink {
+        html_url: host.pull_request_url(&link.owner, &link.repo, link.number),
+        ..link
     })
 }
 
@@ -123,7 +152,7 @@ pub(in crate::server) fn server_github_context<'a>(
     })?;
     Ok(fabro_github::GitHubContext::with_http_client(
         creds,
-        state.github_api_base_url.as_str(),
+        &state.github_host,
         http_client,
     ))
 }
@@ -272,7 +301,11 @@ impl<'a> RunPrInputs<'a> {
             ));
         }
         let normalized_origin = fabro_github::normalize_repo_origin_url(origin_url);
-        parse_github_owner_repo_from_url(&normalized_origin, "repo origin URL")?;
+        parse_github_owner_repo_from_url(
+            &state.github_host,
+            &normalized_origin,
+            "repo origin URL",
+        )?;
         Ok(Self {
             goal: run_spec.graph.goal(),
             base_branch,
@@ -456,7 +489,7 @@ async fn link_run_pull_request(
     Json(body): Json<LinkRunPullRequestRequest>,
 ) -> Response {
     let _create_guard = state.pull_request_create_locks.lock(id).await;
-    let pull_request = match pull_request_record_from_link_request(&body) {
+    let pull_request = match pull_request_record_from_link_request(&state.github_host, &body) {
         Ok(record) => record,
         Err(err) => return err.into_response(),
     };
@@ -612,9 +645,12 @@ async fn close_run_pull_request(
 #[cfg(test)]
 mod tests {
     use axum::http::StatusCode;
-    use fabro_types::{DirtyStatus, GitContext, StartRecord, blob_ref};
+    use fabro_api::types::LinkRunPullRequestRequest;
+    use fabro_types::{DirtyStatus, GitContext, GitHubHost, StartRecord, blob_ref};
 
-    use super::RunPrInputs;
+    use super::{
+        RunPrInputs, parse_github_owner_repo_from_url, pull_request_record_from_link_request,
+    };
     use crate::test_support::{test_app_state, test_concluded_run_projection};
 
     /// A finished run with everything a pull request needs and `patch` as
@@ -678,5 +714,70 @@ mod tests {
         };
         assert_eq!(error.status(), StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(error.detail(), "The saved final patch is missing.");
+    }
+
+    fn ghes() -> GitHubHost {
+        GitHubHost::new("https://ghe.example.com", None).unwrap()
+    }
+
+    fn link_request(html_url: &str) -> LinkRunPullRequestRequest {
+        serde_json::from_value(serde_json::json!({ "html_url": html_url })).unwrap()
+    }
+
+    #[test]
+    fn link_request_accepts_the_configured_host_and_stores_the_canonical_url() {
+        let link = pull_request_record_from_link_request(
+            &ghes(),
+            &link_request("https://GHE.example.com/acme/widgets/pull/7/"),
+        )
+        .unwrap();
+        assert_eq!(link.html_url, "https://ghe.example.com/acme/widgets/pull/7");
+        assert_eq!(
+            (link.owner.as_str(), link.repo.as_str(), link.number),
+            ("acme", "widgets", 7)
+        );
+
+        let default = pull_request_record_from_link_request(
+            &GitHubHost::default(),
+            &link_request("https://github.com/acme/widgets/pull/7"),
+        )
+        .unwrap();
+        assert_eq!(default.html_url, "https://github.com/acme/widgets/pull/7");
+    }
+
+    #[test]
+    fn link_request_rejects_other_hosts_naming_the_configured_one() {
+        let error = pull_request_record_from_link_request(
+            &ghes(),
+            &link_request("https://github.com/acme/widgets/pull/7"),
+        )
+        .unwrap_err();
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+        assert!(
+            error
+                .detail()
+                .contains("https://ghe.example.com/owner/repo/pull/123"),
+            "{}",
+            error.detail()
+        );
+    }
+
+    #[test]
+    fn repo_origin_must_be_on_the_configured_host() {
+        let (owner, repo) = parse_github_owner_repo_from_url(
+            &ghes(),
+            "https://ghe.example.com/acme/widgets",
+            "origin",
+        )
+        .unwrap();
+        assert_eq!((owner.as_str(), repo.as_str()), ("acme", "widgets"));
+
+        let error =
+            parse_github_owner_repo_from_url(&ghes(), "https://github.com/acme/widgets", "origin")
+                .unwrap_err();
+        assert_eq!(
+            error.detail(),
+            "Pull request operations support ghe.example.com only (got github.com)."
+        );
     }
 }

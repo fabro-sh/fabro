@@ -2,7 +2,7 @@
 //! the board and the scheduler read, derived from the projection.
 
 use fabro_types::{
-    AskFabro, RepositoryRef, Run, RunId, RunLifecycle, RunLinks, RunModel, RunOrigin,
+    AskFabro, GitHubHost, RepositoryRef, Run, RunId, RunLifecycle, RunLinks, RunModel, RunOrigin,
     RunProjection, RunSize, RunTimestamps, WorkflowRef, sum_usage,
 };
 use lithos_llm::types::Usage;
@@ -10,7 +10,7 @@ use lithos_llm::types::Usage;
 /// The run summary (`Run`) a projection stands for: what the run list, the
 /// board and the scheduler read.
 #[must_use]
-pub fn build_summary(state: &RunProjection, run_id: &RunId) -> Run {
+pub fn build_summary(host: &GitHubHost, state: &RunProjection, run_id: &RunId) -> Run {
     let goal = state.spec.graph.goal().to_string();
     let diff_summary = state
         .conclusion
@@ -65,6 +65,7 @@ pub fn build_summary(state: &RunProjection, run_id: &RunId) -> Run {
         },
         automation: state.spec.automation.clone(),
         repository: Some(RepositoryRef::from_origin_and_source(
+            host,
             repo_origin_url,
             source_directory.as_deref(),
         )),

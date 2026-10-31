@@ -485,6 +485,7 @@ mod tests {
         let mut transaction = summaries.pool().begin().await.unwrap();
         RunSummaryStore::write_petri_run_row_on_connection(
             &mut transaction,
+            &fabro_types::GitHubHost::default(),
             &fixtures::RUN_1,
             &projection,
         )

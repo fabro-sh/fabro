@@ -148,9 +148,10 @@ impl RunView {
             }
             PlatformRecord::PullRequestCreated(record) => {
                 let link = PullRequestLink {
-                    owner:  record.owner.clone(),
-                    repo:   record.repo.clone(),
-                    number: record.number,
+                    owner:    record.owner.clone(),
+                    repo:     record.repo.clone(),
+                    number:   record.number,
+                    html_url: record.html_url.clone(),
                 };
                 projection.pull_request = Some(link.clone());
                 if let Some(creation) = projection

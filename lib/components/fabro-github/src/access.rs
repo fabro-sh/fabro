@@ -9,8 +9,8 @@
 use std::collections::{BTreeSet, HashMap};
 
 use anyhow::{Context as _, bail};
-use fabro_types::GitHubRepositorySlug;
 use fabro_types::settings::run::RunIntegrationsGithubSettings;
+use fabro_types::{GitHubHost, GitHubRepositorySlug};
 use futures::stream::{self, StreamExt as _};
 
 use crate::{GitHubAppCredentials, HttpClient, InstallationLookup, InstallationToken};
@@ -48,6 +48,7 @@ impl GitHubRepositoryAccess {
     /// - a declared additional set requires interpolated permissions with
     ///   `contents = "read"` or `contents = "write"`.
     pub fn new(
+        host: &GitHubHost,
         origin_url: Option<&str>,
         additional_repositories: &BTreeSet<GitHubRepositorySlug>,
         permissions: HashMap<String, String>,
@@ -64,7 +65,7 @@ impl GitHubRepositoryAccess {
         };
 
         let normalized = crate::normalize_repo_origin_url(origin_url);
-        let (owner, repo) = crate::parse_github_owner_repo(&normalized)
+        let (owner, repo) = crate::parse_github_owner_repo(host, &normalized)
             .context("parsing GitHub origin for repository access")?;
         let Some(primary) = GitHubRepositorySlug::try_new(&format!("{owner}/{repo}")) else {
             bail!("run origin does not name a valid GitHub `owner/repository`: {owner}/{repo}");
@@ -257,7 +258,12 @@ mod tests {
         additional: &[&str],
         permissions: HashMap<String, String>,
     ) -> anyhow::Result<Option<GitHubRepositoryAccess>> {
-        GitHubRepositoryAccess::new(Some(origin), &slugs(additional), permissions)
+        GitHubRepositoryAccess::new(
+            &GitHubHost::default(),
+            Some(origin),
+            &slugs(additional),
+            permissions,
+        )
     }
 
     #[test]
@@ -278,19 +284,34 @@ mod tests {
 
     #[test]
     fn no_origin_and_no_additional_repositories_is_none() {
-        let access = GitHubRepositoryAccess::new(None, &BTreeSet::new(), HashMap::new()).unwrap();
+        let access = GitHubRepositoryAccess::new(
+            &GitHubHost::default(),
+            None,
+            &BTreeSet::new(),
+            HashMap::new(),
+        )
+        .unwrap();
         assert!(access.is_none());
 
-        let blank =
-            GitHubRepositoryAccess::new(Some("  "), &BTreeSet::new(), HashMap::new()).unwrap();
+        let blank = GitHubRepositoryAccess::new(
+            &GitHubHost::default(),
+            Some("  "),
+            &BTreeSet::new(),
+            HashMap::new(),
+        )
+        .unwrap();
         assert!(blank.is_none());
     }
 
     #[test]
     fn additional_repositories_require_an_origin() {
-        let err =
-            GitHubRepositoryAccess::new(None, &slugs(&["fabro-sh/keystone"]), contents_read())
-                .unwrap_err();
+        let err = GitHubRepositoryAccess::new(
+            &GitHubHost::default(),
+            None,
+            &slugs(&["fabro-sh/keystone"]),
+            contents_read(),
+        )
+        .unwrap_err();
         assert!(
             err.to_string().contains("requires a GitHub run origin"),
             "{err:#}"

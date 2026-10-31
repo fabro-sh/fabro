@@ -121,9 +121,15 @@ mod tests {
     #[test]
     fn leaves_legacy_aliases_and_non_secret_config_unclassified() {
         for name in [
+            // A sandbox-injected copy of the resolved token, not a vault secret.
+            EnvVars::GH_ENTERPRISE_TOKEN,
+            EnvVars::GH_HOST,
             EnvVars::GH_TOKEN,
             EnvVars::GITHUB_BASE_URL,
+            EnvVars::GITHUB_WEB_URL,
             EnvVars::SLACK_BASE_URL,
+            EnvVars::SSL_CERT_DIR,
+            EnvVars::SSL_CERT_FILE,
             EnvVars::DAYTONA_API_URL,
             EnvVars::DAYTONA_ORGANIZATION_ID,
             EnvVars::DAYTONA_SERVER_URL,

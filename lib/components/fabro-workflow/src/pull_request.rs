@@ -465,9 +465,13 @@ async fn reconcile_existing_pull_request(
     .await;
     Ok(Some(CreatedPullRequest {
         link:        PullRequestLink {
-            owner:  owner.to_string(),
-            repo:   repo.to_string(),
-            number: existing.number,
+            owner:    owner.to_string(),
+            repo:     repo.to_string(),
+            number:   existing.number,
+            html_url: req
+                .github
+                .host()
+                .pull_request_url(owner, repo, existing.number),
         },
         title:       existing.title,
         base_branch: req.base_branch.to_string(),
@@ -553,8 +557,8 @@ pub async fn open_pull_request(
     req: OpenPullRequestRequest<'_>,
 ) -> Result<CreatedPullRequest, String> {
     let https_url = ssh_url_to_https(req.origin_url);
-    let (owner, repo) =
-        github_app::parse_github_owner_repo(&https_url).map_err(|err| format!("{err:#}"))?;
+    let (owner, repo) = github_app::parse_github_owner_repo(req.github.host(), &https_url)
+        .map_err(|err| format!("{err:#}"))?;
 
     // Verify before generating content: this is the cheap check, and a stale
     // branch would otherwise cost a full LLM call before failing.
@@ -621,10 +625,15 @@ pub async fn open_pull_request(
     )
     .await;
 
+    let html_url = req
+        .github
+        .host()
+        .pull_request_url(&owner, &repo, created.number);
     let link = PullRequestLink {
         owner,
         repo,
         number: created.number,
+        html_url,
     };
 
     Ok(CreatedPullRequest {
@@ -1272,9 +1281,11 @@ capabilities = { text = true, tools = true, response_format = { json_object = tr
         let payload = pr_content_json("Fix bug", "Narrative.");
         let harness = setup_fallback_test_harness_with_branch_sha(&payload, "stale-sha").await;
         let github_base_url = harness.github_server.url("");
+        let github_host =
+            fabro_github::GitHubHost::new("https://github.com", Some(&github_base_url)).unwrap();
         let error = open_pull_request(OpenPullRequestRequest {
             run_id:            RunId::new(),
-            github:            fabro_github::GitHubContext::new(&harness.creds, &github_base_url),
+            github:            fabro_github::GitHubContext::new(&harness.creds, &github_host),
             origin_url:        "https://github.com/owner/repo.git",
             base_branch:       "main",
             head_branch:       "fabro/run/123",
@@ -1543,7 +1554,7 @@ capabilities = { text = true, tools = true, response_format = { json_object = tr
             &payload,
             "final-sha",
             serde_json::json!([{
-                "html_url": "https://github.com/owner/repo/pull/7",
+                "html_url": "https://github.com/OWNER/Repo/pull/7",
                 "number": 7,
                 "node_id": "PR_existing",
                 "title": "Reconciled title",
@@ -1553,7 +1564,9 @@ capabilities = { text = true, tools = true, response_format = { json_object = tr
         .await;
 
         let github_base_url = harness.github_server.url("");
-        let github = github_app::GitHubContext::new(&harness.creds, &github_base_url);
+        let github_host =
+            fabro_github::GitHubHost::new("https://github.com", Some(&github_base_url)).unwrap();
+        let github = github_app::GitHubContext::new(&harness.creds, &github_host);
 
         let result = open_pull_request(OpenPullRequestRequest {
             run_id: RunId::new(),
@@ -1576,6 +1589,8 @@ capabilities = { text = true, tools = true, response_format = { json_object = tr
         .expect("reconciliation should adopt the existing pull request");
 
         assert_eq!(result.link.number, 7);
+        // The URL follows the stored coordinates, not the API's spelling.
+        assert_eq!(result.link.html_url, "https://github.com/owner/repo/pull/7");
         assert_eq!(result.title, "Reconciled title");
         // Adoption must not cost an LLM call or a create request.
         assert_eq!(
@@ -1601,7 +1616,9 @@ capabilities = { text = true, tools = true, response_format = { json_object = tr
         let harness = setup_fallback_test_harness(&payload).await;
 
         let github_base_url = harness.github_server.url("");
-        let github = github_app::GitHubContext::new(&harness.creds, &github_base_url);
+        let github_host =
+            fabro_github::GitHubHost::new("https://github.com", Some(&github_base_url)).unwrap();
+        let github = github_app::GitHubContext::new(&harness.creds, &github_host);
 
         let result = open_pull_request(OpenPullRequestRequest {
             run_id: RunId::new(),
@@ -1624,6 +1641,9 @@ capabilities = { text = true, tools = true, response_format = { json_object = tr
         .expect("PR creation should succeed");
 
         assert_eq!(result.title, "Fix telemetry leak");
+        // The mock API answers with an `example.test` URL; the stored URL is
+        // derived from the stored coordinates instead.
+        assert_eq!(result.link.html_url, "https://github.com/owner/repo/pull/1");
         harness.assert_mocks_called_once().await;
     }
 
@@ -1635,7 +1655,9 @@ capabilities = { text = true, tools = true, response_format = { json_object = tr
         let harness = setup_fallback_test_harness(&payload).await;
 
         let github_base_url = harness.github_server.url("");
-        let github = github_app::GitHubContext::new(&harness.creds, &github_base_url);
+        let github_host =
+            fabro_github::GitHubHost::new("https://github.com", Some(&github_base_url)).unwrap();
+        let github = github_app::GitHubContext::new(&harness.creds, &github_host);
 
         // Single ~200-char line, no `Plan:` / heading prefix, no newlines.
         let goal = "x".repeat(200);

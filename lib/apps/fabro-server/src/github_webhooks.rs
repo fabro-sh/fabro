@@ -1,4 +1,5 @@
 use fabro_static::EnvVars;
+use fabro_types::GitHubHost;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use tokio::process::Command;
@@ -56,6 +57,7 @@ pub struct TailscaleFunnelManager {
 impl TailscaleFunnelManager {
     pub async fn start(
         main_server_port: u16,
+        host: &GitHubHost,
         app_id: &str,
         private_key_pem: &str,
     ) -> anyhow::Result<Self> {
@@ -63,7 +65,9 @@ impl TailscaleFunnelManager {
         info!(port = main_server_port, url = %funnel_url, "Tailscale funnel enabled");
 
         let webhook_url = format!("{funnel_url}{WEBHOOK_ROUTE}");
-        match fabro_github::update_app_webhook_config(app_id, private_key_pem, &webhook_url).await {
+        match fabro_github::update_app_webhook_config(host, app_id, private_key_pem, &webhook_url)
+            .await
+        {
             Ok(()) => {
                 info!(url = %webhook_url, "GitHub App webhook URL updated");
             }

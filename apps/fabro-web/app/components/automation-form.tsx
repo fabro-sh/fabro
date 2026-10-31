@@ -100,6 +100,7 @@ export function automationFormValuesFromRun(
   runState?: RunProjection | null,
   settings?: WorkflowSettings | null,
   environments?: Environment[],
+  githubWebUrl: string = DEFAULT_GITHUB_WEB_URL,
 ): AutomationFormValues {
   const name = firstPresentString(
     run.title,
@@ -117,7 +118,7 @@ export function automationFormValuesFromRun(
   const targetRepository = canonicalTarget?.repo
     ?? githubRepositoryFromSettings(settings)
     ?? githubRepositoryName(run.repository?.name)
-    ?? githubRepositoryFromOriginUrl(run.repository?.origin_url)
+    ?? githubRepositoryFromOriginUrl(run.repository?.origin_url, githubWebUrl)
     ?? "";
   const cloneBranch = sandboxRuntime(run.sandbox)?.clone_branch;
   const sourceEnvironment = settings?.run?.environment;
@@ -245,20 +246,30 @@ function githubRepositoryName(value: string | null | undefined): string | null {
   return `${match[1]}/${match[2]}`;
 }
 
-function githubRepositoryFromOriginUrl(value: string | null | undefined): string | null {
+const DEFAULT_GITHUB_WEB_URL = "https://github.com";
+
+function githubRepositoryFromOriginUrl(
+  value: string | null | undefined,
+  githubWebUrl: string,
+): string | null {
   const trimmed = value?.trim();
   if (!trimmed) return null;
 
-  const scpLikeMatch = trimmed.match(
-    /^git@github\.com:([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)\/([A-Za-z0-9._-]+?)(?:\.git)?$/i,
-  );
-  if (scpLikeMatch) {
-    return githubRepositoryName(`${scpLikeMatch[1]}/${scpLikeMatch[2]}`);
+  let githubHostname: string;
+  try {
+    githubHostname = new URL(githubWebUrl).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+
+  const scpPrefix = `git@${githubHostname}:`;
+  if (trimmed.toLowerCase().startsWith(scpPrefix)) {
+    return githubRepositoryName(trimmed.slice(scpPrefix.length));
   }
 
   try {
     const url = new URL(trimmed);
-    if (url.hostname.toLowerCase() !== "github.com") return null;
+    if (url.hostname.toLowerCase() !== githubHostname) return null;
     const parts = url.pathname.split("/").filter(Boolean);
     if (parts.length !== 2) return null;
     return githubRepositoryName(`${parts[0]}/${parts[1]}`);

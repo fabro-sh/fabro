@@ -1,7 +1,7 @@
 use anyhow::{Context as _, anyhow};
 use async_trait::async_trait;
 use fabro_github::{
-    GitHubCredentials, create_installation_access_token_for_projects, sign_app_jwt,
+    GitHubCredentials, GitHubHost, create_installation_access_token_for_projects, sign_app_jwt,
 };
 use tokio::sync::OnceCell;
 
@@ -35,7 +35,7 @@ pub struct GitHubTracker {
     owner:           String,
     repo:            String,
     project_number:  u64,
-    base_url:        String,
+    host:            GitHubHost,
     project_node_id: OnceCell<String>,
 }
 
@@ -46,7 +46,7 @@ impl GitHubTracker {
         owner: String,
         repo: String,
         project_number: u64,
-        base_url: String,
+        host: GitHubHost,
     ) -> Self {
         Self {
             creds,
@@ -54,13 +54,13 @@ impl GitHubTracker {
             owner,
             repo,
             project_number,
-            base_url,
+            host,
             project_node_id: OnceCell::new(),
         }
     }
 
     fn graphql_url(&self) -> String {
-        format!("{}/graphql", self.base_url)
+        self.host.graphql_url()
     }
 
     async fn fresh_token(&self) -> anyhow::Result<String> {
@@ -73,7 +73,7 @@ impl GitHubTracker {
                     &jwt,
                     &self.owner,
                     &self.repo,
-                    &self.base_url,
+                    &self.host,
                 )
                 .await
                 .context("creating GitHub App installation token")
@@ -645,7 +645,7 @@ mod tests {
             "owner".to_string(),
             "repo".to_string(),
             1,
-            server_url.to_string(),
+            GitHubHost::new(server_url, Some(server_url)).unwrap(),
         )
     }
 
@@ -1225,7 +1225,7 @@ mod tests {
     #[tokio::test]
     async fn github_tracker_fetch_issues_by_ids_empty() {
         let pem = test_rsa_key();
-        let tracker = mock_github_tracker("http://unused", pem);
+        let tracker = mock_github_tracker("http://127.0.0.1:1", pem);
 
         // Empty input → no HTTP calls at all
         let issues = tracker.fetch_issues_by_ids(&[]).await.unwrap();

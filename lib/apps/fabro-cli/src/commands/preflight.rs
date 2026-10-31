@@ -12,6 +12,7 @@ use crate::commands::run::output::{
 use crate::commands::run::overrides::preflight_args_overrides;
 use crate::manifest_args::preflight_manifest_args;
 use crate::shared::{cyan_spinner, print_json_pretty};
+use crate::user_config;
 
 pub(crate) async fn execute(
     mut args: PreflightArgs,
@@ -32,6 +33,7 @@ pub(crate) async fn execute(
         args:                 preflight_manifest_args(&args),
         environment_defaults: fabro_environment::seeded_catalog_layer(),
         user_settings_path:   Some(active_settings_path(None)),
+        github_host:          user_config::github_host()?,
     })?;
 
     let spinner = (!ctx.json_output()).then(|| cyan_spinner("Running checks..."));

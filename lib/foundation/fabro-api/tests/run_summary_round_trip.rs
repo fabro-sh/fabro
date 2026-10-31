@@ -143,9 +143,10 @@ fn run_summary_json_matches_openapi_shape() {
             deletions:     4,
         }),
         pull_request:     Some(PullRequestLink {
-            owner:  "fabro-sh".to_string(),
-            repo:   "fabro".to_string(),
-            number: 123,
+            owner:    "fabro-sh".to_string(),
+            repo:     "fabro".to_string(),
+            number:   123,
+            html_url: "https://github.com/fabro-sh/fabro/pull/123".to_string(),
         }),
         current_question: None,
         superseded_by:    None,

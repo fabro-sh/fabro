@@ -14,7 +14,7 @@ use fabro_static::EnvVars;
 use fabro_types::settings::RunNamespace;
 use fabro_types::settings::cli::CliTargetSettings;
 use fabro_types::settings::server::LogDestination;
-use fabro_types::{ServerSettings, UserSettings};
+use fabro_types::{GitHubHost, ServerSettings, UserSettings};
 use fabro_util::error::SharedError;
 use fabro_util::version::FABRO_VERSION;
 use tokio::fs;
@@ -22,6 +22,14 @@ use toml_edit::{DocumentMut, Item, Table, value};
 use tracing::debug;
 
 use crate::args::ServerTargetArgs;
+
+/// The GitHub deployment configured in the local server settings, with the
+/// `GITHUB_WEB_URL` / `GITHUB_BASE_URL` overrides applied.
+pub(crate) fn github_host() -> Result<GitHubHost> {
+    let configured = ServerSettingsBuilder::load_default_github_host()
+        .context("loading the GitHub host from the server settings")?;
+    fabro_github::with_env_overrides(&configured)
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct RunSettingsKeyPresence {

@@ -20,4 +20,8 @@
 export interface InstallPrefill {
     'canonical_url': string;
     'object_store_local_root': string;
+    /**
+     * Web origin of the GitHub deployment the install targets, without a trailing slash.
+     */
+    'github_web_url': string;
 }

@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use fabro_github::token_source::InstallationTokenSource;
 use fabro_github::{GitHubAppCredentials, GitHubCredentials, GitHubRepositoryAccess};
-use fabro_types::GitHubRepositorySlug;
+use fabro_types::{GitHubHost, GitHubRepositorySlug};
 use tokio::process::Command;
 use tokio::time::sleep;
 
@@ -34,9 +34,9 @@ fn env_var(name: &str) -> String {
 }
 
 async fn ls_remote_with_token(slug: &GitHubRepositorySlug, token: &str) -> bool {
-    let url = slug.https_url();
+    let url = slug.https_url(&GitHubHost::default());
     let mut command = Command::new("git");
-    fabro_github::apply_probe_git_env(&mut command, token);
+    fabro_github::apply_probe_git_env(&mut command, &GitHubHost::default(), token);
     let output = command
         .args(["ls-remote", &url, "HEAD"])
         .stdout(Stdio::null())
@@ -65,6 +65,7 @@ async fn scoped_token_reaches_the_declared_additional_repository() {
     let additional_set: BTreeSet<GitHubRepositorySlug> = [additional.clone()].into_iter().collect();
 
     let access = GitHubRepositoryAccess::new(
+        &GitHubHost::default(),
         Some(&origin),
         &additional_set,
         std::collections::HashMap::from([("contents".to_string(), "read".to_string())]),
@@ -75,8 +76,8 @@ async fn scoped_token_reaches_the_declared_additional_repository() {
     // The production choreography: every target resolves to one shared
     // installation, then one mint scoped to the whole effective set.
     let creds = GitHubCredentials::App(app.clone());
-    let source =
-        InstallationTokenSource::for_access(&creds, &access).expect("token source should build");
+    let source = InstallationTokenSource::for_access(&creds, &GitHubHost::default(), &access)
+        .expect("token source should build");
     let resolved = source.resolve().await.expect("scoped mint should succeed");
     let token = resolved.token.expose();
 
@@ -102,15 +103,19 @@ async fn scoped_token_reaches_the_declared_additional_repository() {
     // read the additional repository (proves server-side scoping, not just
     // possession of a token).
     let primary_only = GitHubRepositoryAccess::new(
+        &GitHubHost::default(),
         Some(&origin),
         &BTreeSet::new(),
         std::collections::HashMap::from([("contents".to_string(), "read".to_string())]),
     )
     .expect("primary-only access should validate")
     .expect("origin should produce an access value");
-    let narrow_source =
-        InstallationTokenSource::for_access(&GitHubCredentials::App(app), &primary_only)
-            .expect("primary-only token source should build");
+    let narrow_source = InstallationTokenSource::for_access(
+        &GitHubCredentials::App(app),
+        &GitHubHost::default(),
+        &primary_only,
+    )
+    .expect("primary-only token source should build");
     let narrow = narrow_source
         .resolve()
         .await

@@ -13,6 +13,7 @@ const INSTALL_ERROR_MESSAGE =
 const INSTALL_PREFILL = {
   canonical_url: "https://fabro.example.com",
   object_store_local_root: "/home/test/.fabro/storage/objects",
+  github_web_url: "https://github.com",
 };
 
 const SESSION_RESPONSE = {
@@ -234,6 +235,67 @@ describe("InstallApp", () => {
         expect(renderTreeText(renderer!.toJSON())).toContain(INSTALL_ERROR_MESSAGE);
       });
       expect(testWindow.location.search).toBe("");
+
+      await act(async () => {
+        renderer?.unmount();
+      });
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
+  test.each([
+    ["https://github.com", "github.com/settings/tokens"],
+    ["https://ghe.example.com", "ghe.example.com/settings/tokens"],
+  ])("links the GitHub token page on %s", async (githubWebUrl, label) => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const originalConsoleError = console.error;
+    console.error = ((...args: unknown[]) => {
+      if (
+        typeof args[0] === "string" &&
+        args[0].startsWith("react-test-renderer is deprecated")
+      ) {
+        return;
+      }
+      originalConsoleError(...args);
+    }) as typeof console.error;
+    try {
+      const fetchMock = mock(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...SESSION_RESPONSE,
+              prefill: { ...INSTALL_PREFILL, github_web_url: githubWebUrl },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        ),
+      );
+      useInstallFetchMock(fetchMock as unknown as typeof fetch);
+
+      const testWindow = createTestWindow("https://fabro.example.com/install/github");
+      testWindow.sessionStorage.setItem("fabro-install-token", "test-install-token");
+      (globalThis as { window?: unknown }).window = testWindow;
+
+      let renderer: TestRenderer.ReactTestRenderer | null = null;
+      await act(async () => {
+        renderer = createInstallRenderer(
+          <MemoryRouter initialEntries={["/install/github"]}>
+            <Routes>
+              <Route path="/install/*" element={<InstallApp />} />
+            </Routes>
+          </MemoryRouter>,
+        );
+      });
+
+      await waitFor(() => {
+        expect(renderTreeText(renderer!.toJSON())).toContain("Connect GitHub");
+      });
+      const link = renderer!.root.findAll(
+        (node) => node.type === "a" && node.props.href === `${githubWebUrl}/settings/tokens`,
+      );
+      expect(link.length).toBeGreaterThan(0);
+      expect(renderTreeText(renderer!.toJSON())).toContain(label);
 
       await act(async () => {
         renderer?.unmount();

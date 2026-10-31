@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{DirtyStatus, GitContext, GitHubRepositorySlug, RunId, WorkflowVersionId, repository};
+use crate::{
+    DirtyStatus, GitContext, GitHubHost, GitHubRepositorySlug, RunId, WorkflowVersionId, repository,
+};
 
 /// A request to create a run from an immutable workflow version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,6 +75,18 @@ pub struct GitRunTarget {
 }
 
 impl GitRunTarget {
+    /// Validates the coordinate and returns it in canonical form, for callers
+    /// that do not need the operational Git projection (and so no host).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`GitRunTarget::validate`].
+    pub fn canonical(self) -> Result<Self, GitCoordinateValidationError> {
+        // The host does not affect the canonical form.
+        self.validate(&GitHubHost::default())
+            .map(ValidatedGitRunTarget::into_target)
+    }
+
     /// Validates and canonicalizes this Git coordinate without resolving remote
     /// repository state.
     ///
@@ -80,7 +94,10 @@ impl GitRunTarget {
     ///
     /// Returns an error when the repository slug, branch, tag, or exact commit
     /// does not use the canonical grammar accepted for Git-backed runs.
-    pub fn validate(self) -> Result<ValidatedGitRunTarget, GitCoordinateValidationError> {
+    pub fn validate(
+        self,
+        host: &GitHubHost,
+    ) -> Result<ValidatedGitRunTarget, GitCoordinateValidationError> {
         let Self {
             repo,
             branch,
@@ -104,7 +121,7 @@ impl GitRunTarget {
             })
             .transpose()?;
         let git = GitContext {
-            origin_url: repository.https_url(),
+            origin_url: repository.https_url(host),
             branch:     branch.clone(),
             sha:        sha.clone(),
             dirty:      DirtyStatus::Clean,
@@ -123,6 +140,18 @@ impl GitRunTarget {
 }
 
 impl RunTarget {
+    /// Validates the target and returns it in canonical form, for callers
+    /// that do not need the operational Git projection (and so no host).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`RunTarget::validate`].
+    pub fn canonical(self) -> Result<Self, TargetValidationError> {
+        // The host does not affect the canonical form.
+        self.validate(&GitHubHost::default())
+            .map(|validated| validated.target)
+    }
+
     /// The wire `kind` discriminator (`git`, `none`, or `folder`), for
     /// diagnostics.
     pub fn kind_name(&self) -> &'static str {
@@ -139,10 +168,10 @@ impl RunTarget {
     ///
     /// Returns an error when a Git target's repository slug, branch, tag, or
     /// exact commit does not use the canonical grammar accepted for runs.
-    pub fn validate(self) -> Result<ValidatedRunTarget, TargetValidationError> {
+    pub fn validate(self, host: &GitHubHost) -> Result<ValidatedRunTarget, TargetValidationError> {
         match self {
             Self::Git(target) => {
-                let validated = target.validate().map_err(TargetValidationError::from)?;
+                let validated = target.validate(host).map_err(TargetValidationError::from)?;
                 Ok(ValidatedRunTarget {
                     target: Self::Git(validated.target),
                     git:    Some(validated.git),

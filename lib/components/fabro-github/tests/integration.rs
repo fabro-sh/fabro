@@ -4,9 +4,14 @@ use fabro_github::{
     get_pull_request, merge_pull_request, resolve_authenticated_url, sign_app_jwt,
 };
 use fabro_test::{GitHubAppOptions, GitHubAppState, TwinGitHub};
+use fabro_types::GitHubHost;
 use fabro_types::settings::run::MergeStrategy;
 
 const TEST_RSA_KEY: &str = include_str!("../src/testdata/rsa_private.pem");
+
+fn twin_host(twin: &TwinGitHub) -> GitHubHost {
+    GitHubHost::new(&twin.base_url, Some(&twin.base_url)).expect("twin URL should be a valid host")
+}
 
 fn github_credentials() -> GitHubCredentials {
     GitHubCredentials::App(GitHubAppCredentials {
@@ -40,7 +45,8 @@ fn standard_app_state() -> GitHubAppState {
 async fn create_and_get_pull_request() {
     let twin = TwinGitHub::start(standard_app_state()).await;
     let creds = github_credentials();
-    let ctx = &GitHubContext::new(&creds, &twin.base_url);
+    let host = twin_host(&twin);
+    let ctx = &GitHubContext::new(&creds, &host);
 
     let created = create_pull_request(
         ctx,
@@ -71,7 +77,8 @@ async fn create_and_get_pull_request() {
 async fn create_merge_and_verify_state() {
     let twin = TwinGitHub::start(standard_app_state()).await;
     let creds = github_credentials();
-    let ctx = &GitHubContext::new(&creds, &twin.base_url);
+    let host = twin_host(&twin);
+    let ctx = &GitHubContext::new(&creds, &host);
 
     let created = create_pull_request(
         ctx, "acme", "widgets", "main", "feature", "Merge me", "PR body", false,
@@ -104,7 +111,8 @@ async fn create_close_and_verify_state() {
     let twin = TwinGitHub::start(standard_app_state()).await;
     let creds = github_credentials();
 
-    let ctx = &GitHubContext::new(&creds, &twin.base_url);
+    let host = twin_host(&twin);
+    let ctx = &GitHubContext::new(&creds, &host);
 
     let created = create_pull_request(
         ctx, "acme", "widgets", "main", "feature", "Close me", "PR body", false,
@@ -130,7 +138,8 @@ async fn enable_auto_merge_persists() {
     let twin = TwinGitHub::start(standard_app_state()).await;
     let creds = github_credentials();
 
-    let ctx = &GitHubContext::new(&creds, &twin.base_url);
+    let host = twin_host(&twin);
+    let ctx = &GitHubContext::new(&creds, &host);
 
     let created = create_pull_request(
         ctx,
@@ -160,10 +169,9 @@ async fn enable_auto_merge_persists() {
     };
     let jwt = sign_app_jwt(&app_creds.app_id, &app_creds.private_key_pem).unwrap();
     let client = fabro_test::test_http_client();
-    let token =
-        create_installation_access_token_for_pr(&client, &jwt, "acme", "widgets", &twin.base_url)
-            .await
-            .unwrap();
+    let token = create_installation_access_token_for_pr(&client, &jwt, "acme", "widgets", &host)
+        .await
+        .unwrap();
 
     let detail: serde_json::Value = fabro_test::test_http_client()
         .get(format!(
@@ -192,9 +200,10 @@ async fn enable_auto_merge_persists() {
 async fn resolve_authenticated_url_embeds_token() {
     let twin = TwinGitHub::start(standard_app_state()).await;
     let creds = github_credentials();
+    let host = twin_host(&twin);
 
     let url = resolve_authenticated_url(
-        &GitHubContext::new(&creds, &twin.base_url),
+        &GitHubContext::new(&creds, &host),
         "https://github.com/acme/widgets.git",
     )
     .await
@@ -214,9 +223,10 @@ async fn resolve_authenticated_url_embeds_token() {
 async fn resolve_authenticated_url_errors_on_non_github_url() {
     let twin = TwinGitHub::start(standard_app_state()).await;
     let creds = github_credentials();
+    let host = twin_host(&twin);
 
     let error = resolve_authenticated_url(
-        &GitHubContext::new(&creds, &twin.base_url),
+        &GitHubContext::new(&creds, &host),
         "https://gitlab.com/foo/bar",
     )
     .await

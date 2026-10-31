@@ -4,24 +4,17 @@
 //! `index.html` so any inline `<script>` hashes don't drift from the
 //! template. Third-party sources are enumerated explicitly.
 
-use std::sync::OnceLock;
-
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
+use fabro_types::GitHubHost;
 use sha2::{Digest, Sha256};
-
-static POLICY: OnceLock<String> = OnceLock::new();
 
 pub(crate) const INSTALL_MODE_SCRIPT_BODY: &str = "window.__FABRO_MODE__ = \"install\";";
 
-pub fn policy() -> &'static str {
-    POLICY.get_or_init(build_policy)
-}
-
-fn build_policy() -> String {
+pub fn policy(host: &GitHubHost) -> String {
     let mut script_hashes = inline_script_hashes_from_embedded_index();
     script_hashes.push(script_hash(INSTALL_MODE_SCRIPT_BODY));
-    build_policy_with_hashes(&script_hashes)
+    build_policy_with_hashes(&script_hashes, host)
 }
 
 fn inline_script_hashes_from_embedded_index() -> Vec<String> {
@@ -70,7 +63,18 @@ fn script_hash(script: &str) -> String {
     format!("sha256-{}", STANDARD.encode(hash))
 }
 
-fn build_policy_with_hashes(script_hashes: &[String]) -> String {
+/// Avatars of a GitHub Enterprise host are served from the host itself
+/// (`https://avatars.<host>`) or from its web origin, not from
+/// githubusercontent.com.
+fn github_img_sources(host: &GitHubHost) -> String {
+    if host.is_github_com() {
+        "https://avatars.githubusercontent.com".to_string()
+    } else {
+        format!("{} https://avatars.{}", host.web_url(), host.host())
+    }
+}
+
+fn build_policy_with_hashes(script_hashes: &[String], host: &GitHubHost) -> String {
     let inline_script_sources = if script_hashes.is_empty() {
         String::new()
     } else {
@@ -92,7 +96,7 @@ fn build_policy_with_hashes(script_hashes: &[String]) -> String {
     // terminal WebSocket working across browsers that do not treat `'self'`
     // as matching WebSocket schemes for connect-src. `frame-src https:`
     // allows signed sandbox VNC preview iframes from dynamic Daytona preview
-    // hosts. `https://github.com` in form-action allows the install-mode
+    // hosts. The GitHub web origin in form-action allows the install-mode
     // GitHub App manifest POST handoff. Loopback resume targets keep CLI
     // OAuth working when the browser-visible origin and canonical origin use
     // different loopback hostnames on a dynamically chosen port.
@@ -101,15 +105,17 @@ fn build_policy_with_hashes(script_hashes: &[String]) -> String {
          script-src 'self'{inline_script_sources} 'wasm-unsafe-eval'; \
          style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; \
          font-src 'self' https://fonts.gstatic.com; \
-         img-src 'self' data: blob: https://avatars.githubusercontent.com; \
+         img-src 'self' data: blob: {img_sources}; \
          connect-src 'self' ws: wss:; \
          worker-src 'self' blob:; \
          frame-src 'self' https:; \
          manifest-src 'self'; \
          frame-ancestors 'none'; \
          base-uri 'self'; \
-         form-action 'self' https://github.com http://127.0.0.1:*/auth/cli/resume http://localhost:*/auth/cli/resume; \
-         object-src 'none'"
+         form-action 'self' {web_url} http://127.0.0.1:*/auth/cli/resume http://localhost:*/auth/cli/resume; \
+         object-src 'none'",
+        img_sources = github_img_sources(host),
+        web_url = host.web_url(),
     )
 }
 
@@ -151,7 +157,7 @@ mod tests {
 
     #[test]
     fn policy_allows_install_mode_inline_bootstrap() {
-        let policy = build_policy();
+        let policy = policy(&GitHubHost::default());
         let expected_hash = script_hash(INSTALL_MODE_SCRIPT_BODY);
         assert!(
             policy.contains(&format!("'{expected_hash}'")),
@@ -161,7 +167,7 @@ mod tests {
 
     #[test]
     fn policy_allows_cli_loopback_resume_form_posts() {
-        let policy = build_policy_with_hashes(&[]);
+        let policy = build_policy_with_hashes(&[], &GitHubHost::default());
         assert!(
             policy.contains("form-action 'self' https://github.com http://127.0.0.1:*/auth/cli/resume http://localhost:*/auth/cli/resume"),
             "CLI auth can submit the resume form to the canonical loopback origin on a dynamic port: {policy}"
@@ -170,7 +176,7 @@ mod tests {
 
     #[test]
     fn policy_is_constructed_with_expected_directives() {
-        let policy = build_policy_with_hashes(&["sha256-abc".to_string()]);
+        let policy = build_policy_with_hashes(&["sha256-abc".to_string()], &GitHubHost::default());
         assert!(policy.contains("default-src 'self'"));
         assert!(
             policy.contains("script-src 'self' 'sha256-abc' 'wasm-unsafe-eval'"),
@@ -192,8 +198,30 @@ mod tests {
     }
 
     #[test]
+    fn github_com_policy_is_unchanged() {
+        let policy = build_policy_with_hashes(&[], &GitHubHost::default());
+        assert!(policy.contains(
+            "img-src 'self' data: blob: https://avatars.githubusercontent.com; connect-src"
+        ));
+    }
+
+    #[test]
+    fn enterprise_policy_uses_the_configured_web_origin() {
+        let host = GitHubHost::new("https://ghe.example.com", None).unwrap();
+        let policy = build_policy_with_hashes(&[], &host);
+        assert!(policy.contains(
+            "img-src 'self' data: blob: https://ghe.example.com https://avatars.ghe.example.com; connect-src"
+        ));
+        assert!(policy.contains(
+            "form-action 'self' https://ghe.example.com http://127.0.0.1:*/auth/cli/resume"
+        ));
+        assert!(!policy.contains("https://github.com"));
+        assert!(!policy.contains("githubusercontent.com"));
+    }
+
+    #[test]
     fn policy_is_valid_without_inline_scripts() {
-        let policy = build_policy_with_hashes(&[]);
+        let policy = build_policy_with_hashes(&[], &GitHubHost::default());
         assert!(
             policy.contains("script-src 'self' 'wasm-unsafe-eval'"),
             "empty hash list should not produce a stray space: {policy}"
@@ -204,7 +232,7 @@ mod tests {
     fn embedded_spa_index_builds_a_policy() {
         // Guards against the embedded asset going missing or becoming
         // unreadable in a way that would leave the CSP header blank.
-        let policy = build_policy();
+        let policy = policy(&GitHubHost::default());
         assert!(
             policy.contains("script-src 'self'"),
             "embedded SPA policy should contain a script-src directive"

@@ -12,10 +12,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use fabro_github::token_source::{InstallationTokenSource, ResolvedToken};
-use fabro_github::{GITHUB_CREDENTIAL_HELPER_KEY, GitHubCredentials, GitHubRepositoryAccess};
+use fabro_github::{GitHubCredentials, GitHubRepositoryAccess};
 use fabro_static::EnvVars;
 use fabro_types::settings::run::{RunIntegrationsGithubSettings, RunMode};
-use fabro_types::{GitHubRepositorySlug, RunSpec, RunTarget};
+use fabro_types::{GitHubHost, GitHubRepositorySlug, RunSpec, RunTarget};
 use fabro_util::shell;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use petri_runtime::executor::{
@@ -38,6 +38,7 @@ pub struct StageCredentials {
     git_tokens:   Arc<InstallationTokenSource>,
     api_tokens:   Option<Arc<InstallationTokenSource>>,
     repositories: Vec<GitHubRepositorySlug>,
+    host:         GitHubHost,
 }
 
 impl StageCredentials {
@@ -48,6 +49,7 @@ impl StageCredentials {
     pub fn for_run(
         spec: &RunSpec,
         credentials: Option<&GitHubCredentials>,
+        host: &GitHubHost,
         read_tokens: Option<Arc<InstallationTokenSource>>,
     ) -> anyhow::Result<Option<Self>> {
         if spec.settings.run.execution.mode == RunMode::DryRun {
@@ -56,7 +58,7 @@ impl StageCredentials {
         let Some(RunTarget::Git(target)) = &spec.target else {
             return Ok(None);
         };
-        let repository = target.clone().validate()?.repository().clone();
+        let repository = target.clone().validate(host)?.repository().clone();
         let integration = spec
             .settings
             .run
@@ -64,7 +66,8 @@ impl StageCredentials {
             .github
             .resolve_integration()?;
         let Some(access) = GitHubRepositoryAccess::new(
-            Some(&repository.https_url()),
+            host,
+            Some(&repository.https_url(host)),
             &integration.additional_repositories,
             integration.permissions.clone(),
         )?
@@ -76,7 +79,7 @@ impl StageCredentials {
         };
         let api_tokens = integration
             .is_token_requested()
-            .then(|| InstallationTokenSource::for_access(credentials, &access))
+            .then(|| InstallationTokenSource::for_access(credentials, host, &access))
             .transpose()?;
         let contents_declared = integration
             .permissions
@@ -96,6 +99,7 @@ impl StageCredentials {
             git_tokens,
             api_tokens,
             repositories,
+            host: host.clone(),
         }))
     }
 
@@ -261,14 +265,15 @@ impl CredentialEnv {
         }
         let password = utf8_percent_encode(token.token.expose(), NON_ALPHANUMERIC).to_string();
         self.masker.register_explicit(&password);
+        let authority = self.credentials.host.host();
         let store = self
             .credentials
             .repositories
             .iter()
             .flat_map(|repo| {
                 [
-                    format!("https://x-access-token:{password}@github.com/{repo}\n"),
-                    format!("https://x-access-token:{password}@github.com/{repo}.git\n"),
+                    format!("https://x-access-token:{password}@{authority}/{repo}\n"),
+                    format!("https://x-access-token:{password}@{authority}/{repo}.git\n"),
                 ]
             })
             .collect::<String>();
@@ -307,24 +312,18 @@ impl CredentialEnv {
             })?;
         // Preserve fetch/publish headers and workflow configuration. The store
         // returns a credential only for an allowed repository path.
+        let host = &self.credentials.host;
+        let helper_key = host.credential_helper_key();
+        let rewrite_key = format!("url.{}/.insteadOf", host.web_url());
         let entries = [
             (
-                "credential.https://github.com.useHttpPath",
+                format!("credential.{}.useHttpPath", host.web_url()),
                 "true".to_string(),
             ),
-            (GITHUB_CREDENTIAL_HELPER_KEY, String::new()),
-            (
-                GITHUB_CREDENTIAL_HELPER_KEY,
-                format!("store --file={}", self.store_path()),
-            ),
-            (
-                "url.https://github.com/.insteadOf",
-                "git@github.com:".to_string(),
-            ),
-            (
-                "url.https://github.com/.insteadOf",
-                "ssh://git@github.com/".to_string(),
-            ),
+            (helper_key.clone(), String::new()),
+            (helper_key, format!("store --file={}", self.store_path())),
+            (rewrite_key.clone(), format!("git@{}:", host.hostname())),
+            (rewrite_key, format!("ssh://git@{}/", host.hostname())),
         ];
         for index in 0..count {
             for prefix in ["GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"] {
@@ -339,7 +338,7 @@ impl CredentialEnv {
         for (offset, (key, value)) in entries.iter().enumerate() {
             env.insert(
                 format!("GIT_CONFIG_KEY_{}", count + offset).into(),
-                (*key).into(),
+                key.as_str().into(),
             );
             env.insert(
                 format!("GIT_CONFIG_VALUE_{}", count + offset).into(),
@@ -369,6 +368,18 @@ impl SpawnEnv for CredentialEnv {
         if let Some(tokens) = &self.credentials.api_tokens {
             let resolved = self.resolve(tokens, "resolve").await?;
             env.insert(EnvVars::GITHUB_TOKEN.into(), resolved.token.expose().into());
+            // The `gh` CLI reads GITHUB_TOKEN for github.com only; any other
+            // host needs GH_HOST and GH_ENTERPRISE_TOKEN.
+            if !self.credentials.host.is_github_com() {
+                env.insert(
+                    EnvVars::GH_HOST.into(),
+                    self.credentials.host.hostname().into(),
+                );
+                env.insert(
+                    EnvVars::GH_ENTERPRISE_TOKEN.into(),
+                    resolved.token.expose().into(),
+                );
+            }
         }
         // The store and the helper configuration that names it live in the
         // scope's sandbox; a one-shot container cannot read either.
@@ -465,15 +476,148 @@ mod tests {
     }
 
     fn credentials(api: bool) -> StageCredentials {
+        credentials_on(api, GitHubHost::default())
+    }
+
+    fn credentials_on(api: bool, host: GitHubHost) -> StageCredentials {
         let tokens = test_support::installation_token_source(
             "acme/private",
             Arc::new(RotatingMinter(AtomicUsize::new(0))),
         );
         StageCredentials {
-            git_tokens:   tokens.clone(),
-            api_tokens:   api.then_some(tokens),
+            git_tokens: tokens.clone(),
+            api_tokens: api.then_some(tokens),
             repositories: vec![GitHubRepositorySlug::try_new("acme/private").expect("slug")],
+            host,
         }
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "sync read of a test fixture's credential store; not on a Tokio path"
+    )]
+    /// The environment a process spawn in a scope receives under `host`, and
+    /// the credential store written for it.
+    async fn process_env_on(host: GitHubHost) -> (BTreeMap<SmolStr, SmolStr>, String) {
+        let dir = tempfile::tempdir().expect("directory");
+        let runtime = providers::standard_runtime(&SandboxProviderConfig::default());
+        let router = runtime.sandbox_router_for(dir.path()).expect("router");
+        let handle = router
+            .acquire(
+                &ScopeSpec::new(ScopeId::new(0), "host-credentials"),
+                &AcquireContext::bare(),
+            )
+            .await
+            .expect("acquire");
+        let store = dir.path().join("store-directory");
+        fs::create_dir(&store).expect("store directory");
+        let env = CredentialEnv {
+            inner:       handle.exec(),
+            credentials: credentials_on(true, host),
+            masker:      MapSecrets::empty().masker(),
+            directory:   store.display().to_string(),
+            written:     Mutex::new(None),
+        };
+        let mut process = BTreeMap::new();
+        env.apply(SpawnTarget::Process, &mut process)
+            .await
+            .expect("apply");
+        let written = fs::read_to_string(store.join("store")).expect("store");
+        assert!(
+            router
+                .release(handle, ScopeOutcome::Succeeded)
+                .await
+                .is_clean()
+        );
+        (process, written)
+    }
+
+    /// The git config entries of `env`, in order, as `(key, value)`.
+    fn git_config(env: &BTreeMap<SmolStr, SmolStr>) -> Vec<(String, String)> {
+        let count: usize = env["GIT_CONFIG_COUNT"].parse().expect("count");
+        (0..count)
+            .map(|index| {
+                (
+                    env[format!("GIT_CONFIG_KEY_{index}").as_str()].to_string(),
+                    env[format!("GIT_CONFIG_VALUE_{index}").as_str()].to_string(),
+                )
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn github_com_scopes_keep_the_default_git_config_and_no_gh_host() {
+        let (env, store) = process_env_on(GitHubHost::default()).await;
+        let config = git_config(&env);
+        let keys: Vec<_> = config.iter().map(|(key, _)| key.as_str()).collect();
+        assert_eq!(keys, [
+            "credential.https://github.com.useHttpPath",
+            "credential.https://github.com.helper",
+            "credential.https://github.com.helper",
+            "url.https://github.com/.insteadOf",
+            "url.https://github.com/.insteadOf",
+        ]);
+        assert_eq!(config[3].1, "git@github.com:");
+        assert_eq!(config[4].1, "ssh://git@github.com/");
+        assert!(store.contains("@github.com/acme/private\n"));
+        assert!(store.contains("@github.com/acme/private.git\n"));
+        assert!(!env.contains_key("GH_HOST"));
+        assert!(!env.contains_key("GH_ENTERPRISE_TOKEN"));
+    }
+
+    #[tokio::test]
+    async fn a_ghes_scope_scopes_git_and_gh_credentials_to_its_host() {
+        let host = GitHubHost::new("https://ghe.example.com", None).expect("host");
+        let (env, store) = process_env_on(host).await;
+        let config = git_config(&env);
+        assert_eq!(
+            config[0],
+            (
+                "credential.https://ghe.example.com.useHttpPath".to_string(),
+                "true".to_string()
+            )
+        );
+        assert_eq!(
+            config[1],
+            (
+                "credential.https://ghe.example.com.helper".to_string(),
+                String::new()
+            )
+        );
+        assert_eq!(config[2].0, "credential.https://ghe.example.com.helper");
+        assert!(config[2].1.starts_with("store --file="));
+        assert_eq!(
+            config[3],
+            (
+                "url.https://ghe.example.com/.insteadOf".to_string(),
+                "git@ghe.example.com:".to_string()
+            )
+        );
+        assert_eq!(
+            config[4],
+            (
+                "url.https://ghe.example.com/.insteadOf".to_string(),
+                "ssh://git@ghe.example.com/".to_string()
+            )
+        );
+        assert!(config.iter().all(|(key, _)| !key.contains("github.com")));
+        assert!(store.contains("@ghe.example.com/acme/private\n"));
+        assert!(store.contains("@ghe.example.com/acme/private.git\n"));
+        assert!(!store.contains("github.com"));
+        assert_eq!(env["GH_HOST"], "ghe.example.com");
+        assert_eq!(env["GH_ENTERPRISE_TOKEN"], env["GITHUB_TOKEN"]);
+        assert!(env["GITHUB_TOKEN"].starts_with("scripted-token-generation-"));
+    }
+
+    #[tokio::test]
+    async fn a_ghes_scope_with_a_port_keeps_the_port_out_of_ssh_and_gh_host() {
+        let host = GitHubHost::new("https://ghe.example.com:8443", None).expect("host");
+        let (env, _store) = process_env_on(host).await;
+        let config = git_config(&env);
+        assert_eq!(config[3].0, "url.https://ghe.example.com:8443/.insteadOf");
+        assert_eq!(config[3].1, "git@ghe.example.com:");
+        assert_eq!(config[4].1, "ssh://git@ghe.example.com/");
+        assert_eq!(env["GH_HOST"], "ghe.example.com");
     }
 
     #[test]
@@ -487,9 +631,14 @@ mod tests {
         );
         let pat = GitHubCredentials::Pat("scripted-personal-access-token".to_string());
         let read = InstallationTokenSource::pat("scripted-personal-access-token".to_string());
-        let default = StageCredentials::for_run(&spec, Some(&pat), Some(Arc::clone(&read)))
-            .expect("policy")
-            .expect("credentials");
+        let default = StageCredentials::for_run(
+            &spec,
+            Some(&pat),
+            &GitHubHost::default(),
+            Some(Arc::clone(&read)),
+        )
+        .expect("policy")
+        .expect("credentials");
         assert!(default.api_tokens.is_none());
         assert_eq!(default.repositories.len(), 1);
         spec.settings
@@ -504,9 +653,10 @@ mod tests {
             .github
             .additional_repositories
             .insert(GitHubRepositorySlug::try_new("acme/another").expect("slug"));
-        let declared = StageCredentials::for_run(&spec, Some(&pat), Some(read))
-            .expect("policy")
-            .expect("credentials");
+        let declared =
+            StageCredentials::for_run(&spec, Some(&pat), &GitHubHost::default(), Some(read))
+                .expect("policy")
+                .expect("credentials");
         assert!(declared.api_tokens.is_some());
         assert_eq!(declared.repositories.len(), 2);
     }
