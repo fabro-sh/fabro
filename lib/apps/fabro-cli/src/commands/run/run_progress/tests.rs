@@ -284,3 +284,139 @@ fn base_header_uses_only_the_commit_when_source_branch_is_unknown_or_ambiguous()
         }
     }
 }
+
+fn applied_route(from: &str, to: &str, label: &Value, back: bool) -> RunStreamItem {
+    RunStreamItem {
+        run_id:      fixtures::RUN_1,
+        stream_seq:  1,
+        kind:        RunStreamItemKind::Petri,
+        id:          "execution 0/19/0".to_string(),
+        recorded_at: 0,
+        item:        json!({
+            "origin": "core",
+            "context": {"invocation": 0, "execution": 0},
+            "subject": {"node": {"name": from, "meta": {"edges": {
+                "0": {"to": to, "label": "Not selected"},
+                "7": {"to": to, "label": label}
+            }}}, "firing": 2},
+            "record": {"seq": 19, "body": {"event": "route.applied",
+                "kind": "edge", "firing": 2, "group": 0, "edge": 7}},
+            "derived": {"target": {"name": to}, "transition": "Continue", "back": back}
+        }),
+    }
+}
+
+fn route_progress(item: &RunStreamItem, verbose: bool) -> String {
+    let output = Output::default();
+    let renderer = ProgressRenderer::new_plain(Box::new(output.clone()), false);
+    let mut ui = ProgressUI::with_renderer(renderer, verbose);
+    ui.handle_stream_item(item);
+    output.text()
+}
+
+#[test]
+fn selected_route_labels_render_on_arrows_in_progress_and_pretty_events() {
+    let mut transcript = String::new();
+    for (from, to, label, back) in [
+        (
+            "Run tests",
+            "Open pull request",
+            json!("Tests passed"),
+            false,
+        ),
+        (
+            "Review changes",
+            "Revise implementation",
+            json!("Changes requested"),
+            false,
+        ),
+        ("Approval", "Deploy", json!("Approved"), false),
+        ("Verify fix", "Investigate", json!("Still failing"), true),
+        ("work", "a", json!("yes"), false),
+        ("start", "work", Value::Null, false),
+        ("verify", "work", Value::Null, true),
+    ] {
+        let item = applied_route(from, to, &label, back);
+        let before = petri_stream::raw_line(&item).unwrap();
+        transcript.push_str(&route_progress(&item, true));
+        transcript.push_str(
+            &petri_stream::format_pretty(&item, &Styles::new(false), &mut PrettyState::default())
+                .unwrap(),
+        );
+        transcript.push('\n');
+        assert_eq!(route_progress(&item, false), "");
+        assert_eq!(petri_stream::raw_line(&item).unwrap(), before);
+    }
+    insta::assert_snapshot!(transcript, @r#"
+        → Run tests ── Tests passed ──▶ Open pull request
+    00:00:00    Run tests ── Tests passed ──▶ Open pull request continue
+        → Review changes ── Changes requested ──▶ Revise implementation
+    00:00:00    Review changes ── Changes requested ──▶ Revise implementation continue
+        → Approval ── Approved ──▶ Deploy
+    00:00:00    Approval ── Approved ──▶ Deploy continue
+        ↺ Verify fix ── Still failing ──▶ Investigate  (loop restart)
+    00:00:00    Verify fix ── Still failing ──▶ Investigate continue (loop)
+        → work ── yes ──▶ a
+    00:00:00    work ── yes ──▶ a continue
+        → start → work
+    00:00:00    start → work continue
+        ↺ verify → work  (loop restart)
+    00:00:00    verify → work continue (loop)
+    "#);
+}
+
+#[test]
+fn selected_route_labels_coexist_with_transition_and_condition_details() {
+    let mut item = applied_route("verify", "finish", &json!("Tests passed"), false);
+    item.item["subject"]["node"]["meta"]["edges"]["7"]["condition"] = json!("outcome=succeeded");
+    item.item["derived"]["transition"] = json!("Restart");
+    let pretty =
+        petri_stream::format_pretty(&item, &Styles::new(false), &mut PrettyState::default())
+            .unwrap();
+    insta::assert_snapshot!(format!("{}{pretty}", route_progress(&item, true)), @r#"
+        → verify ── Tests passed ──▶ finish  [restart]
+    00:00:00    verify ── Tests passed ──▶ finish restart when outcome=succeeded
+    "#);
+}
+
+#[test]
+fn unavailable_selected_route_labels_preserve_unlabeled_output() {
+    let baseline = applied_route("work", "next", &Value::Null, false);
+    let mut cases = vec![
+        applied_route("work", "next", &json!(""), false),
+        applied_route("work", "next", &json!(42), false),
+    ];
+    let mut missing_edge = baseline.clone();
+    missing_edge.item["record"]["body"]["edge"] = json!(99);
+    cases.push(missing_edge);
+    let mut missing_metadata = baseline.clone();
+    missing_metadata.item["subject"]["node"]["meta"] = json!({});
+    cases.push(missing_metadata);
+    let mut no_edge = baseline.clone();
+    no_edge.item["record"]["body"] = json!({"event": "route.applied", "kind": "jump"});
+    cases.push(no_edge);
+    for item in cases {
+        assert_eq!(route_progress(&item, true), route_progress(&baseline, true));
+        assert_eq!(
+            petri_stream::format_pretty(&item, &Styles::new(false), &mut PrettyState::default()),
+            petri_stream::format_pretty(
+                &baseline,
+                &Styles::new(false),
+                &mut PrettyState::default()
+            ),
+        );
+    }
+}
+
+#[test]
+fn selected_route_labels_escape_controls_and_preserve_unicode() {
+    let item = applied_route(
+        "review",
+        "revise",
+        &json!("Réessayer \"tests\"\n\u{1b}[31m"),
+        false,
+    );
+    insta::assert_snapshot!(route_progress(&item, true), @r#"
+    → review ── Réessayer \"tests\"\n\u{1b}[31m ──▶ revise
+    "#);
+}

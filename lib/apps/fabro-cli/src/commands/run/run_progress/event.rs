@@ -140,6 +140,7 @@ pub(super) enum ProgressEvent {
     LoopRestart {
         from_node: String,
         to_node:   String,
+        label:     Option<String>,
     },
     RunNotice {
         level:   RunNoticeLevel,
