@@ -9469,6 +9469,7 @@ components:
       enum:
         - start_requested
         - approved
+        - auto_approved
 
     FailureCategory:
       description: Product-level classification for grouping and retry policy.
@@ -15451,6 +15452,7 @@ components:
         - storage
         - artifacts
         - scheduler
+        - approvals
         - logging
         - integrations
       properties:
@@ -15470,6 +15472,8 @@ components:
           $ref: "#/components/schemas/ServerArtifactsSettings"
         scheduler:
           $ref: "#/components/schemas/ServerSchedulerSettings"
+        approvals:
+          $ref: "#/components/schemas/ServerApprovalsSettings"
         logging:
           $ref: "#/components/schemas/ServerLoggingSettings"
         integrations:
@@ -15643,6 +15647,19 @@ components:
         max_concurrent_runs:
           type: integer
 
+    ServerApprovalsSettings:
+      description: |
+        Server-owned approval policy. `allow_child_auto_approval` is the
+        server half of the child auto-approval opt-in; the workflow half is
+        `[run.children] auto_approve` in the parent workflow's
+        `workflow.toml`, and a worker-started child is auto-approved only
+        when both are enabled.
+      type: object
+      required: [allow_child_auto_approval]
+      properties:
+        allow_child_auto_approval:
+          type: boolean
+
     ServerLoggingSettings:
       type: object
       required: [level, destination]
@@ -15796,6 +15813,7 @@ components:
         - pull_request
         - artifacts
         - integrations
+        - children
       properties:
         goal:
           oneOf:
@@ -15847,6 +15865,19 @@ components:
           $ref: "#/components/schemas/ArtifactsSettings"
         integrations:
           $ref: "#/components/schemas/RunIntegrationsSettings"
+        children:
+          $ref: "#/components/schemas/RunChildrenSettings"
+
+    RunChildrenSettings:
+      description: |
+        How this workflow treats the child runs its workers start. Governs
+        the child's lifecycle start decision, not the child's own
+        agent-interaction approval posture (`run.execution.approval`).
+      type: object
+      required: [auto_approve]
+      properties:
+        auto_approve:
+          type: boolean
 
     RunIntegrationsSettings:
       type: object
