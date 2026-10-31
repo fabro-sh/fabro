@@ -138,6 +138,7 @@ There is no startup-time secret generation or import of optional integration sec
 ## Subprocess Boundaries
 
 - Worker and render-graph subprocesses start from `env_clear()` and re-add only explicit allowlisted variables.
+- Sandbox connection selectors (`DAYTONA_API_URL`, `DAYTONA_ORGANIZATION_ID`, and `PETRI_SANDBOX_DOCKER_HOST_ADDRESS`) are captured in the worker launch specification from the server's configuration lookup and passed explicitly, including absence. They are not independently inherited from the spawning process. This is a launch snapshot, not yet a durable provider-entry binding; see [sandbox admission and ownership](sandbox-admission-contract.md). `DAYTONA_API_KEY` remains a vault lookup and is never included in that connection snapshot.
 - Authority-bearing values are re-injected intentionally. For worker subprocesses this is `FABRO_WORKER_TOKEN`, plus any explicitly required internal value such as a vault-derived `GITHUB_APP_PRIVATE_KEY`; it is not user auth state such as `FABRO_DEV_TOKEN` or `auth.json`.
 - The worker reads `FABRO_WORKER_TOKEN` from its env at startup (in `main()` before Tokio initializes) and immediately calls `std::env::remove_var` to scrub it. The token then flows through function arguments to `runner::execute`. Every descendant process (hooks, sandbox commands, MCP stdio, etc.) therefore inherits a worker env that no longer contains the bearer, so an unscrubbed spawn site cannot leak it.
 - The daemon child inherits the parent env unchanged except for output-format hygiene (`FABRO_JSON` removal).

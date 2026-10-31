@@ -11,7 +11,123 @@ use fabro_server::test_support::{
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-use crate::helpers::{api, checked_response, response_json, response_status};
+use crate::helpers::{
+    MINIMAL_DOT, api, checked_response, minimal_intent_json, response_json, response_status,
+};
+
+#[tokio::test]
+async fn admitted_environment_and_secret_references_survive_catalog_replacement_and_deletion() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let state = TestAppStateBuilder::new()
+        .active_config_path(temp_dir.path().join("settings.toml"))
+        .vault_path(temp_dir.path().join("secrets.json"))
+        .vault_entries([("SERVICE_TOKEN", "test-only-admission-secret")])
+        .build();
+    let app = build_test_router(state);
+    let workspace = tempfile::tempdir().unwrap();
+    let mut environment = environment_body("admission-snapshot", "local");
+    environment["lifecycle"]["preserve"] = json!(true);
+    environment["lifecycle"]["stop_on_terminal"] = json!(false);
+    environment["env"]["SERVICE_TOKEN"] = json!("{{ secrets.SERVICE_TOKEN }}");
+    environment["labels"]["revision"] = json!("admitted");
+    let created = create_environment_with_body(&app, &environment).await;
+    let mut intent = minimal_intent_json(&app, MINIMAL_DOT, workspace.path()).await;
+    intent["environment_id"] = json!("admission-snapshot");
+    let run = response_json(
+        app.clone()
+            .oneshot(json_request(Method::POST, "/runs", &intent))
+            .await
+            .unwrap(),
+        StatusCode::CREATED,
+        "POST /api/v1/runs with an environment snapshot",
+    )
+    .await;
+    let run_id = run["id"].as_str().unwrap();
+    let state_path = format!("/runs/{run_id}/state");
+    let admitted = response_json(
+        app.clone()
+            .oneshot(empty_request(Method::GET, &state_path))
+            .await
+            .unwrap(),
+        StatusCode::OK,
+        "GET admitted worker state",
+    )
+    .await;
+    let spec = &admitted["spec"];
+    assert!(
+        !serde_json::to_string(spec)
+            .unwrap()
+            .contains("test-only-admission-secret")
+    );
+    assert_eq!(
+        spec["settings"]["run"]["environment"]["env"]["SERVICE_TOKEN"],
+        "{{ secrets.SERVICE_TOKEN }}"
+    );
+    assert_eq!(
+        spec["settings"]["run"]["environment"]["lifecycle"],
+        environment["lifecycle"]
+    );
+    assert!(spec["admission"]["graph"]["blob"].is_string());
+
+    let replacement = response_json(
+        app.clone()
+            .oneshot(request_with_if_match(
+                Method::PUT,
+                "/environments/admission-snapshot",
+                revision_from(&created),
+                Some(environment_settings("docker")),
+            ))
+            .await
+            .unwrap(),
+        StatusCode::OK,
+        "PUT replacement environment",
+    )
+    .await;
+    for deleted in [false, true] {
+        if deleted {
+            response_status(
+                app.clone()
+                    .oneshot(request_with_if_match(
+                        Method::DELETE,
+                        "/environments/admission-snapshot",
+                        revision_from(&replacement),
+                        None,
+                    ))
+                    .await
+                    .unwrap(),
+                StatusCode::NO_CONTENT,
+                "DELETE admitted environment",
+            )
+            .await;
+        }
+        let worker_state = response_json(
+            app.clone()
+                .oneshot(empty_request(Method::GET, &state_path))
+                .await
+                .unwrap(),
+            StatusCode::OK,
+            "GET worker state after catalog mutation",
+        )
+        .await;
+        assert_eq!(&worker_state["spec"], spec);
+        let settings = response_json(
+            app.clone()
+                .oneshot(empty_request(
+                    Method::GET,
+                    &format!("/runs/{run_id}/settings"),
+                ))
+                .await
+                .unwrap(),
+            StatusCode::OK,
+            "GET run settings after catalog mutation",
+        )
+        .await;
+        assert_eq!(
+            settings["run"]["environment"],
+            spec["settings"]["run"]["environment"]
+        );
+    }
+}
 
 fn environment_settings(provider: &str) -> Value {
     json!({
