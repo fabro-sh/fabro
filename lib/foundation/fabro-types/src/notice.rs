@@ -30,6 +30,7 @@ pub enum RunNoticeLevel {
 pub enum RunNoticeCode {
     ArtifactCollectionFailed,
     ArtifactOffloadFailed,
+    ArtifactSizeLimitExceeded,
     ArtifactSyncFailed,
     ArtifactUploadFailed,
     CheckpointMetadataDegraded,

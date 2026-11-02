@@ -95,7 +95,7 @@ function ArtifactFiles({
       <EmptyState
         icon={PaperClipIcon}
         title="No artifacts captured"
-        description="No stage in this run produced any artifacts."
+        description="No files were captured. Check the run’s Events for capture notices."
       />
     );
   }

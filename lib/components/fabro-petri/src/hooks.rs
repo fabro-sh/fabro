@@ -89,11 +89,13 @@ use std::time::Duration;
 use bytes::Bytes;
 use fabro_store::platform_records::{
     ArtifactCollectedRecord, CheckpointRecord, GitIdentityRecord, OperationKey, RunBranchRecord,
-    RunDiffRecord,
+    RunDiffRecord, RunNoticeRecord,
 };
 use fabro_store::{PlatformRecord, PlatformRecordKind, StagePosition};
 use fabro_types::settings::run::RunNamespace;
-use fabro_types::{ArtifactSource, BlobHash, DiffSummary, GitIdentity, RunId};
+use fabro_types::{
+    ArtifactSource, BlobHash, DiffSummary, GitIdentity, RunId, RunNoticeCode, RunNoticeLevel,
+};
 use fabro_util::error::collect_chain;
 use fabro_util::sync;
 use fabro_util::workspace_glob::{WorkspaceGlobError, WorkspaceGlobSet};
@@ -375,13 +377,16 @@ impl CheckpointLedger {
 /// and which were collected already.
 struct ArtifactLedger {
     /// The `[run.artifacts] include` patterns, or why they do not parse.
-    globs:     Result<WorkspaceGlobSet, Arc<WorkspaceGlobError>>,
+    globs:        Result<WorkspaceGlobSet, Arc<WorkspaceGlobError>>,
     /// Every artifact collected so far, by path and digest: read from the
     /// store once, then kept current with every append.
-    collected: OnceCell<Mutex<HashSet<ArtifactIdentity>>>,
+    collected:    OnceCell<Mutex<HashSet<ArtifactIdentity>>>,
     /// One lock per identity being captured, so concurrent transitions that
     /// leave the same file upload and record it once.
-    capturing: Mutex<HashMap<ArtifactIdentity, Arc<AsyncMutex<()>>>>,
+    capturing:    Mutex<HashMap<ArtifactIdentity, Arc<AsyncMutex<()>>>>,
+    /// Serialize omission notices across parallel stages; persisted notices
+    /// also suppress repeat scans and replay after a worker restart.
+    size_notices: AsyncMutex<()>,
 }
 
 /// Where each acquired scope's workspace is, and the locks that serialize
@@ -520,9 +525,10 @@ impl FabroHooks {
             handle: OnceLock::new(),
             checkpoints: CheckpointLedger::default(),
             artifacts: ArtifactLedger {
-                globs:     WorkspaceGlobSet::try_new(&spec.artifacts).map_err(Arc::new),
-                capturing: Mutex::default(),
-                collected: OnceCell::new(),
+                globs:        WorkspaceGlobSet::try_new(&spec.artifacts).map_err(Arc::new),
+                capturing:    Mutex::default(),
+                collected:    OnceCell::new(),
+                size_notices: AsyncMutex::new(()),
             },
             scopes: ScopeEnvs::default(),
             failure: Mutex::default(),
@@ -1160,9 +1166,12 @@ impl FabroHooks {
             return Ok(0);
         };
         let candidates = list_artifacts(env.as_ref(), globs).await?;
+        let selection = select_artifacts(candidates);
+        self.record_artifact_size_notices(key, &selection.oversized)
+            .await?;
         let mut collected = 0;
         let mut total_bytes = 0_u64;
-        for (path, size) in select_artifacts(candidates) {
+        for (path, size) in selection.selected {
             if total_bytes.saturating_add(size) > ARTIFACT_MAX_TOTAL_BYTES {
                 break;
             }
@@ -1184,6 +1193,83 @@ impl FabroHooks {
             collected += 1;
         }
         Ok(collected)
+    }
+
+    /// Explain policy omissions even when no files can be captured. The
+    /// message identifies the path and observed size, so a later scan of the
+    /// same omission does not repeat it, including after restart.
+    async fn record_artifact_size_notices(
+        &self,
+        key: CheckpointKey,
+        oversized: &[(String, u64)],
+    ) -> Result<(), HookError> {
+        if oversized.is_empty() {
+            return Ok(());
+        }
+        let _noticing = self.artifacts.size_notices.lock().await;
+        let mut recorded = self.artifact_size_notices().await?;
+        for (path, size) in oversized {
+            // Debug quoting escapes control characters in workspace filenames.
+            let message = format!(
+                "Skipped artifact {path:?}: {size} bytes exceeds the {} MiB limit \
+                 ({ARTIFACT_MAX_FILE_BYTES} bytes).",
+                ARTIFACT_MAX_FILE_BYTES / (1024 * 1024),
+            );
+            if recorded.contains(&message) {
+                continue;
+            }
+            let record = PlatformRecord::RunNotice(RunNoticeRecord {
+                level:   RunNoticeLevel::Warn,
+                code:    RunNoticeCode::ArtifactSizeLimitExceeded.to_string(),
+                message: message.clone(),
+            });
+            if let Err(source) = self
+                .records
+                .append(
+                    &self.run_id,
+                    &record,
+                    Some(StagePosition {
+                        execution: key.execution,
+                        firing:    key.firing,
+                    }),
+                )
+                .await
+            {
+                // An append can commit and lose its response. Check durable
+                // state before reporting failure or trying to append again.
+                if !self.artifact_size_notices().await?.contains(&message) {
+                    return Err(HookError::Write {
+                        kind: "artifact size notice",
+                        source,
+                    });
+                }
+            }
+            recorded.insert(message);
+        }
+        Ok(())
+    }
+
+    async fn artifact_size_notices(&self) -> Result<HashSet<String>, HookError> {
+        let records = self
+            .records
+            .read_kind(&self.run_id, PlatformRecordKind::RunNotice)
+            .await
+            .map_err(|source| HookError::Read {
+                kind: "artifact size notice",
+                source,
+            })?;
+        Ok(records
+            .into_iter()
+            .filter_map(|stored| match stored.record {
+                PlatformRecord::RunNotice(notice)
+                    if notice.code
+                        == <&'static str>::from(RunNoticeCode::ArtifactSizeLimitExceeded) =>
+                {
+                    Some(notice.message)
+                }
+                _ => None,
+            })
+            .collect())
     }
 
     /// Publish bytes before their record; only a recorded capture enters
@@ -1466,8 +1552,10 @@ async fn list_artifacts(
 
 /// The files within the collection's budget: the legacy executor's rule,
 /// smallest first, each under the file limit, at most the count limit.
-fn select_artifacts(mut candidates: Vec<(String, u64)>) -> Vec<(String, u64)> {
-    candidates.retain(|(_, size)| *size <= ARTIFACT_MAX_FILE_BYTES);
+fn select_artifacts(candidates: Vec<(String, u64)>) -> ArtifactSelection {
+    let (mut candidates, oversized): (Vec<_>, Vec<_>) = candidates
+        .into_iter()
+        .partition(|(_, size)| *size <= ARTIFACT_MAX_FILE_BYTES);
     candidates.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
     let mut total = 0_u64;
     let mut selected = Vec::new();
@@ -1480,7 +1568,15 @@ fn select_artifacts(mut candidates: Vec<(String, u64)>) -> Vec<(String, u64)> {
         total = total.saturating_add(size);
         selected.push((path, size));
     }
-    selected
+    ArtifactSelection {
+        selected,
+        oversized,
+    }
+}
+
+struct ArtifactSelection {
+    selected:  Vec<(String, u64)>,
+    oversized: Vec<(String, u64)>,
 }
 
 fn is_checkpoint_failure(status: &Status) -> bool {
@@ -2043,6 +2139,147 @@ mod tests {
         assert_eq!(records.records.records(&run).len(), 1);
     }
 
+    #[tokio::test]
+    async fn artifact_size_notices_survive_restart_and_deduplicate_parallel_stages() {
+        let root = tempfile::tempdir().unwrap();
+        let run = RunId::new();
+        let records = Arc::new(MemoryPlatformRecords::new());
+        let writer = Arc::new(StoreArtifactWriter::new(ArtifactStore::new(
+            Arc::new(InMemory::new()),
+            "artifacts",
+        )));
+        let hooks = artifact_hooks(root.path(), run, records.clone(), writer.clone());
+        let key = |firing| CheckpointKey {
+            execution: 0,
+            firing,
+            attempt: 1,
+        };
+        let oversized = vec![("assets/report.bin".to_string(), ARTIFACT_MAX_FILE_BYTES + 1)];
+        let (first, second) = tokio::join!(
+            hooks.record_artifact_size_notices(key(1), &oversized),
+            hooks.record_artifact_size_notices(key(2), &oversized),
+        );
+        first.unwrap();
+        second.unwrap();
+        let stored = records.records(&run);
+        assert_eq!(stored.len(), 1);
+        assert!(stored[0].position.is_some());
+        let PlatformRecord::RunNotice(notice) = &stored[0].record else {
+            panic!("a notice")
+        };
+        assert_eq!(notice.level, RunNoticeLevel::Warn);
+        assert_eq!(notice.code, "artifact_size_limit_exceeded");
+        assert_eq!(
+            notice.message,
+            "Skipped artifact \"assets/report.bin\": 10485761 bytes exceeds the 10 MiB limit (10485760 bytes)."
+        );
+
+        // A fresh hook instance consults the committed notices, not memory.
+        let resumed = artifact_hooks(root.path(), run, records.clone(), writer);
+        resumed
+            .record_artifact_size_notices(key(3), &oversized)
+            .await
+            .unwrap();
+        assert_eq!(records.records(&run).len(), 1);
+        resumed
+            .record_artifact_size_notices(key(4), &[
+                ("assets/report.bin".to_string(), ARTIFACT_MAX_FILE_BYTES + 2),
+                ("assets/other.bin".to_string(), ARTIFACT_MAX_FILE_BYTES + 1),
+                (
+                    "assets/line\n\u{1b}[31m.bin".to_string(),
+                    ARTIFACT_MAX_FILE_BYTES + 1,
+                ),
+            ])
+            .await
+            .unwrap();
+        let stored = records.records(&run);
+        assert_eq!(
+            stored.len(),
+            4,
+            "changed sizes and distinct paths remain visible"
+        );
+        let PlatformRecord::RunNotice(notice) = &stored[3].record else {
+            panic!("a notice")
+        };
+        assert!(!notice.message.chars().any(char::is_control));
+        assert!(notice.message.contains(r"line\n\u{1b}[31m.bin"));
+    }
+
+    #[tokio::test]
+    async fn artifact_size_notice_append_failures_are_retryable_without_duplicates() {
+        for commit in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let run = RunId::new();
+            let records = Arc::new(FlakyRecords {
+                records: MemoryPlatformRecords::new(),
+                fail: AtomicBool::new(true),
+                commit,
+            });
+            let hooks = artifact_hooks(
+                root.path(),
+                run,
+                records.clone(),
+                Arc::new(StoreArtifactWriter::new(ArtifactStore::new(
+                    Arc::new(InMemory::new()),
+                    "artifacts",
+                ))),
+            );
+            let key = CheckpointKey {
+                execution: 0,
+                firing:    1,
+                attempt:   1,
+            };
+            let oversized = vec![("assets/large.bin".to_string(), ARTIFACT_MAX_FILE_BYTES + 1)];
+            let result = hooks.record_artifact_size_notices(key, &oversized).await;
+            if commit {
+                result.unwrap();
+            } else {
+                let error = result.unwrap_err();
+                assert!(
+                    collect_chain(&error)
+                        .join(": ")
+                        .contains("test append unavailable")
+                );
+                assert!(records.records.records(&run).is_empty());
+            }
+            hooks
+                .record_artifact_size_notices(key, &oversized)
+                .await
+                .unwrap();
+            assert_eq!(records.records.records(&run).len(), 1);
+        }
+    }
+
+    #[test]
+    fn artifact_selection_preserves_the_inclusive_file_limit_and_total_budget() {
+        let selection = select_artifacts(vec![
+            ("small".to_string(), 1),
+            ("exact".to_string(), ARTIFACT_MAX_FILE_BYTES),
+            ("over".to_string(), ARTIFACT_MAX_FILE_BYTES + 1),
+        ]);
+        assert_eq!(selection.selected, vec![
+            ("small".to_string(), 1),
+            ("exact".to_string(), ARTIFACT_MAX_FILE_BYTES)
+        ]);
+        assert_eq!(selection.oversized, vec![(
+            "over".to_string(),
+            ARTIFACT_MAX_FILE_BYTES + 1
+        )]);
+        let selection = select_artifacts(
+            (0..6)
+                .map(|i| (format!("{i}"), ARTIFACT_MAX_FILE_BYTES))
+                .collect(),
+        );
+        assert_eq!(selection.selected.len(), 5);
+        assert!(
+            selection.oversized.is_empty(),
+            "total-budget skips are not per-file size omissions"
+        );
+        let selection = select_artifacts(vec![("over".to_string(), ARTIFACT_MAX_FILE_BYTES + 1)]);
+        assert!(selection.selected.is_empty());
+        assert_eq!(selection.oversized.len(), 1);
+    }
+
     #[test]
     fn the_selection_keeps_the_smallest_files_within_the_budgets() {
         let mut candidates: Vec<(String, u64)> = (0..(ARTIFACT_MAX_FILES + 5))
@@ -2050,7 +2287,12 @@ mod tests {
             .collect();
         candidates.push(("huge.bin".to_string(), ARTIFACT_MAX_FILE_BYTES + 1));
         candidates.push(("tiny.txt".to_string(), 1));
-        let selected = select_artifacts(candidates);
+        let selection = select_artifacts(candidates);
+        assert_eq!(selection.oversized, vec![(
+            "huge.bin".to_string(),
+            ARTIFACT_MAX_FILE_BYTES + 1
+        )]);
+        let selected = selection.selected;
         assert_eq!(selected.len(), ARTIFACT_MAX_FILES);
         assert_eq!(selected[0], ("tiny.txt".to_string(), 1));
         assert!(selected.iter().all(|(path, _)| path != "huge.bin"));

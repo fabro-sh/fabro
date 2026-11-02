@@ -7,13 +7,13 @@ use std::time::Duration;
 
 use fabro_test::{fabro_snapshot, test_context};
 
-use super::petri::{RunningServer, run_detached, run_json, wait_for_success};
+use super::petri::{RunningServer, run_detached, run_json, run_stream, wait_for_success};
 use crate::cmd::support::{read_text, text_tree};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn artifact_worker_captures_large_files_in_the_configured_local_store() {
     let context = test_context!();
-    let server = RunningServer::start_with(
+    let mut server = RunningServer::start_with(
         "\n[server.artifacts]\nprovider = \"local\"\nprefix = \"selected-prefix\"\n",
         &[],
     )
@@ -38,6 +38,25 @@ async fn artifact_worker_captures_large_files_in_the_configured_local_store() {
         artifacts.len(),
         3,
         "unchanged files are captured once; oversize is skipped"
+    );
+    let notices: Vec<_> = run_stream(&server, &run_id)
+        .await
+        .into_iter()
+        .filter(|item| {
+            let record = &item["item"]["record"];
+            record["kind"] == "run.notice" && record["code"] == "artifact_size_limit_exceeded"
+        })
+        .map(|item| item["item"]["record"].clone())
+        .collect();
+    assert_eq!(
+        notices,
+        vec![serde_json::json!({
+            "kind": "run.notice",
+            "level": "warn",
+            "code": "artifact_size_limit_exceeded",
+            "message": "Skipped artifact \"assets/skipped.bin\": 10485761 bytes exceeds the 10 MiB limit (10485760 bytes).",
+        })],
+        "the worker records the omission once across later stages"
     );
     let database =
         fabro_db::Database::connect(fabro_config::Storage::new(&server.storage_dir).sqlite_path())
@@ -121,6 +140,34 @@ async fn artifact_worker_captures_large_files_in_the_configured_local_store() {
             .len(),
         10 * 1024 * 1024 + 1
     );
+    let attach = context
+        .command()
+        .args(["attach", &run_id, "--server", &server.target()])
+        .output()
+        .expect("attach replays the completed run");
+    assert!(attach.status.success());
+    let stderr = String::from_utf8_lossy(&attach.stderr);
+    let warnings: Vec<_> = stderr
+        .lines()
+        .filter_map(|line| line.find("Warning: Skipped artifact").map(|at| &line[at..]))
+        .collect();
+    assert_eq!(warnings, vec![
+        "Warning: Skipped artifact \"assets/skipped.bin\": 10485761 bytes exceeds the 10 MiB limit (10485760 bytes). [artifact_size_limit_exceeded]"
+    ]);
+
+    // A fresh server replays the same notice from durable storage.
+    server.kill();
+    server.launch().await;
+    let replayed: Vec<_> = run_stream(&server, &run_id)
+        .await
+        .into_iter()
+        .filter(|item| {
+            let record = &item["item"]["record"];
+            record["kind"] == "run.notice" && record["code"] == "artifact_size_limit_exceeded"
+        })
+        .map(|item| item["item"]["record"].clone())
+        .collect();
+    assert_eq!(replayed, notices);
     server.shutdown();
 }
 
