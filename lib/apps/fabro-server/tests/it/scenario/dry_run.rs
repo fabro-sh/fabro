@@ -58,7 +58,7 @@ async fn dry_run_serve_starts_and_runs_workflow() {
 }
 
 #[tokio::test]
-async fn test_model_known_but_unavailable_returns_bad_request() {
+async fn test_model_known_but_unavailable_returns_a_probe_finding() {
     let app = test_app_with_no_providers();
 
     let req = Request::builder()
@@ -71,15 +71,12 @@ async fn test_model_known_but_unavailable_returns_bad_request() {
     let response = app.oneshot(req).await.unwrap();
     let body = response_json(
         response,
-        StatusCode::BAD_REQUEST,
+        StatusCode::OK,
         "POST /api/v1/models/claude-opus-4.6/test",
     )
     .await;
-    assert!(
-        body["errors"][0]["detail"]
-            .as_str()
-            .is_some_and(|detail| detail.contains("no offering on an eligible provider"))
-    );
+    assert_eq!(body["outcome"]["status"], "failed");
+    assert_eq!(body["outcome"]["error"]["kind"], "model_selection");
 }
 
 #[tokio::test]
@@ -94,12 +91,13 @@ async fn test_model_unknown_via_full_router() {
         .unwrap();
 
     let response = app.oneshot(req).await.unwrap();
-    response_status(
+    let body = response_json(
         response,
-        StatusCode::NOT_FOUND,
+        StatusCode::OK,
         "POST /api/v1/models/nonexistent-model-xyz/test",
     )
     .await;
+    assert_eq!(body["outcome"]["error"]["kind"], "model_selection");
 }
 
 #[tokio::test]

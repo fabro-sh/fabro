@@ -2,10 +2,11 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use fabro_llm::api;
 use fabro_llm::lithos_catalog::Catalog;
 use fabro_llm::probe::{self, ApiKeyProbeError, ModelTestStatus};
-use fabro_llm::{ModelSelectionError, api, selection};
 use fabro_redact::redact_string;
+use lithos_llm::client::{ProbeOptions, ProbeOutcome};
 use lithos_llm::types::ReasoningEffort;
 
 use super::super::{
@@ -228,85 +229,25 @@ async fn test_model(
             .into_response();
         }
     };
-    let catalog = state.catalog();
-    let eligible = llm_result
-        .provider_ids()
-        .into_iter()
-        .collect::<HashSet<_>>();
-    let explicit_provider = params.provider.map(ProviderId::new);
-    let info = if let Some(provider) = explicit_provider.as_ref() {
-        match selection::resolve_on_provider(&catalog, provider, &id) {
-            Ok(info) => info,
-            Err(error) => return model_selection_response(&error),
-        }
-    } else {
-        match selection::select(&catalog, &id, None, &eligible) {
-            Ok(info) => info,
-            Err(error) => return model_selection_response(&error),
-        }
-    };
-    let provider_id = info.provider.id().clone();
-    let model_id = info.model.id().clone();
-    if let Some((_, issue)) = llm_result
-        .auth_issues
-        .iter()
-        .find(|(provider, _)| provider == &provider_id)
-    {
-        return ApiError::bad_request(issue.to_string()).into_response();
-    }
-    if !llm_result.has_provider(&provider_id) {
-        return Json(serde_json::json!({
-            "model_id": model_id,
-            "provider": provider_id,
-            "status": "skip",
-        }))
-        .into_response();
-    }
+    let selector = params
+        .provider
+        .map_or_else(|| id.clone(), |provider| format!("{provider}/{id}"));
+    let mut options = ProbeOptions::new().tools(mode == ModelTestMode::Deep);
     if let Some(effort) = reasoning_effort {
-        let capabilities = info.model.capabilities();
-        if !capabilities.reasoning_effort(effort).is_supported() {
-            let allowed = ReasoningEffort::ALL
-                .into_iter()
-                .filter(|candidate| capabilities.reasoning_effort(*candidate).is_supported())
-                .map(ReasoningEffort::as_str)
-                .collect::<Vec<_>>()
-                .join(", ");
-            return ApiError::bad_request(format!(
-                "model '{model_id}' does not support reasoning_effort '{effort}'; allowed values: {allowed}"
-            ))
-            .into_response();
-        }
+        options = options.reasoning_effort(effort);
     }
-
-    let outcome = probe::run_model_test(
-        &llm_result.client,
-        &format!("{provider_id}/{model_id}"),
-        mode,
-        reasoning_effort,
-        None,
-    )
-    .await;
-    Json(serde_json::json!({
-        "model_id": model_id,
-        "provider": provider_id,
-        "status": <&'static str>::from(outcome.status),
-        "error_message": outcome.error_message,
-    }))
-    .into_response()
-}
-
-fn model_selection_response(error: &ModelSelectionError) -> Response {
-    match error {
-        ModelSelectionError::UnknownProvider { .. }
-        | ModelSelectionError::UnknownSelector { .. }
-        | ModelSelectionError::UnknownSelectorOnProvider { .. }
-        | ModelSelectionError::ProviderUsedAsModel { .. } => {
-            ApiError::not_found(error.to_string()).into_response()
+    let mut report = llm_result.client.probe(selector, options).await;
+    // Model selection and probe findings belong to lithos. Fabro only owns
+    // disclosure of provider diagnostics across its HTTP boundary.
+    match &mut report.outcome {
+        ProbeOutcome::Failed(error) => {
+            error.message = redact_string(&error.message);
+            error.provider_code = error.provider_code.as_deref().map(redact_string);
+            error.raw_data = None;
+            error.source_message = None;
         }
-        ModelSelectionError::ProviderUnavailable { .. }
-        | ModelSelectionError::NoEligibleOffering { .. }
-        | ModelSelectionError::NoDefaultModel { .. } => {
-            ApiError::bad_request(error.to_string()).into_response()
-        }
+        ProbeOutcome::Incorrect { detail } => *detail = redact_string(detail),
+        _ => {}
     }
+    Json(report).into_response()
 }

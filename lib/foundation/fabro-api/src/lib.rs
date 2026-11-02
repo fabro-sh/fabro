@@ -72,9 +72,10 @@ pub mod types {
         WorkflowVersionId,
     };
     pub use lithos_llm::catalog::{ModelHandle, ProviderId};
+    pub use lithos_llm::client::ProbeReport;
     pub use lithos_llm::types::{
-        ContentPart, Cost, CostSource, ErrorKind as LlmErrorKind, Message, ReasoningEffort,
-        ReasoningOutput, ResponseFormat as CompletionResponseFormat,
+        ContentPart, Cost, CostSource, ErrorData as LlmErrorData, ErrorKind as LlmErrorKind,
+        Message, ReasoningEffort, ReasoningOutput, ResponseFormat as CompletionResponseFormat,
         RetryClassification as LlmRetryClassification, Role, Speed, TokenCounts,
         ToolChoice as CompletionToolChoice, ToolDefinition as CompletionToolDefinition,
         ToolDefinitionKind as CompletionToolDefinitionKind, Usage,

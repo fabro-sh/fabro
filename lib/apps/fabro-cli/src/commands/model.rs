@@ -1,11 +1,11 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
-use fabro_api::types as api_types;
 use fabro_types::{Model, ModelTestMode};
 use fabro_util::terminal::Styles;
 use futures::{StreamExt, stream};
 use lithos_llm::catalog::ProviderId;
+use lithos_llm::client::{ProbeOutcome, ProbeReport};
 use serde::Serialize;
 
 use crate::args::{ModelListArgs, ModelTestArgs, ModelsCommand};
@@ -29,6 +29,8 @@ struct ModelTestRow {
     detail:   Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error:    Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    report:   Option<ProbeReport>,
 }
 
 #[derive(Serialize)]
@@ -44,24 +46,7 @@ struct CompletedModelTest {
     model:        Model,
     result_color: Color,
     status:       String,
-}
-
-fn model_matches_selector(model: &Model, selector: &str) -> bool {
-    model.id.as_str() == selector || model.aliases.iter().any(|alias| alias == selector)
-}
-
-fn find_model_by_id_or_alias(
-    models: &[Model],
-    id: &str,
-    provider: Option<&ProviderId>,
-) -> Option<Model> {
-    models
-        .iter()
-        .find(|model| {
-            provider.is_none_or(|provider| &model.provider == provider)
-                && model_matches_selector(model, id)
-        })
-        .cloned()
+    report:       Option<ProbeReport>,
 }
 
 pub(crate) async fn execute(
@@ -183,34 +168,37 @@ fn print_models_table(models: &[Model], styles: &Styles) {
     );
 }
 
-fn configured_model_test_status(
-    expected: &Model,
-    result: Result<api_types::ModelTestResult>,
-) -> (Color, String, bool) {
-    match result {
-        Ok(resp) if resp.provider != expected.provider || resp.model_id != expected.id.as_str() => {
-            (
-                Color::Red,
-                format!(
-                    "error: server tested unexpected offering {}/{}",
-                    resp.provider, resp.model_id
-                ),
-                true,
-            )
-        }
-        Ok(resp) if resp.status == api_types::ModelTestResultStatus::Ok => {
-            (Color::Green, "ok".to_string(), false)
-        }
-        Ok(resp) if resp.status == api_types::ModelTestResultStatus::Skip => (
+fn probe_status(report: &ProbeReport) -> (Color, String, bool) {
+    match &report.outcome {
+        ProbeOutcome::Passed => (Color::Green, "ok".to_string(), false),
+        ProbeOutcome::Failed(error) => (
             Color::Red,
-            "error: provider became unconfigured after listing".to_string(),
+            format!("error: {}: {}", error.kind.as_str(), error.message),
             true,
         ),
-        Ok(resp) => {
-            let message = resp
-                .error_message
-                .unwrap_or_else(|| "unknown error".to_string());
-            (Color::Red, format!("error: {message}"), true)
+        ProbeOutcome::Incorrect { detail } => (Color::Red, format!("incorrect: {detail}"), true),
+        _ => (Color::Red, "error: unknown probe outcome".to_string(), true),
+    }
+}
+
+fn configured_model_test_status(
+    expected: &Model,
+    result: &Result<ProbeReport>,
+) -> (Color, String, bool) {
+    match result {
+        Ok(report) => {
+            // A bulk job names an exact offering. Keep this correlation check;
+            // a single selector is resolved exclusively by the server's probe.
+            if let Some(route) = &report.route {
+                if route.provider() != &expected.provider || route.model() != &expected.id {
+                    return (
+                        Color::Red,
+                        format!("error: server tested unexpected offering {route}"),
+                        true,
+                    );
+                }
+            }
+            probe_status(report)
         }
         Err(err) => (Color::Red, format!("error: {err}"), true),
     }
@@ -225,6 +213,7 @@ fn model_test_row_from_status(model: &Model, status: &str, result_color: Color) 
             result:   ModelTestResultKind::Pass,
             detail:   None,
             error:    None,
+            report:   None,
         },
         Color::Yellow => ModelTestRow {
             model:    model.id.to_string(),
@@ -232,12 +221,14 @@ fn model_test_row_from_status(model: &Model, status: &str, result_color: Color) 
             result:   ModelTestResultKind::Skip,
             detail:   Some(trimmed.to_string()),
             error:    None,
+            report:   None,
         },
         _ => ModelTestRow {
             model:    model.id.to_string(),
             provider: model.provider.clone(),
             result:   ModelTestResultKind::Fail,
             detail:   None,
+            report:   None,
             error:    Some(
                 trimmed
                     .strip_prefix("error: ")
@@ -265,6 +256,44 @@ async fn test_models_via_server(
     let reasoning_effort = args.reasoning_effort;
     let request_mode = args.tools.then_some(ModelTestMode::Deep);
 
+    if let Some(selector) = model {
+        let requested_provider = provider.map(ProviderId::new);
+        if !json_output {
+            eprint!("Testing {selector}...");
+        }
+        let result = client
+            .test_model(
+                selector,
+                requested_provider.as_ref(),
+                request_mode,
+                reasoning_effort,
+            )
+            .await;
+        if !json_output {
+            eprintln!(" done");
+        }
+        let report = result?;
+        if json_output {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            let route = report
+                .route
+                .as_ref()
+                .map_or_else(|| selector.to_string(), ToString::to_string);
+            let (_, status, _) = probe_status(&report);
+            println!(
+                "{route}: {status} ({} ms; {} input, {} output tokens)",
+                report.latency.as_millis(),
+                report.usage.input,
+                report.usage.output
+            );
+        }
+        if !report.passed() {
+            bail!("1 model(s) failed");
+        }
+        return Ok(());
+    }
+
     let use_color = styles.use_color;
     let mut title = models_title(use_color);
     title.push("RESULT".cell().bold(use_color));
@@ -274,162 +303,81 @@ async fn test_models_via_server(
     let mut failures = 0u32;
     let mut skipped = 0u32;
     let mut skipped_providers: Vec<String> = Vec::new();
-    if let Some(model_id) = model {
-        let requested_provider = provider.map(ProviderId::new);
-        let listed_models = client.list_models(provider, Some(model_id)).await?;
-        let listed_info = find_model_by_id_or_alias(&listed_models, model_id, None);
-        if !json_output {
-            eprint!("Testing {model_id}...");
-        }
-        let has_configured_match = listed_models
-            .iter()
-            .any(|model| model.configured && model_matches_selector(model, model_id));
-        let result =
-            if requested_provider.is_none() && listed_info.is_some() && !has_configured_match {
-                None
-            } else {
-                Some(
-                    client
-                        .test_model(
-                            model_id,
-                            requested_provider.as_ref(),
-                            request_mode,
-                            reasoning_effort,
-                        )
-                        .await,
-                )
-            };
-        if !json_output {
-            eprintln!(" done");
-        }
+    let models_to_test = client.list_models(provider, None).await?;
+    if models_to_test.is_empty() {
+        bail!("No models found");
+    }
 
-        let (info, result_color, status) = match result {
-            None => {
-                let info = listed_info.with_context(|| format!("Unknown model: {model_id}"))?;
-                failures += 1;
-                skipped += 1;
-                (info, Color::Yellow, "not configured".to_string())
-            }
-            Some(Ok(resp)) => {
-                let info =
-                    find_model_by_id_or_alias(&listed_models, &resp.model_id, Some(&resp.provider))
-                        .with_context(|| {
-                            format!(
-                                "Unknown model returned by server: {}/{}",
-                                resp.provider, resp.model_id
-                            )
-                        })?;
-                if resp.status == api_types::ModelTestResultStatus::Ok {
-                    (info, Color::Green, "ok".to_string())
-                } else if resp.status == api_types::ModelTestResultStatus::Skip {
-                    failures += 1;
-                    skipped += 1;
-                    (info, Color::Yellow, "not configured".to_string())
-                } else {
-                    failures += 1;
-                    let message = resp
-                        .error_message
-                        .unwrap_or_else(|| "unknown error".to_string());
-                    (info, Color::Red, format!("error: {message}"))
+    let (configured, unconfigured): (Vec<_>, Vec<_>) = models_to_test
+        .into_iter()
+        .partition(|model| model.configured);
+
+    for info in &unconfigured {
+        skipped += 1;
+        let provider_name = info.provider.to_string();
+        if !skipped_providers.contains(&provider_name) {
+            skipped_providers.push(provider_name);
+        }
+        if json_output {
+            json_rows.push(model_test_row_from_status(
+                info,
+                "not configured",
+                Color::Yellow,
+            ));
+        }
+    }
+
+    let mut completed = stream::iter(configured.into_iter().enumerate())
+        .map(|(index, info)| {
+            let client = client.clone();
+            async move {
+                let result = client
+                    .test_model(
+                        info.id.as_str(),
+                        Some(&info.provider),
+                        request_mode,
+                        reasoning_effort,
+                    )
+                    .await;
+                if !json_output {
+                    eprintln!("Testing {}... done", info.id);
                 }
+                let (result_color, status, failed) = configured_model_test_status(&info, &result);
+                (
+                    CompletedModelTest {
+                        index,
+                        model: info,
+                        result_color,
+                        status,
+                        report: result.ok(),
+                    },
+                    failed,
+                )
             }
-            Some(Err(err)) if err.to_string().contains("Model not found") => {
-                bail!("Unknown model: {model_id}");
-            }
-            Some(Err(err)) => {
-                let info = listed_info.with_context(|| format!("Unknown model: {model_id}"))?;
-                failures += 1;
-                (info, Color::Red, format!("error: {err}"))
-            }
-        };
+        })
+        .buffer_unordered(jobs)
+        .collect::<Vec<_>>()
+        .await;
 
-        let mut row = model_row(&info, use_color);
+    completed.sort_by_key(|(completed, _)| completed.index);
+
+    for (completed, failed) in completed {
+        if failed {
+            failures += 1;
+        }
+
+        let mut row = model_row(&completed.model, use_color);
+        let mut json_row =
+            model_test_row_from_status(&completed.model, &completed.status, completed.result_color);
+        json_row.report = completed.report;
+        json_rows.push(json_row);
         row.push(
-            status
-                .clone()
+            completed
+                .status
                 .cell()
-                .foreground_color(color_if(use_color, result_color)),
+                .foreground_color(color_if(use_color, completed.result_color)),
         );
         rows.push(row);
-        json_rows.push(model_test_row_from_status(&info, &status, result_color));
-    } else {
-        let models_to_test = client.list_models(provider, None).await?;
-        if models_to_test.is_empty() {
-            bail!("No models found");
-        }
-
-        let (configured, unconfigured): (Vec<_>, Vec<_>) = models_to_test
-            .into_iter()
-            .partition(|model| model.configured);
-
-        for info in &unconfigured {
-            skipped += 1;
-            let provider_name = info.provider.to_string();
-            if !skipped_providers.contains(&provider_name) {
-                skipped_providers.push(provider_name);
-            }
-            if json_output {
-                json_rows.push(model_test_row_from_status(
-                    info,
-                    "not configured",
-                    Color::Yellow,
-                ));
-            }
-        }
-
-        let mut completed = stream::iter(configured.into_iter().enumerate())
-            .map(|(index, info)| {
-                let client = client.clone();
-                async move {
-                    let result = client
-                        .test_model(
-                            info.id.as_str(),
-                            Some(&info.provider),
-                            request_mode,
-                            reasoning_effort,
-                        )
-                        .await;
-                    if !json_output {
-                        eprintln!("Testing {}... done", info.id);
-                    }
-                    let (result_color, status, failed) =
-                        configured_model_test_status(&info, result);
-                    (
-                        CompletedModelTest {
-                            index,
-                            model: info,
-                            result_color,
-                            status,
-                        },
-                        failed,
-                    )
-                }
-            })
-            .buffer_unordered(jobs)
-            .collect::<Vec<_>>()
-            .await;
-
-        completed.sort_by_key(|(completed, _)| completed.index);
-
-        for (completed, failed) in completed {
-            if failed {
-                failures += 1;
-            }
-
-            let mut row = model_row(&completed.model, use_color);
-            json_rows.push(model_test_row_from_status(
-                &completed.model,
-                &completed.status,
-                completed.result_color,
-            ));
-            row.push(
-                completed
-                    .status
-                    .cell()
-                    .foreground_color(color_if(use_color, completed.result_color)),
-            );
-            rows.push(row);
-        }
     }
 
     if json_output {
@@ -458,7 +406,7 @@ async fn test_models_via_server(
         println!("{}", table.display()?);
     }
 
-    if skipped > 0 && model.is_none() {
+    if skipped > 0 {
         eprintln!(
             "Skipped {} model(s) (no credentials: {})",
             skipped,
@@ -516,7 +464,7 @@ impl Default for ModelsCommand {
 mod tests {
     use fabro_types::{ModelControls, ModelCosts, ModelFeatures, ModelLimits};
     use lithos_llm::catalog::builtin;
-    use lithos_llm::types::ReasoningEffort;
+    use lithos_llm::types::{ErrorKind, ReasoningEffort, TokenCounts};
 
     use super::*;
 
@@ -657,9 +605,11 @@ mod tests {
                     .header("Content-Type", "application/json")
                     .body(
                         serde_json::json!({
-                            "model_id": "test-model",
-                            "provider": "anthropic",
-                            "status": "ok"
+                            "version": 1,
+                            "route": "anthropic/test-model",
+                            "outcome": {"status": "passed"},
+                            "latency_ms": 12,
+                            "usage": TokenCounts::default()
                         })
                         .to_string(),
                     );
@@ -672,8 +622,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status, api_types::ModelTestResultStatus::Ok);
-        assert!(response.error_message.is_none());
+        assert!(response.passed());
     }
 
     #[tokio::test]
@@ -689,10 +638,11 @@ mod tests {
                     .header("Content-Type", "application/json")
                     .body(
                         serde_json::json!({
-                            "model_id": "test-model",
-                            "provider": "anthropic",
-                            "status": "error",
-                            "error_message": "timeout"
+                            "version": 1,
+                            "route": "anthropic/test-model",
+                            "outcome": {"status": "failed", "error": {"kind": "timeout", "message": "timeout", "retry": {"type": "never"}}},
+                            "latency_ms": 12,
+                            "usage": TokenCounts::default()
                         })
                         .to_string(),
                     );
@@ -710,12 +660,13 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status, api_types::ModelTestResultStatus::Error);
-        assert_eq!(response.error_message.as_deref(), Some("timeout"));
+        assert!(
+            matches!(response.outcome, ProbeOutcome::Failed(error) if error.message == "timeout")
+        );
     }
 
     #[tokio::test]
-    async fn test_model_via_server_parses_skip() {
+    async fn test_model_via_server_parses_selection_failure() {
         let server = httpmock::MockServer::start_async().await;
         server
             .mock_async(|when, then| {
@@ -724,9 +675,11 @@ mod tests {
                     .header("Content-Type", "application/json")
                     .body(
                         serde_json::json!({
-                            "model_id": "kimi-k2.5",
-                            "provider": "moonshot",
-                            "status": "skip"
+                            "version": 1,
+                            "route": "moonshot/kimi-k2.5",
+                            "outcome": {"status": "failed", "error": {"kind": "model_selection", "message": "provider unavailable", "retry": {"type": "never"}}},
+                            "latency_ms": 12,
+                            "usage": TokenCounts::default()
                         })
                         .to_string(),
                     );
@@ -739,8 +692,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status, api_types::ModelTestResultStatus::Skip);
-        assert!(response.error_message.is_none());
+        assert!(
+            matches!(response.outcome, ProbeOutcome::Failed(error) if error.kind == ErrorKind::ModelSelection)
+        );
     }
 
     #[tokio::test]
@@ -767,26 +721,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn single_model_test_uses_server_model_metadata_for_custom_models() {
+    async fn single_model_test_uses_probe_identity_without_catalog_metadata() {
         let server = httpmock::MockServer::start_async().await;
-        server
-            .mock_async(|when, then| {
-                when.method("GET")
-                    .path("/api/v1/models")
-                    .query_param("page[limit]", "100")
-                    .query_param("page[offset]", "0")
-                    .query_param("query", "venice-large");
-                then.status(200)
-                    .header("Content-Type", "application/json")
-                    .body(
-                        serde_json::json!({
-                            "data": [custom_model_json("venice-large", "venice")],
-                            "meta": { "has_more": false }
-                        })
-                        .to_string(),
-                    );
-            })
-            .await;
         server
             .mock_async(|when, then| {
                 when.method("POST").path("/api/v1/models/venice-large/test");
@@ -794,9 +730,11 @@ mod tests {
                     .header("Content-Type", "application/json")
                     .body(
                         serde_json::json!({
-                            "model_id": "venice-large",
-                            "provider": "venice",
-                            "status": "ok"
+                            "version": 1,
+                            "route": "venice/venice-large",
+                            "outcome": {"status": "passed"},
+                            "latency_ms": 12,
+                            "usage": TokenCounts::default()
                         })
                         .to_string(),
                     );
@@ -847,9 +785,11 @@ mod tests {
                     .header("Content-Type", "application/json")
                     .body(
                         serde_json::json!({
-                            "model_id": "portable-model",
-                            "provider": "openai",
-                            "status": "ok"
+                            "version": 1,
+                            "route": "openai/portable-model",
+                            "outcome": {"status": "passed"},
+                            "latency_ms": 12,
+                            "usage": TokenCounts::default()
                         })
                         .to_string(),
                     );
@@ -864,9 +804,11 @@ mod tests {
                     .header("Content-Type", "application/json")
                     .body(
                         serde_json::json!({
-                            "model_id": "portable-model",
-                            "provider": "openrouter",
-                            "status": "ok"
+                            "version": 1,
+                            "route": "openrouter/portable-model",
+                            "outcome": {"status": "passed"},
+                            "latency_ms": 12,
+                            "usage": TokenCounts::default()
                         })
                         .to_string(),
                     );

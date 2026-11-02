@@ -20,6 +20,7 @@ use fabro_util::exit::{ErrorExt, ExitClass};
 use futures::future::BoxFuture;
 use futures::{Stream, StreamExt};
 use lithos_llm::catalog::ProviderId;
+use lithos_llm::client::ProbeReport;
 use lithos_llm::types::ReasoningEffort;
 use serde::Deserialize;
 use tokio::sync::Mutex;
@@ -912,7 +913,7 @@ impl Client {
         provider: Option<&ProviderId>,
         mode: Option<ModelTestMode>,
         reasoning_effort: Option<ReasoningEffort>,
-    ) -> Result<types::ModelTestResult> {
+    ) -> Result<ProbeReport> {
         let response = self
             .send_api(|client| async move {
                 let mut request = client.test_model().id(id.to_string());
