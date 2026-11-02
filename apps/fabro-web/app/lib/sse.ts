@@ -29,6 +29,7 @@ export interface SharedEventSubscription {
   resolvers: Map<symbol, EventResolver>;
   pendingKeys: Map<string, KeyOrMatcher>;
   debounceTimer: ReturnType<typeof setTimeout> | null;
+  maxWaitTimer: ReturnType<typeof setTimeout> | null;
 }
 
 export function sseKeyDedupeId(key: KeyOrMatcher): string {
@@ -47,6 +48,7 @@ export function subscribeToSharedEventSource<TPayload extends EventPayload>({
   resolveInvalidation,
   eventSourceFactory = createBrowserEventSource,
   debounceMs = 300,
+  maxWaitMs,
 }: {
   subscriptions: Map<string, SharedEventSubscription>;
   subscriptionKey: string;
@@ -55,6 +57,8 @@ export function subscribeToSharedEventSource<TPayload extends EventPayload>({
   resolveInvalidation: (payload: TPayload) => EventInvalidation;
   eventSourceFactory?: (url: string) => EventSourceLike;
   debounceMs?: number;
+  /** Flush pending keys within this interval, even while events keep arriving. */
+  maxWaitMs?: number;
 }): () => void {
   let subscription = subscriptions.get(subscriptionKey);
   if (!subscription) {
@@ -66,6 +70,7 @@ export function subscribeToSharedEventSource<TPayload extends EventPayload>({
       resolvers: new Map(),
       pendingKeys: new Map(),
       debounceTimer: null,
+      maxWaitTimer: null,
     };
     subscriptions.set(subscriptionKey, subscription);
 
@@ -92,7 +97,7 @@ export function subscribeToSharedEventSource<TPayload extends EventPayload>({
         immediate ||= Boolean(invalidation.immediate);
       }
 
-      queueInvalidations(current, [...keys.values()], { debounceMs, immediate });
+      queueInvalidations(current, [...keys.values()], { debounceMs, maxWaitMs, immediate });
 
       if (close) {
         closeSharedEventSource(subscriptions, subscriptionKey, { flushPending: true });
@@ -133,9 +138,11 @@ function queueInvalidations(
   keys: KeyOrMatcher[],
   {
     debounceMs,
+    maxWaitMs,
     immediate,
   }: {
     debounceMs: number;
+    maxWaitMs?: number;
     immediate?: boolean;
   },
 ) {
@@ -149,6 +156,9 @@ function queueInvalidations(
     return;
   }
 
+  if (maxWaitMs !== undefined && subscription.maxWaitTimer === null) {
+    subscription.maxWaitTimer = setTimeout(() => flushInvalidations(subscription), maxWaitMs);
+  }
   if (subscription.debounceTimer) {
     clearTimeout(subscription.debounceTimer);
   }
@@ -159,6 +169,7 @@ function queueInvalidations(
 }
 
 function flushInvalidations(subscription: SharedEventSubscription) {
+  clearInvalidationTimers(subscription);
   if (subscription.pendingKeys.size === 0) return;
   const keys = [...subscription.pendingKeys.values()];
   subscription.pendingKeys.clear();
@@ -181,11 +192,16 @@ function closeSharedEventSource(
   if (flushPending) {
     flushInvalidations(subscription);
   }
-  if (subscription.debounceTimer) {
-    clearTimeout(subscription.debounceTimer);
-  }
+  clearInvalidationTimers(subscription);
   subscription.source.close();
   subscriptions.delete(subscriptionKey);
+}
+
+function clearInvalidationTimers(subscription: SharedEventSubscription) {
+  if (subscription.debounceTimer !== null) clearTimeout(subscription.debounceTimer);
+  if (subscription.maxWaitTimer !== null) clearTimeout(subscription.maxWaitTimer);
+  subscription.debounceTimer = null;
+  subscription.maxWaitTimer = null;
 }
 
 function stringifyKeyValue(value: unknown): string {

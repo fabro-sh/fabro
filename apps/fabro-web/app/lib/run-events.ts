@@ -40,6 +40,8 @@ export interface RunEventPayload extends EventPayload {
 
 interface RunEventOptions {
   debounceMs?: number;
+  /** Keep live queries updating even when progress never pauses. */
+  maxWaitMs?: number;
   coordinator?: CrossTabSseCoordinator;
   /** Called with every well-formed stream item of the run, before invalidation. */
   onItem?: (item: RunStreamItem) => void;
@@ -131,7 +133,7 @@ export function queryKeysForStreamItem(
           immediate: false,
         };
       }
-      return { keys: [queryKeys.runs.state(runId), stream, ...stageKeys], immediate: false };
+      return { keys: [queryKeys.runs.state(runId), queryKeys.runs.usage(runId), stream, ...stageKeys], immediate: false };
     }
     case "control.requested":
       return {
@@ -196,13 +198,14 @@ export function subscribeToRunEvents(
   runId: string,
   mutate: MutateFn,
   eventSourceFactory: (url: string) => EventSourceLike = createBrowserEventSource,
-  { debounceMs = 300, coordinator, onItem }: RunEventOptions = {},
+  { debounceMs = 300, maxWaitMs = 1_000, coordinator, onItem }: RunEventOptions = {},
 ): () => void {
   return subscribeToCrossTabSse<RunEventPayload>({
     coordinator,
     subscriptionKey: `run:${runId}`,
     mutate,
     debounceMs,
+    maxWaitMs,
     resyncKeys: () => resyncKeysForRun(runId),
     resolveInvalidation: (payload) => {
       if (payload.run_id !== runId) return { keys: [] };
@@ -216,6 +219,7 @@ export function subscribeToRunEvents(
         mutate,
         eventSourceFactory,
         debounceMs,
+        maxWaitMs,
         resolveInvalidation: (payload) => {
           const result = runInvalidation(runId, payload, onItem);
           return { ...result, close: result.immediate };
