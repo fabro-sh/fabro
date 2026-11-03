@@ -168,6 +168,31 @@ fn print_models_table(models: &[Model], styles: &Styles) {
     );
 }
 
+/// Catalog data decorates the report; it never selects a model or changes the
+/// finding.
+async fn probe_display_metadata(
+    client: &server_client::Client,
+    report: &ProbeReport,
+    selector: &str,
+    provider: Option<&str>,
+) -> Option<Model> {
+    let (provider, query) = report.route.as_ref().map_or((provider, selector), |route| {
+        (Some(route.provider().as_str()), route.model().as_str())
+    });
+    // Missing or unavailable metadata must not turn a successful probe into a
+    // failure.
+    let models = client.list_models(provider, Some(query)).await.ok()?;
+    let mut matches = models.into_iter().filter(|model| {
+        provider.is_none_or(|provider| model.provider.as_str() == provider)
+            && (model.id.as_str() == query
+                || (report.route.is_none() && model.aliases.iter().any(|alias| alias == query)))
+    });
+    let model = matches.next()?;
+    // An unresolved selector can name multiple offerings. Do not invent a selected
+    // route.
+    matches.next().is_none().then_some(model)
+}
+
 fn probe_status(report: &ProbeReport) -> (Color, String, bool) {
     match &report.outcome {
         ProbeOutcome::Passed => (Color::Green, "ok".to_string(), false),
@@ -276,17 +301,39 @@ async fn test_models_via_server(
         if json_output {
             println!("{}", serde_json::to_string_pretty(&report)?);
         } else {
-            let route = report
-                .route
-                .as_ref()
-                .map_or_else(|| selector.to_string(), ToString::to_string);
-            let (_, status, _) = probe_status(&report);
-            println!(
-                "{route}: {status} ({} ms; {} input, {} output tokens)",
-                report.latency.as_millis(),
-                report.usage.input,
-                report.usage.output
-            );
+            let use_color = styles.use_color;
+            let metadata = probe_display_metadata(client, &report, selector, provider).await;
+            let mut row = if let Some(metadata) = metadata {
+                model_row(&metadata, use_color)
+            } else {
+                let (model, provider) = report
+                    .route
+                    .as_ref()
+                    .map_or((selector, provider.unwrap_or("—")), |route| {
+                        (route.model().as_str(), route.provider().as_str())
+                    });
+                vec![
+                    model.cell().bold(use_color),
+                    provider
+                        .cell()
+                        .foreground_color(color_if(use_color, Color::Ansi256(8))),
+                    "—".cell(),
+                    "—".cell().justify(Justify::Right),
+                    "—".cell().justify(Justify::Right),
+                    "—".cell().justify(Justify::Right),
+                ]
+            };
+            let (color, status, _) = probe_status(&report);
+            row.push(status.cell().foreground_color(color_if(use_color, color)));
+            let mut title = models_title(use_color);
+            title.push("RESULT".cell().bold(use_color));
+            let table = vec![row]
+                .table()
+                .title(title)
+                .color_choice(color_choice(use_color))
+                .border(Border::builder().build())
+                .separator(Separator::builder().build());
+            println!("{}", table.display()?);
         }
         if !report.passed() {
             bail!("1 model(s) failed");

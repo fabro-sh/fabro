@@ -346,9 +346,11 @@ fabro model test --provider openai
 This is useful for confirming connectivity after setup or when adding a new provider key.
 
 With `--model`, Fabro sends the selector directly to the server's lithos-llm
-probe. It displays the canonical provider/model selected by the probe, the
-outcome, elapsed milliseconds, and input/output token usage. Add `--tools` to
-check a multi-turn tool exchange.
+probe. Normal output retains the model table: model, provider, aliases, context,
+cost, speed, and result. Catalog metadata is fetched only for presentation;
+unavailable or missing metadata appears as `—` and does not change the probe's
+result. Add `--tools` to check a multi-turn tool exchange. Timing and token usage
+remain available in `--json`, which does not fetch catalog metadata.
 
 `fabro model test --model <selector> --json` returns the version-1 lithos-llm
 probe report directly: `version`, `route`, `outcome`, `latency_ms`, and `usage`.

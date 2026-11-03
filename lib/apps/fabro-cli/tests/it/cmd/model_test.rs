@@ -149,7 +149,7 @@ fn assert_model_test_forwards(cli_args: &[&str], expected_query: &[(&str, &str)]
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    list.assert_calls(0);
+    list.assert_calls(1);
     test.assert();
 }
 
@@ -167,7 +167,7 @@ fn model_test_deep_remains_an_alias_for_tools() {
 }
 
 #[test]
-fn single_model_reports_canonical_alias_without_listing() {
+fn single_model_json_reports_canonical_alias_without_listing() {
     let context = test_context!();
     let server = MockServer::start();
     context.set_http_target(&server.base_url());
@@ -211,26 +211,122 @@ fn single_model_reports_canonical_alias_without_listing() {
     );
     listing.assert_calls(0);
     probe.assert_calls(1);
+}
 
+#[test]
+fn single_model_text_restores_the_metadata_table() {
+    let context = test_context!();
+    let server = MockServer::start();
+    context.set_http_target(&server.base_url());
+    let mut model = model_json("test-model", "anthropic", false);
+    model["aliases"] = serde_json::json!(["tm"]);
+    let listing = server.mock(|when, then| {
+        when.method("GET")
+            .path("/api/v1/models")
+            .query_param("provider", "anthropic")
+            .query_param("query", "test-model");
+        then.status(200).json_body(serde_json::json!({
+            "data": [model_json("test-model", "other-provider", true), model],
+            "meta": {"has_more": false}
+        }));
+    });
+    let probe = server.mock(|when, then| {
+        when.method("POST").path("/api/v1/models/tm/test");
+        then.status(200).json_body(serde_json::json!({
+            "version": 1, "route": "anthropic/test-model", "outcome": {"status": "passed"},
+            "latency_ms": 12, "usage": TokenCounts::default()
+        }));
+    });
     let mut cmd = context.command();
-    cmd.args([
-        "model",
-        "test",
-        "--model",
-        "claude-sonnet-4-6",
-        "--provider",
-        "anthropic",
-    ]);
+    cmd.args(["model", "test", "--model", "tm"]);
     fabro_snapshot!(context.filters(), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
-    anthropic/claude-sonnet-4.6: ok (12 ms; 0 input, 0 output tokens)
+    MODEL       PROVIDER   ALIASES  CONTEXT         COST     SPEED  RESULT 
+     test-model  anthropic  tm          131k  $1.0 / $2.0  42 tok/s  ok
     ----- stderr -----
-    Testing claude-sonnet-4-6... done
+    Testing tm... done
     ");
-    listing.assert_calls(0);
-    probe.assert_calls(2);
+    listing.assert_calls(1);
+    probe.assert_calls(1);
+}
+
+#[test]
+fn single_model_text_preserves_success_when_metadata_is_missing_or_unavailable() {
+    for (status, models) in [
+        (500, vec![]),
+        (200, vec![]),
+        (200, vec![model_json("test-model", "other-provider", true)]),
+    ] {
+        let context = test_context!();
+        let server = MockServer::start();
+        context.set_http_target(&server.base_url());
+        let listing = server.mock(|when, then| {
+            when.method("GET").path("/api/v1/models");
+            then.status(status).json_body(serde_json::json!({
+                "data": models, "meta": {"has_more": false}
+            }));
+        });
+        let probe = server.mock(|when, then| {
+            when.method("POST").path("/api/v1/models/tm/test");
+            then.status(200).json_body(serde_json::json!({
+                "version": 1, "route": "anthropic/test-model", "outcome": {"status": "passed"},
+                "latency_ms": 12, "usage": TokenCounts::default()
+            }));
+        });
+        let mut cmd = context.command();
+        cmd.args(["model", "test", "--model", "tm"]);
+        insta::allow_duplicates! {
+            fabro_snapshot!(context.filters(), cmd, @"
+        success: true
+        exit_code: 0
+        ----- stdout -----
+        MODEL       PROVIDER   ALIASES  CONTEXT  COST  SPEED  RESULT 
+         test-model  anthropic  —              —     —      —  ok
+        ----- stderr -----
+        Testing tm... done
+        ");
+        }
+        listing.assert_calls(1);
+        probe.assert_calls(1);
+    }
+}
+
+#[test]
+fn single_model_text_preserves_failure_when_metadata_is_unavailable() {
+    let context = test_context!();
+    let server = MockServer::start();
+    context.set_http_target(&server.base_url());
+    let listing = server.mock(|when, then| {
+        when.method("GET").path("/api/v1/models");
+        then.status(500);
+    });
+    let probe = server.mock(|when, then| {
+        when.method("POST")
+            .path("/api/v1/models/unknown-model/test");
+        then.status(200).json_body(serde_json::json!({
+            "version": 1, "route": null,
+            "outcome": {"status": "failed", "error": {
+                "kind": "model_selection", "message": "unknown model", "retry": {"type": "never"}
+            }},
+            "latency_ms": 0, "usage": TokenCounts::default()
+        }));
+    });
+    let mut cmd = context.command();
+    cmd.args(["model", "test", "--model", "unknown-model"]);
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    MODEL          PROVIDER  ALIASES  CONTEXT  COST  SPEED  RESULT                                
+     unknown-model  —         —              —     —      —  error: model_selection: unknown model
+    ----- stderr -----
+    Testing unknown-model... done
+      × 1 model(s) failed
+    ");
+    listing.assert_calls(1);
+    probe.assert_calls(1);
 }
 
 #[test]
