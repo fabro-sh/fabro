@@ -258,6 +258,8 @@ When `[run.artifacts]` contains include patterns, Fabro scans the sandbox after 
 
 Each scan represents the post-stage workspace state; Fabro does not depend on filesystem modification timestamps. The same path and content hash is recorded only once per run, even when it still matches after later stages. Individual files over 10 MiB (10,485,760 bytes) are skipped, and each collection is limited to 100 files and 50 MiB total. A file exactly 10 MiB can be captured.
 
+When a matching file exceeds the per-file limit, Fabro records an `artifact_size_limit_exceeded` warning with its path, observed size, and limit. Read it in `fabro attach`, the run events API, or the web Events view. The same path and observed size is reported once per run, including across later stages and resume; the warning does not fail the run.
+
 New artifact bytes use the configured artifact backend, with stage and filename metadata in SQLite. Existing captures stored as SQLite blobs remain readable without moving their bytes. Generic offloaded context values and checkpoint patches continue to use SQLite blobs.
 
 ### What gets captured

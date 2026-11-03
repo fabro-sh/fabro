@@ -8,6 +8,7 @@ import {
   commandOutcomeOf,
   commandScriptOf,
   debugRowsFromStream,
+  debugRowSearchText,
   deriveRunPhasesFromStream,
   extractPetriStageContext,
   findPetriEdgeForStage,
@@ -203,6 +204,24 @@ describe("run phases", () => {
 });
 
 describe("platform records", () => {
+  test("artifact size notices remain readable and searchable in persisted events", () => {
+    const record = {
+      kind: "run.notice",
+      level: "warn",
+      code: "artifact_size_limit_exceeded",
+      message: 'Skipped artifact "assets/report.bin": 10485761 bytes exceeds the 10 MiB limit (10485760 bytes).',
+    };
+    const item: RunStreamItem = {
+      run_id: "run", stream_seq: 1, kind: "platform", id: "1", recorded_at: 0,
+      item: { seq: 1, recorded_at: 0, record, position: { execution: 0, firing: 1 } },
+    };
+    const [row] = debugRowsFromStream([item]);
+    expect(row.event).toBe("run.notice");
+    expect(row.item.item.record).toEqual(record);
+    expect(debugRowSearchText(row)).toContain("assets/report.bin");
+    expect(debugRowSearchText(row)).toContain("10 mib limit");
+  });
+
   test("the debug rows name every item and carry its stage", () => {
     const rows = debugRowsFromStream(parallel.stream);
     expect(rows).toHaveLength(parallel.stream.length);
