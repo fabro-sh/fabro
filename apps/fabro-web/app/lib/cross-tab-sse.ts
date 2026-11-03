@@ -116,6 +116,8 @@ interface SubscribeOptions<TPayload extends EventPayload> {
   resyncKeys: () => KeyOrMatcher[];
   fallbackSubscribe: () => () => void;
   debounceMs?: number;
+  /** Flush pending keys within this interval, even while events keep arriving. */
+  maxWaitMs?: number;
 }
 
 export interface SubscribeToCrossTabSseOptions<TPayload extends EventPayload>
@@ -136,6 +138,8 @@ interface LocalSubscription {
   pendingKeys: Map<string, KeyOrMatcher>;
   debounceTimer: ReturnType<typeof setTimeout> | null;
   debounceMs: number;
+  maxWaitMs?: number;
+  maxWaitTimer: ReturnType<typeof setTimeout> | null;
   resolveInvalidation: (payload: EventPayload) => EventInvalidation;
   resyncKeys: () => KeyOrMatcher[];
 }
@@ -295,6 +299,8 @@ export class CrossTabSseCoordinator {
         pendingKeys: new Map(),
         debounceTimer: null,
         debounceMs: options.debounceMs ?? 300,
+        maxWaitMs: options.maxWaitMs,
+        maxWaitTimer: null,
         resolveInvalidation: options.resolveInvalidation as (payload: EventPayload) => EventInvalidation,
         resyncKeys: options.resyncKeys,
       };
@@ -304,6 +310,7 @@ export class CrossTabSseCoordinator {
         options.resolveInvalidation as (payload: EventPayload) => EventInvalidation;
       subscription.resyncKeys = options.resyncKeys;
       subscription.debounceMs = options.debounceMs ?? subscription.debounceMs;
+      subscription.maxWaitMs = options.maxWaitMs ?? subscription.maxWaitMs;
     }
 
     subscription.refcount += 1;
@@ -702,6 +709,12 @@ export class CrossTabSseCoordinator {
       return;
     }
 
+    if (subscription.maxWaitMs !== undefined && subscription.maxWaitTimer === null) {
+      subscription.maxWaitTimer = setTimeout(
+        () => this.flushInvalidations(subscription),
+        subscription.maxWaitMs,
+      );
+    }
     if (subscription.debounceTimer) {
       clearTimeout(subscription.debounceTimer);
     }
@@ -712,6 +725,7 @@ export class CrossTabSseCoordinator {
   }
 
   private flushInvalidations(subscription: LocalSubscription) {
+    this.clearSubscriptionTimer(subscription);
     if (subscription.pendingKeys.size === 0) return;
     const keys = [...subscription.pendingKeys.values()];
     subscription.pendingKeys.clear();
@@ -940,9 +954,10 @@ export class CrossTabSseCoordinator {
   }
 
   private clearSubscriptionTimer(subscription: LocalSubscription) {
-    if (!subscription.debounceTimer) return;
-    clearTimeout(subscription.debounceTimer);
+    if (subscription.debounceTimer !== null) clearTimeout(subscription.debounceTimer);
+    if (subscription.maxWaitTimer !== null) clearTimeout(subscription.maxWaitTimer);
     subscription.debounceTimer = null;
+    subscription.maxWaitTimer = null;
   }
 
   private resetIdleState() {

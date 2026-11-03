@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
-import type { Key } from "swr";
+import { describe, expect, jest, test } from "bun:test";
+import { unstable_serialize, type Key } from "swr";
 
 import { loadPetriFixture } from "./petri-fixtures";
 import { streamItemName } from "./petri-stream";
@@ -430,4 +430,95 @@ async function waitFor(condition: () => boolean, timeoutMs = 200) {
     await new Promise((resolve) => setTimeout(resolve, 2));
   }
   throw new Error("condition did not become true before timeout");
+}
+
+for (const mode of ["coordinated", "fallback"] as const) {
+  describe(`${mode} live usage batching`, () => {
+    function subscribe() {
+      const source = new FakeEventSource();
+      const coordinator = mode === "coordinated"
+        ? createCoordinator(() => source)
+        : createFallbackCoordinator();
+      const keys: Key[] = [];
+      const usageKey = unstable_serialize(queryKeys.runs.usage("run-live"));
+      const cleanup = subscribeToRunEvents("run-live", (key) => {
+        keys.push(key);
+        return Promise.resolve();
+      }, () => source, { coordinator });
+      jest.advanceTimersByTime(100);
+      expect(source.onmessage).not.toBeNull();
+      keys.length = 0;
+      let seq = 0;
+      return {
+        source, keys, cleanup,
+        close: () => { cleanup(); coordinator.close(); },
+        usageRefreshes: () => keys.filter((key) => unstable_serialize(key) === usageKey).length,
+        progress: () => source.emit(makePetriItem(++seq, { event: "step.progress.recorded" }, {
+          run_id: "run-live", stage: { name: "agent" },
+        })),
+      };
+    }
+
+    test("refreshes bursts after 300ms and continuous progress at least once per second", () => {
+      jest.useFakeTimers();
+      const subscription = subscribe();
+      try {
+        subscription.progress();
+        subscription.progress();
+        jest.advanceTimersByTime(299);
+        expect(subscription.usageRefreshes()).toBe(0);
+        jest.advanceTimersByTime(1);
+        expect(subscription.usageRefreshes()).toBe(1);
+        // No new event means no polling or leftover maximum-wait flush.
+        jest.advanceTimersByTime(1_000);
+        expect(subscription.usageRefreshes()).toBe(1);
+
+        for (let batch = 0; batch < 2; batch += 1) {
+          for (let event = 0; event < 10; event += 1) {
+            subscription.progress();
+            expect(subscription.usageRefreshes()).toBe(batch + 1);
+            jest.advanceTimersByTime(100);
+          }
+          expect(subscription.usageRefreshes()).toBe(batch + 2);
+        }
+      } finally {
+        subscription.close();
+        jest.useRealTimers();
+      }
+    });
+
+    test("flushes terminal usage immediately without a later duplicate refresh", () => {
+      jest.useFakeTimers();
+      const subscription = subscribe();
+      try {
+        subscription.progress();
+        subscription.source.emit(makePlatformItem(2, {
+          kind: "run.lifecycle", transition: "succeeded", status: { kind: "succeeded" },
+        }, { run_id: "run-live" }));
+        expect(subscription.usageRefreshes()).toBe(1);
+        const count = subscription.keys.length;
+        jest.advanceTimersByTime(1_000);
+        expect(subscription.keys).toHaveLength(count);
+        expect(subscription.source.closed).toBe(mode === "fallback");
+      } finally {
+        subscription.close();
+        jest.useRealTimers();
+      }
+    });
+
+    test("unsubscribing discards both pending timers", () => {
+      jest.useFakeTimers();
+      const subscription = subscribe();
+      try {
+        subscription.progress();
+        subscription.cleanup();
+        jest.advanceTimersByTime(2_000);
+        expect(subscription.keys).toEqual([]);
+        expect(subscription.source.closed).toBe(true);
+      } finally {
+        subscription.close();
+        jest.useRealTimers();
+      }
+    });
+  });
 }
