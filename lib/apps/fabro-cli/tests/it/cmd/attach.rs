@@ -1441,6 +1441,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/stage",
               "meta": {
                 "label": "Start",
+                "permissions": "full",
                 "shape": "Mdiamond",
                 "kind": "start",
                 "classes": [],
@@ -1504,6 +1505,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/stage",
               "meta": {
                 "label": "Start",
+                "permissions": "full",
                 "shape": "Mdiamond",
                 "kind": "start",
                 "classes": [],
@@ -1593,6 +1595,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/stage",
               "meta": {
                 "label": "Start",
+                "permissions": "full",
                 "shape": "Mdiamond",
                 "kind": "start",
                 "classes": [],
@@ -1697,6 +1700,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/stage",
               "meta": {
                 "label": "Start",
+                "permissions": "full",
                 "shape": "Mdiamond",
                 "kind": "start",
                 "classes": [],
@@ -1759,6 +1763,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/stage",
               "meta": {
                 "label": "Start",
+                "permissions": "full",
                 "shape": "Mdiamond",
                 "kind": "start",
                 "classes": [],
@@ -1815,6 +1820,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/stage",
               "meta": {
                 "label": "Start",
+                "permissions": "full",
                 "shape": "Mdiamond",
                 "kind": "start",
                 "classes": [],
@@ -1882,6 +1888,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/stage",
               "meta": {
                 "label": "Start",
+                "permissions": "full",
                 "shape": "Mdiamond",
                 "kind": "start",
                 "classes": [],
@@ -1974,6 +1981,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/stage",
               "meta": {
                 "label": "Start",
+                "permissions": "full",
                 "shape": "Mdiamond",
                 "kind": "start",
                 "classes": [],
@@ -2054,6 +2062,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/stage",
               "meta": {
                 "label": "Start",
+                "permissions": "full",
                 "shape": "Mdiamond",
                 "kind": "start",
                 "classes": [],
@@ -2125,6 +2134,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/stage",
               "meta": {
                 "label": "Start",
+                "permissions": "full",
                 "shape": "Mdiamond",
                 "kind": "start",
                 "classes": [],
@@ -2184,6 +2194,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
                   "kind": "attractor/human",
                   "meta": {
                     "label": "Approve?",
+                    "permissions": "full",
                     "shape": "hexagon",
                     "kind": "human",
                     "classes": [],
@@ -2233,6 +2244,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/human",
               "meta": {
                 "label": "Approve?",
+                "permissions": "full",
                 "shape": "hexagon",
                 "kind": "human",
                 "classes": [],
@@ -2302,6 +2314,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/human",
               "meta": {
                 "label": "Approve?",
+                "permissions": "full",
                 "shape": "hexagon",
                 "kind": "human",
                 "classes": [],
@@ -2361,6 +2374,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/stage",
               "meta": {
                 "label": "Start",
+                "permissions": "full",
                 "shape": "Mdiamond",
                 "kind": "start",
                 "classes": [],
@@ -2405,6 +2419,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/human",
               "meta": {
                 "label": "Approve?",
+                "permissions": "full",
                 "shape": "hexagon",
                 "kind": "human",
                 "classes": [],
@@ -2454,6 +2469,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/stage",
               "meta": {
                 "label": "Start",
+                "permissions": "full",
                 "shape": "Mdiamond",
                 "kind": "start",
                 "classes": [],
@@ -2521,6 +2537,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/human",
               "meta": {
                 "label": "Approve?",
+                "permissions": "full",
                 "shape": "hexagon",
                 "kind": "human",
                 "classes": [],
@@ -2592,6 +2609,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/human",
               "meta": {
                 "label": "Approve?",
+                "permissions": "full",
                 "shape": "hexagon",
                 "kind": "human",
                 "classes": [],
@@ -2657,6 +2675,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/human",
               "meta": {
                 "label": "Approve?",
+                "permissions": "full",
                 "shape": "hexagon",
                 "kind": "human",
                 "classes": [],
@@ -2716,6 +2735,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/human",
               "meta": {
                 "label": "Approve?",
+                "permissions": "full",
                 "shape": "hexagon",
                 "kind": "human",
                 "classes": [],
@@ -2823,6 +2843,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/human",
               "meta": {
                 "label": "Approve?",
+                "permissions": "full",
                 "shape": "hexagon",
                 "kind": "human",
                 "classes": [],
@@ -2882,6 +2903,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "kind": "attractor/human",
               "meta": {
                 "label": "Approve?",
+                "permissions": "full",
                 "shape": "hexagon",
                 "kind": "human",
                 "classes": [],
