@@ -5911,35 +5911,30 @@ paths:
       operationId: testModel
       tags: [Models]
       summary: Test Model
-      description: Tests a model by sending a simple prompt and reporting pass/fail.
+      description: >-
+        Runs the lithos-llm probe and returns its versioned report, including the
+        canonical route, outcome, elapsed time and token usage. Unknown or
+        unavailable models and provider failures produce HTTP 200 reports with
+        a failed outcome. Invalid query options remain HTTP 400 errors.
       parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
-          description: The canonical model ID or an alias.
+          description: A model selector resolved by lithos-llm (canonical ID, alias or provider-qualified selector).
         - $ref: "#/components/parameters/ModelTestProviderParam"
         - $ref: "#/components/parameters/ModelTestModeParam"
         - $ref: "#/components/parameters/ModelTestReasoningEffortParam"
       responses:
         "200":
-          description: Test result
+          description: Probe report (passed, failed or incorrect)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ModelTestResult"
+                $ref: "#/components/schemas/ProbeReport"
         "400":
           description: Invalid test mode or reasoning effort
-          headers:
-            x-request-id:
-              $ref: "#/components/headers/XRequestId"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "404":
-          description: Model not found
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -8875,30 +8870,99 @@ components:
             key. Does NOT imply authentication or model requests will succeed;
             call `POST /models/{id}/test` to test usability.
 
-    ModelTestResult:
-      description: Result of testing a model in `basic` or `deep` mode.
+    ProbeReport:
+      description: >-
+        The lithos-llm version-1 probe report. The route is the canonical
+        provider/model selected by the probe, or null if selection failed.
+        Probe failures are findings in a successful HTTP response; API
+        authentication, malformed options and server setup failures remain HTTP errors.
+        Provider errors are redacted at the server disclosure boundary.
       type: object
-      required:
-        - model_id
-        - provider
-        - status
+      required: [version, route, outcome, latency_ms, usage]
       properties:
-        model_id:
+        version:
+          type: integer
+          enum: [1]
+        route:
+          type: [string, "null"]
+          pattern: '^[^/]+/.+$'
+        outcome:
+          $ref: "#/components/schemas/ProbeOutcome"
+        latency_ms:
+          type: integer
+          format: uint64
+          minimum: 0
+        usage:
+          $ref: "#/components/schemas/TokenCounts"
+
+    ProbeOutcome:
+      oneOf:
+        - $ref: "#/components/schemas/ProbePassed"
+        - $ref: "#/components/schemas/ProbeFailed"
+        - $ref: "#/components/schemas/ProbeIncorrect"
+      discriminator:
+        propertyName: status
+        mapping:
+          passed: "#/components/schemas/ProbePassed"
+          failed: "#/components/schemas/ProbeFailed"
+          incorrect: "#/components/schemas/ProbeIncorrect"
+
+    ProbePassed:
+      type: object
+      required: [status]
+      properties:
+        status:
           type: string
-          description: The canonical model ID that was tested.
-          example: "claude-opus-4-6"
+          enum: [passed]
+
+    ProbeFailed:
+      type: object
+      required: [status, error]
+      properties:
+        status:
+          type: string
+          enum: [failed]
+        error:
+          $ref: "#/components/schemas/LlmErrorData"
+
+    ProbeIncorrect:
+      type: object
+      required: [status, detail]
+      properties:
+        status:
+          type: string
+          enum: [incorrect]
+        detail:
+          type: string
+
+    LlmErrorData:
+      description: Structured lithos-llm failure, subject to the server's disclosure policy.
+      type: object
+      required: [kind, message, retry]
+      properties:
+        kind:
+          $ref: "#/components/schemas/LlmErrorKind"
+        message:
+          type: string
         provider:
           $ref: "#/components/schemas/ProviderId"
         status:
+          type: integer
+          minimum: 0
+          maximum: 65535
+        provider_code:
           type: string
-          enum:
-            - ok
-            - error
-            - skip
-          description: Whether the model responded successfully, failed, or was skipped because its provider is not configured.
-        error_message:
-          type: ["string", "null"]
-          description: Error details when status is "error".
+        retry:
+          $ref: "#/components/schemas/LlmRetryClassification"
+        raw_data:
+          description: Provider response data; omitted by the model-test endpoint.
+        provider_retry_after_millis:
+          type: integer
+          format: uint64
+          minimum: 0
+        source_message:
+          type: string
+          description: Internal source detail; omitted by the model-test endpoint.
 
     ModelTestMode:
       description: Single-model test mode.

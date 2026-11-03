@@ -606,6 +606,8 @@ fn main() {
             &[],
         ),
         ("TokenCounts", "lithos_llm::types::TokenCounts", &[]),
+        ("ProbeReport", "lithos_llm::client::ProbeReport", &[]),
+        ("LlmErrorData", "lithos_llm::types::ErrorData", &[]),
         ("Usage", "lithos_llm::types::Usage", &[]),
         ("UsageModelRef", "fabro_types::ModelRef", &[]),
         ("Speed", "lithos_llm::types::Speed", &[]),

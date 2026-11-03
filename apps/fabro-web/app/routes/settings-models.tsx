@@ -310,22 +310,19 @@ function ModelsSection({ providers }: { providers: Provider[] }) {
             modelsApi.testModel(...modelOfferingTestArgs(offering)),
           );
           if (
-            result.provider !== offering.provider ||
-            result.model_id !== offering.id
+            result.route !== null &&
+            result.route !== `${offering.provider}/${offering.id}`
           ) {
             outcome = {
-              phase:   "error",
-              message: `Server tested unexpected offering ${result.provider}/${result.model_id}`,
+              phase: "error",
+              message: `Server tested unexpected offering ${result.route}`,
             };
-          } else if (result.status === "ok") {
+          } else if (result.outcome.status === "passed") {
             outcome = { phase: "ok" };
-          } else if (result.status === "error") {
-            outcome = {
-              phase:   "error",
-              message: result.error_message ?? "Failed",
-            };
+          } else if (result.outcome.status === "failed") {
+            outcome = { phase: "error", message: result.outcome.error.message };
           } else {
-            outcome = { phase: "error", message: "provider not configured" };
+            outcome = { phase: "error", message: result.outcome.detail };
           }
         } catch (err) {
           outcome = {
