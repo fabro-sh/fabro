@@ -20,7 +20,8 @@
 
 export const RunRunnableSource = {
     START_REQUESTED: 'start_requested',
-    APPROVED: 'approved'
+    APPROVED: 'approved',
+    AUTO_APPROVED: 'auto_approved'
 } as const;
 
 export type RunRunnableSource = typeof RunRunnableSource[keyof typeof RunRunnableSource];

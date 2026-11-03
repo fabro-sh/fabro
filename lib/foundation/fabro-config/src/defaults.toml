@@ -36,6 +36,9 @@ url = "http://localhost:3000"
 [server.scheduler]
 max_concurrent_runs = 5
 
+[server.approvals]
+allow_child_auto_approval = false
+
 [server.artifacts]
 provider = "local"
 prefix = ""

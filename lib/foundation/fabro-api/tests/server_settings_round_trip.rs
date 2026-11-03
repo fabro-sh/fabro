@@ -2,7 +2,7 @@ use std::any::{TypeId, type_name};
 
 use fabro_api::types::{
     LogDestination as ApiLogDestination, ObjectStoreSettings as ApiObjectStoreSettings,
-    ServerNamespace as ApiServerNamespace,
+    ServerApprovalsSettings as ApiServerApprovalsSettings, ServerNamespace as ApiServerNamespace,
     ServerSandboxProviderSettings as ApiServerSandboxProviderSettings,
     ServerSandboxProvidersSettings as ApiServerSandboxProvidersSettings,
     ServerSandboxSettings as ApiServerSandboxSettings, ServerSettings as ApiServerSettings,
@@ -11,7 +11,7 @@ use fabro_config::ServerSettingsBuilder;
 use fabro_types::ServerSettings;
 use fabro_types::settings::ServerNamespace;
 use fabro_types::settings::server::{
-    LogDestination, ObjectStoreSettings, ServerSandboxProviderSettings,
+    LogDestination, ObjectStoreSettings, ServerApprovalsSettings, ServerSandboxProviderSettings,
     ServerSandboxProvidersSettings, ServerSandboxSettings,
 };
 
@@ -24,6 +24,7 @@ fn server_settings_family_reuses_domain_types() {
     assert_same_type::<ApiServerSandboxSettings, ServerSandboxSettings>();
     assert_same_type::<ApiServerSandboxProvidersSettings, ServerSandboxProvidersSettings>();
     assert_same_type::<ApiServerSandboxProviderSettings, ServerSandboxProviderSettings>();
+    assert_same_type::<ApiServerApprovalsSettings, ServerApprovalsSettings>();
 }
 
 #[test]
@@ -76,6 +77,10 @@ strategy = "tailscale_funnel"
     assert_eq!(json["server"]["listen"]["address"], "127.0.0.1:32276");
     assert_eq!(json["server"]["storage"]["root"], "/srv/fabro");
     assert_eq!(json["server"]["logging"]["destination"], "stdout");
+    assert_eq!(
+        json["server"]["approvals"]["allow_child_auto_approval"],
+        false
+    );
     assert_eq!(
         json["server"]["sandbox"]["providers"]["local"]["enabled"],
         true

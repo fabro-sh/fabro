@@ -36,6 +36,9 @@ import type { RunBranchSettings } from './run-branch-settings';
 import type { RunCheckpointSettings } from './run-checkpoint-settings';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { RunChildrenSettings } from './run-children-settings';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { RunCloneSettings } from './run-clone-settings';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -85,4 +88,5 @@ export interface RunNamespace {
     'pull_request': PullRequestSettings | null;
     'artifacts': ArtifactsSettings;
     'integrations': RunIntegrationsSettings;
+    'children': RunChildrenSettings;
 }

@@ -60,6 +60,21 @@ pub struct RunLayer {
     pub artifacts:     Option<RunArtifactsLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub integrations:  Option<RunIntegrationsLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub children:      Option<RunChildrenLayer>,
+}
+
+/// `[run.children]` — how this workflow treats the child runs its workers
+/// start. Belongs to the parent workflow: it governs children dispatched by
+/// that workflow, never the run's own agent interactions
+/// (`[run.execution] approval`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[serde(deny_unknown_fields)]
+pub struct RunChildrenLayer {
+    /// Workflow half of the child auto-approval opt-in; also requires the
+    /// server's `[server.approvals] allow_child_auto_approval`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_approve: Option<bool>,
 }
 
 /// `[run.integrations]` — run-level integration knobs.

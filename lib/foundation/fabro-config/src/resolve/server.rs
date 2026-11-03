@@ -5,11 +5,11 @@ use fabro_types::SandboxProviderKind;
 use fabro_types::settings::server::{
     GithubIntegrationSettings, GithubIntegrationStrategy, IntegrationWebhooksSettings,
     ObjectStoreProvider, ObjectStoreSettings, SandboxPluginSettings, ServerApiSettings,
-    ServerArtifactsSettings, ServerAuthGithubSettings, ServerAuthMethod, ServerAuthSettings,
-    ServerIntegrationsSettings, ServerListenSettings, ServerLoggingSettings, ServerNamespace,
-    ServerSandboxProviderSettings, ServerSandboxProvidersSettings, ServerSandboxSettings,
-    ServerSchedulerSettings, ServerStorageSettings, ServerWebSettings, SlackIntegrationSettings,
-    WebhookStrategy,
+    ServerApprovalsSettings, ServerArtifactsSettings, ServerAuthGithubSettings, ServerAuthMethod,
+    ServerAuthSettings, ServerIntegrationsSettings, ServerListenSettings, ServerLoggingSettings,
+    ServerNamespace, ServerSandboxProviderSettings, ServerSandboxProvidersSettings,
+    ServerSandboxSettings, ServerSchedulerSettings, ServerStorageSettings, ServerWebSettings,
+    SlackIntegrationSettings, WebhookStrategy,
 };
 use fabro_util::Home;
 
@@ -49,6 +49,13 @@ pub fn resolve_server(layer: &ServerLayer, errors: &mut Vec<ResolveError>) -> Se
                 .as_ref()
                 .and_then(|scheduler| scheduler.max_concurrent_runs)
                 .expect("defaults.toml should provide server.scheduler.max_concurrent_runs"),
+        },
+        approvals: ServerApprovalsSettings {
+            allow_child_auto_approval: layer
+                .approvals
+                .as_ref()
+                .and_then(|approvals| approvals.allow_child_auto_approval)
+                .expect("defaults.toml should provide server.approvals.allow_child_auto_approval"),
         },
         logging: ServerLoggingSettings {
             level:       layer

@@ -600,7 +600,8 @@ mod tests {
     }
 }
 
-/// What made a run runnable: its start request, or its approval.
+/// What made a run runnable: its start request, its approval, or a policy
+/// that approved its child start.
 #[derive(
     Debug,
     Clone,
@@ -618,4 +619,5 @@ mod tests {
 pub enum RunRunnableSource {
     StartRequested,
     Approved,
+    AutoApproved,
 }

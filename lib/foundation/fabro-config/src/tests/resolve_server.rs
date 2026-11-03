@@ -681,3 +681,27 @@ methods = ["dev-token", "github"]
     assert!(dev_token_auth_enabled(&both));
     assert!(!dev_token_auth_enabled(&SettingsLayer::default()));
 }
+
+#[test]
+fn child_auto_approval_is_disabled_by_default() {
+    let settings = resolve_server(&empty_settings_with_auth_methods());
+
+    assert!(!settings.approvals.allow_child_auto_approval);
+}
+
+#[test]
+fn child_auto_approval_resolves_from_server_config() {
+    let layer = parse(
+        r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.approvals]
+allow_child_auto_approval = true
+"#,
+    );
+
+    assert!(resolve_server(&layer).approvals.allow_child_auto_approval);
+}

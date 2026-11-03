@@ -202,6 +202,9 @@ fn inspect_resolves_selector_via_server_endpoint() {
                 "github": {
                   "permissions": {}
                 }
+              },
+              "children": {
+                "auto_approve": false
               }
             }
           },

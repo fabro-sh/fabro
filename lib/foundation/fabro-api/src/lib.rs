@@ -20,16 +20,17 @@ pub mod types {
     };
     pub use fabro_environment::Environment;
     pub use fabro_types::settings::run::{
-        McpHttpProtocol, RunIntegrationsGithubSettings, RunIntegrationsSettings, RunModelControls,
-        RunModelSettings,
+        McpHttpProtocol, RunChildrenSettings, RunIntegrationsGithubSettings,
+        RunIntegrationsSettings, RunModelControls, RunModelSettings,
     };
     pub use fabro_types::settings::server::{
         GithubIntegrationSettings, GithubIntegrationStrategy, IntegrationWebhooksSettings,
-        LogDestination, ObjectStoreSettings, ServerApiSettings, ServerArtifactsSettings,
-        ServerAuthGithubSettings, ServerAuthMethod, ServerAuthSettings, ServerIntegrationsSettings,
-        ServerListenSettings, ServerLoggingSettings, ServerSandboxProviderSettings,
-        ServerSandboxProvidersSettings, ServerSandboxSettings, ServerSchedulerSettings,
-        ServerStorageSettings, ServerWebSettings, SlackIntegrationSettings, WebhookStrategy,
+        LogDestination, ObjectStoreSettings, ServerApiSettings, ServerApprovalsSettings,
+        ServerArtifactsSettings, ServerAuthGithubSettings, ServerAuthMethod, ServerAuthSettings,
+        ServerIntegrationsSettings, ServerListenSettings, ServerLoggingSettings,
+        ServerSandboxProviderSettings, ServerSandboxProvidersSettings, ServerSandboxSettings,
+        ServerSchedulerSettings, ServerStorageSettings, ServerWebSettings,
+        SlackIntegrationSettings, WebhookStrategy,
     };
     pub use fabro_types::settings::{McpTransport, ServerNamespace};
     pub use fabro_types::status::{

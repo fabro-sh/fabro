@@ -18,6 +18,9 @@
 import type { ServerApiSettings } from './server-api-settings';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { ServerApprovalsSettings } from './server-approvals-settings';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { ServerArtifactsSettings } from './server-artifacts-settings';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -53,6 +56,7 @@ export interface ServerNamespace {
     'storage': ServerStorageSettings;
     'artifacts': ServerArtifactsSettings;
     'scheduler': ServerSchedulerSettings;
+    'approvals': ServerApprovalsSettings;
     'logging': ServerLoggingSettings;
     'integrations': ServerIntegrationsSettings;
 }

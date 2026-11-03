@@ -121,7 +121,34 @@ Child run creation and child run execution are separate steps:
 4. **Schedule** - after approval, the child becomes `runnable` and the scheduler starts it when capacity is available.
 5. **Execute** - the child runs its own workflow and writes its own events, checkpoints, artifacts, and outputs.
 
-The approval step prevents a workflow agent from recursively launching executing runs without an operator checkpoint. Approve or deny pending child runs from the web UI or through the run lifecycle API.
+By default, the approval step keeps a workflow agent from recursively launching executing runs without an operator checkpoint. Approve or deny pending child runs from the web UI or through the run lifecycle API.
+
+### Auto-approval
+
+A parent workflow can opt its child starts out of the operator checkpoint with two keys that must both be enabled:
+
+```toml title=".fabro/workflows/dispatcher/workflow.toml"
+[run.children]
+auto_approve = true
+```
+
+```toml title="settings.toml (server)"
+[server.approvals]
+allow_child_auto_approval = true
+```
+
+- `[run.children] auto_approve` belongs to the **parent** workflow: it governs children dispatched by that workflow. It is read from the registered workflow configuration (and the server's `[run]` defaults below it), never from run inputs or `args`.
+- `[server.approvals] allow_child_auto_approval` is the server-owned half, default `false`.
+
+When both are enabled, a child start records an `auto_approved` lifecycle transition and becomes `runnable` in one pass: its approval state reads `approved` with a decision timestamp, and it never projects a transient `pending`. Any other combination keeps the operator checkpoint.
+
+The policy is evaluated when the start request arrives. Turning either key off only affects future starts; already-pending children stay pending and already-runnable children are not revoked.
+
+A worker start of a run that is not its own child always requires operator approval, whatever the policy says: a run-management worker can request the start, but never past the approval predicate.
+
+<Note>
+`args.auto_approve` on `fabro_run_create` is a different knob. It maps to the child run's own `[run.execution] approval` setting and controls the child's *agent-interaction* approval posture, not its lifecycle start. Setting `args.auto_approve` alone never skips the child-start checkpoint.
+</Note>
 
 ## Supervise children
 
