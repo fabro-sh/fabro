@@ -10,6 +10,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use fabro_test::{fabro_snapshot, test_context};
 use httpmock::MockServer;
+use lithos_llm::types::TokenCounts;
 use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, oneshot};
 
@@ -129,9 +130,11 @@ fn assert_model_test_forwards(cli_args: &[&str], expected_query: &[(&str, &str)]
         then.status(200)
             .header("Content-Type", "application/json")
             .json_body(serde_json::json!({
-                "model_id": "test-model",
-                "provider": "anthropic",
-                "status": "ok"
+                "version": 1,
+                "route": "anthropic/test-model",
+                "outcome": {"status": "passed"},
+                "latency_ms": 12,
+                "usage": TokenCounts::default()
             }));
     });
 
@@ -146,7 +149,7 @@ fn assert_model_test_forwards(cli_args: &[&str], expected_query: &[(&str, &str)]
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    list.assert();
+    list.assert_calls(1);
     test.assert();
 }
 
@@ -164,38 +167,197 @@ fn model_test_deep_remains_an_alias_for_tools() {
 }
 
 #[test]
-fn model_test_unknown_model_errors() {
+fn single_model_json_reports_canonical_alias_without_listing() {
     let context = test_context!();
+    let server = MockServer::start();
+    context.set_http_target(&server.base_url());
+    let listing = server.mock(|when, then| {
+        when.method("GET").path("/api/v1/models");
+        then.status(500);
+    });
+    let report = serde_json::json!({
+        "version": 1,
+        "route": "anthropic/claude-sonnet-4.6",
+        "outcome": {"status": "passed"},
+        "latency_ms": 12,
+        "usage": TokenCounts::default(),
+    });
+    let probe = server.mock(|when, then| {
+        when.method("POST")
+            .path("/api/v1/models/claude-sonnet-4-6/test")
+            .query_param("provider", "anthropic");
+        then.status(200).json_body(report.clone());
+    });
     let mut cmd = context.command();
-    cmd.args(["model", "test", "--model", "nonexistent-model-xyz"]);
-
-    fabro_snapshot!(context.filters(), cmd, @"
-    success: false
-    exit_code: 1
-    ----- stdout -----
-    ----- stderr -----
-    Testing nonexistent-model-xyz... done
-      × Unknown model: nonexistent-model-xyz
-    ");
+    cmd.args([
+        "model",
+        "test",
+        "--model",
+        "claude-sonnet-4-6",
+        "--provider",
+        "anthropic",
+        "--json",
+    ]);
+    let output = cmd
+        .assert()
+        .success()
+        .stderr("")
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&output).unwrap(),
+        report
+    );
+    listing.assert_calls(0);
+    probe.assert_calls(1);
 }
 
 #[test]
-fn single_model_skip_exits_nonzero() {
+fn single_model_text_restores_the_metadata_table() {
     let context = test_context!();
+    let server = MockServer::start();
+    context.set_http_target(&server.base_url());
+    let mut model = model_json("test-model", "anthropic", false);
+    model["aliases"] = serde_json::json!(["tm"]);
+    let listing = server.mock(|when, then| {
+        when.method("GET")
+            .path("/api/v1/models")
+            .query_param("provider", "anthropic")
+            .query_param("query", "test-model");
+        then.status(200).json_body(serde_json::json!({
+            "data": [model_json("test-model", "other-provider", true), model],
+            "meta": {"has_more": false}
+        }));
+    });
+    let probe = server.mock(|when, then| {
+        when.method("POST").path("/api/v1/models/tm/test");
+        then.status(200).json_body(serde_json::json!({
+            "version": 1, "route": "anthropic/test-model", "outcome": {"status": "passed"},
+            "latency_ms": 12, "usage": TokenCounts::default()
+        }));
+    });
     let mut cmd = context.command();
-    cmd.args(["model", "test", "--model", "gemini-3.1-pro-preview"]);
-    remove_provider_env(&mut cmd);
+    cmd.args(["model", "test", "--model", "tm"]);
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    MODEL       PROVIDER   ALIASES  CONTEXT         COST     SPEED  RESULT 
+     test-model  anthropic  tm          131k  $1.0 / $2.0  42 tok/s  ok
+    ----- stderr -----
+    Testing tm... done
+    ");
+    listing.assert_calls(1);
+    probe.assert_calls(1);
+}
 
+#[test]
+fn single_model_text_preserves_success_when_metadata_is_missing_or_unavailable() {
+    for (status, models) in [
+        (500, vec![]),
+        (200, vec![]),
+        (200, vec![model_json("test-model", "other-provider", true)]),
+    ] {
+        let context = test_context!();
+        let server = MockServer::start();
+        context.set_http_target(&server.base_url());
+        let listing = server.mock(|when, then| {
+            when.method("GET").path("/api/v1/models");
+            then.status(status).json_body(serde_json::json!({
+                "data": models, "meta": {"has_more": false}
+            }));
+        });
+        let probe = server.mock(|when, then| {
+            when.method("POST").path("/api/v1/models/tm/test");
+            then.status(200).json_body(serde_json::json!({
+                "version": 1, "route": "anthropic/test-model", "outcome": {"status": "passed"},
+                "latency_ms": 12, "usage": TokenCounts::default()
+            }));
+        });
+        let mut cmd = context.command();
+        cmd.args(["model", "test", "--model", "tm"]);
+        insta::allow_duplicates! {
+            fabro_snapshot!(context.filters(), cmd, @"
+        success: true
+        exit_code: 0
+        ----- stdout -----
+        MODEL       PROVIDER   ALIASES  CONTEXT  COST  SPEED  RESULT 
+         test-model  anthropic  —              —     —      —  ok
+        ----- stderr -----
+        Testing tm... done
+        ");
+        }
+        listing.assert_calls(1);
+        probe.assert_calls(1);
+    }
+}
+
+#[test]
+fn single_model_text_preserves_failure_when_metadata_is_unavailable() {
+    let context = test_context!();
+    let server = MockServer::start();
+    context.set_http_target(&server.base_url());
+    let listing = server.mock(|when, then| {
+        when.method("GET").path("/api/v1/models");
+        then.status(500);
+    });
+    let probe = server.mock(|when, then| {
+        when.method("POST")
+            .path("/api/v1/models/unknown-model/test");
+        then.status(200).json_body(serde_json::json!({
+            "version": 1, "route": null,
+            "outcome": {"status": "failed", "error": {
+                "kind": "model_selection", "message": "unknown model", "retry": {"type": "never"}
+            }},
+            "latency_ms": 0, "usage": TokenCounts::default()
+        }));
+    });
+    let mut cmd = context.command();
+    cmd.args(["model", "test", "--model", "unknown-model"]);
     fabro_snapshot!(context.filters(), cmd, @"
     success: false
     exit_code: 1
     ----- stdout -----
-    MODEL                   PROVIDER  ALIASES     CONTEXT          COST     SPEED  RESULT         
-     gemini-3.1-pro-preview  gemini    gemini-pro       1m  $2.0 / $12.0  85 tok/s  not configured
+    MODEL          PROVIDER  ALIASES  CONTEXT  COST  SPEED  RESULT                                
+     unknown-model  —         —              —     —      —  error: model_selection: unknown model
     ----- stderr -----
-    Testing gemini-3.1-pro-preview... done
+    Testing unknown-model... done
       × 1 model(s) failed
     ");
+    listing.assert_calls(1);
+    probe.assert_calls(1);
+}
+
+#[test]
+fn single_model_preserves_failed_and_incorrect_findings() {
+    for outcome in [
+        serde_json::json!({"status": "failed", "error": {"kind": "model_selection", "message": "unknown model", "retry": {"type": "never"}}}),
+        serde_json::json!({"status": "incorrect", "detail": "model did not call the tool"}),
+    ] {
+        let context = test_context!();
+        let server = MockServer::start();
+        context.set_http_target(&server.base_url());
+        let report = serde_json::json!({
+            "version": 1,
+            "route": null,
+            "outcome": outcome,
+            "latency_ms": 0,
+            "usage": TokenCounts::default(),
+        });
+        let probe = server.mock(|when, then| {
+            when.method("POST").path("/api/v1/models/test-model/test");
+            then.status(200).json_body(report.clone());
+        });
+        let mut cmd = context.command();
+        cmd.args(["model", "test", "--model", "test-model", "--json"]);
+        let output = cmd.assert().failure().get_output().stdout.clone();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&output).unwrap(),
+            report
+        );
+        probe.assert_calls(1);
+    }
 }
 
 #[test]
@@ -225,34 +387,6 @@ fn bulk_skip_exits_zero_and_prints_summary() {
 }
 
 #[test]
-fn json_output_includes_skipped_models() {
-    let context = test_context!();
-    let mut cmd = context.command();
-    cmd.args([
-        "model",
-        "test",
-        "--model",
-        "gemini-3.1-pro-preview",
-        "--json",
-    ]);
-    remove_provider_env(&mut cmd);
-
-    let output = cmd.output().expect("failed to execute model test");
-    assert!(
-        !output.status.success(),
-        "expected single-model skip to exit non-zero:\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let json: serde_json::Value = serde_json::from_str(&stdout).expect("invalid JSON output");
-
-    assert_eq!(json["failures"], 1);
-    assert_eq!(json["skipped"], 1);
-    assert_eq!(json["results"][0]["result"], "skip");
-}
-
-#[test]
 fn model_test_does_not_announce_unconfigured() {
     let context = test_context!();
     let server = MockServer::start();
@@ -267,9 +401,11 @@ fn model_test_does_not_announce_unconfigured() {
         then.status(200)
             .header("Content-Type", "application/json")
             .json_body(serde_json::json!({
-                "model_id": "claude-opus-4-7",
-                "provider": "anthropic",
-                "status": "ok"
+                "version": 1,
+                "route": "anthropic/claude-opus-4-7",
+                "outcome": {"status": "passed"},
+                "latency_ms": 12,
+                "usage": TokenCounts::default()
             }));
     });
     let unconfigured_test = server.mock(|when, then| {
@@ -317,9 +453,11 @@ fn model_test_skipped_footer_sources_from_listing() {
         then.status(200)
             .header("Content-Type", "application/json")
             .json_body(serde_json::json!({
-                "model_id": "claude-opus-4-7",
-                "provider": "anthropic",
-                "status": "ok"
+                "version": 1,
+                "route": "anthropic/claude-opus-4-7",
+                "outcome": {"status": "passed"},
+                "latency_ms": 12,
+                "usage": TokenCounts::default()
             }));
     });
 
@@ -349,9 +487,11 @@ fn model_test_post_list_race_is_a_failure() {
         then.status(200)
             .header("Content-Type", "application/json")
             .json_body(serde_json::json!({
-                "model_id": "claude-opus-4-7",
-                "provider": "anthropic",
-                "status": "skip"
+                "version": 1,
+                "route": "anthropic/claude-opus-4-7",
+                "outcome": {"status": "failed", "error": {"kind": "model_selection", "message": "provider unavailable", "retry": {"type": "never"}}},
+                "latency_ms": 12,
+                "usage": TokenCounts::default()
             }));
     });
 
@@ -367,7 +507,7 @@ fn model_test_post_list_race_is_a_failure() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stdout.contains("provider became unconfigured after listing"));
+    assert!(stdout.contains("model_selection: provider unavailable"));
     assert!(stderr.contains("1 model(s) failed"));
     assert!(!stderr.contains("Skipped"));
 }
@@ -391,9 +531,11 @@ fn model_test_json_partitions_skip_and_fail() {
         then.status(200)
             .header("Content-Type", "application/json")
             .json_body(serde_json::json!({
-                "model_id": "claude-opus-4-7",
-                "provider": "anthropic",
-                "status": "skip"
+                "version": 1,
+                "route": "anthropic/claude-opus-4-7",
+                "outcome": {"status": "failed", "error": {"kind": "model_selection", "message": "provider unavailable", "retry": {"type": "never"}}},
+                "latency_ms": 12,
+                "usage": TokenCounts::default()
             }));
     });
 
@@ -420,8 +562,13 @@ fn model_test_json_partitions_skip_and_fail() {
     assert_eq!(json["results"][1]["result"], "fail");
     assert_eq!(
         json["results"][1]["error"],
-        "provider became unconfigured after listing"
+        "model_selection: provider unavailable"
     );
+    assert_eq!(
+        json["results"][1]["report"]["outcome"]["error"]["kind"],
+        "model_selection"
+    );
+    assert!(json["results"][0].get("report").is_none());
 }
 
 #[derive(Clone)]
@@ -598,9 +745,11 @@ async fn concurrent_test_model(
     state.gate.exit();
 
     Json(serde_json::json!({
-        "model_id": id,
-        "provider": "anthropic",
-        "status": "ok"
+        "version": 1,
+        "route": format!("anthropic/{id}"),
+        "outcome": {"status": "passed"},
+        "latency_ms": 12,
+        "usage": TokenCounts::default()
     }))
 }
 

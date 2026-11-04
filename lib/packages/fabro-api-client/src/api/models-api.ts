@@ -26,9 +26,9 @@ import type { ErrorResponse } from '../models';
 // @ts-ignore
 import type { ModelTestMode } from '../models';
 // @ts-ignore
-import type { ModelTestResult } from '../models';
-// @ts-ignore
 import type { PaginatedModelList } from '../models';
+// @ts-ignore
+import type { ProbeReport } from '../models';
 // @ts-ignore
 import type { ProviderCredentialTestRequest } from '../models';
 // @ts-ignore
@@ -137,9 +137,9 @@ export const ModelsApiAxiosParamCreator = function (configuration?: Configuratio
             };
         },
         /**
-         * Tests a model by sending a simple prompt and reporting pass/fail.
+         * Runs the lithos-llm probe and returns its versioned report, including the canonical route, outcome, elapsed time and token usage. Unknown or unavailable models and provider failures produce HTTP 200 reports with a failed outcome. Invalid query options remain HTTP 400 errors.
          * @summary Test Model
-         * @param {string} id The canonical model ID or an alias.
+         * @param {string} id A model selector resolved by lithos-llm (canonical ID, alias or provider-qualified selector).
          * @param {string} [provider] Pin the test to this provider\&#39;s offering. When omitted, the server selects among ready providers by catalog priority.
          * @param {ModelTestMode} [mode] Test mode for the single-model test endpoint. Defaults to &#x60;basic&#x60;.
          * @param {ReasoningEffort} [reasoningEffort] Optional native reasoning-effort level for the model test.
@@ -310,16 +310,16 @@ export const ModelsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Tests a model by sending a simple prompt and reporting pass/fail.
+         * Runs the lithos-llm probe and returns its versioned report, including the canonical route, outcome, elapsed time and token usage. Unknown or unavailable models and provider failures produce HTTP 200 reports with a failed outcome. Invalid query options remain HTTP 400 errors.
          * @summary Test Model
-         * @param {string} id The canonical model ID or an alias.
+         * @param {string} id A model selector resolved by lithos-llm (canonical ID, alias or provider-qualified selector).
          * @param {string} [provider] Pin the test to this provider\&#39;s offering. When omitted, the server selects among ready providers by catalog priority.
          * @param {ModelTestMode} [mode] Test mode for the single-model test endpoint. Defaults to &#x60;basic&#x60;.
          * @param {ReasoningEffort} [reasoningEffort] Optional native reasoning-effort level for the model test.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async testModel(id: string, provider?: string, mode?: ModelTestMode, reasoningEffort?: ReasoningEffort, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ModelTestResult>> {
+        async testModel(id: string, provider?: string, mode?: ModelTestMode, reasoningEffort?: ReasoningEffort, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ProbeReport>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.testModel(id, provider, mode, reasoningEffort, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ModelsApi.testModel']?.[localVarOperationServerIndex]?.url;
@@ -383,16 +383,16 @@ export const ModelsApiFactory = function (configuration?: Configuration, basePat
             return localVarFp.listProviders(options).then((request) => request(axios, basePath));
         },
         /**
-         * Tests a model by sending a simple prompt and reporting pass/fail.
+         * Runs the lithos-llm probe and returns its versioned report, including the canonical route, outcome, elapsed time and token usage. Unknown or unavailable models and provider failures produce HTTP 200 reports with a failed outcome. Invalid query options remain HTTP 400 errors.
          * @summary Test Model
-         * @param {string} id The canonical model ID or an alias.
+         * @param {string} id A model selector resolved by lithos-llm (canonical ID, alias or provider-qualified selector).
          * @param {string} [provider] Pin the test to this provider\&#39;s offering. When omitted, the server selects among ready providers by catalog priority.
          * @param {ModelTestMode} [mode] Test mode for the single-model test endpoint. Defaults to &#x60;basic&#x60;.
          * @param {ReasoningEffort} [reasoningEffort] Optional native reasoning-effort level for the model test.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        testModel(id: string, provider?: string, mode?: ModelTestMode, reasoningEffort?: ReasoningEffort, options?: RawAxiosRequestConfig): AxiosPromise<ModelTestResult> {
+        testModel(id: string, provider?: string, mode?: ModelTestMode, reasoningEffort?: ReasoningEffort, options?: RawAxiosRequestConfig): AxiosPromise<ProbeReport> {
             return localVarFp.testModel(id, provider, mode, reasoningEffort, options).then((request) => request(axios, basePath));
         },
         /**
@@ -447,9 +447,9 @@ export class ModelsApi extends BaseAPI {
     }
 
     /**
-     * Tests a model by sending a simple prompt and reporting pass/fail.
+     * Runs the lithos-llm probe and returns its versioned report, including the canonical route, outcome, elapsed time and token usage. Unknown or unavailable models and provider failures produce HTTP 200 reports with a failed outcome. Invalid query options remain HTTP 400 errors.
      * @summary Test Model
-     * @param {string} id The canonical model ID or an alias.
+     * @param {string} id A model selector resolved by lithos-llm (canonical ID, alias or provider-qualified selector).
      * @param {string} [provider] Pin the test to this provider\&#39;s offering. When omitted, the server selects among ready providers by catalog priority.
      * @param {ModelTestMode} [mode] Test mode for the single-model test endpoint. Defaults to &#x60;basic&#x60;.
      * @param {ReasoningEffort} [reasoningEffort] Optional native reasoning-effort level for the model test.

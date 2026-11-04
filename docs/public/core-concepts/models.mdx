@@ -344,3 +344,24 @@ fabro model test --provider openai
 ```
 
 This is useful for confirming connectivity after setup or when adding a new provider key.
+
+With `--model`, Fabro sends the selector directly to the server's lithos-llm
+probe. Normal output retains the model table: model, provider, aliases, context,
+cost, speed, and result. Catalog metadata is fetched only for presentation;
+unavailable or missing metadata appears as `—` and does not change the probe's
+result. Add `--tools` to check a multi-turn tool exchange. Timing and token usage
+remain available in `--json`, which does not fetch catalog metadata.
+
+`fabro model test --model <selector> --json` returns the version-1 lithos-llm
+probe report directly: `version`, `route`, `outcome`, `latency_ms`, and `usage`.
+The outcome is `passed`, `failed` (with a structured `error`), or `incorrect`
+(with a `detail` explaining the model's behavior). A selection failure has a
+null route. Failed and incorrect probes print their report and exit nonzero.
+This replaces the previous single-model JSON summary and `ok/error/skip` API
+result.
+
+Without `--model`, Fabro lists models and tests configured offerings with the
+requested concurrency. Bulk JSON retains `total`, `failures`, `skipped`, and
+`results`; each completed probe's row also contains its full `report`.
+Unconfigured offerings are skipped before probing. An offering that becomes
+unavailable after listing is a failed probe.

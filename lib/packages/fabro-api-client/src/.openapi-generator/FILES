@@ -214,6 +214,7 @@ models/interview-option.ts
 models/interview-provider-settings.ts
 models/interview-question-record.ts
 models/link-run-pull-request-request.ts
+models/llm-error-data.ts
 models/llm-output-kind.ts
 models/llm-retry-classification-after.ts
 models/llm-retry-classification-never.ts
@@ -252,7 +253,6 @@ models/model-handle.ts
 models/model-limits.ts
 models/model-reference.ts
 models/model-test-mode.ts
-models/model-test-result.ts
 models/model-usage.ts
 models/model.ts
 models/none-run-target.ts
@@ -321,6 +321,11 @@ models/principal-user.ts
 models/principal-webhook.ts
 models/principal-worker.ts
 models/principal.ts
+models/probe-failed.ts
+models/probe-incorrect.ts
+models/probe-outcome.ts
+models/probe-passed.ts
+models/probe-report.ts
 models/project-namespace.ts
 models/provider-credential-test-request.ts
 models/provider-credential-test-response.ts

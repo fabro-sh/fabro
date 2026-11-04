@@ -319,7 +319,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/fabro.rb versions.json
-          git diff --cached --quiet || (git commit -m "Update fabro to ${TAG_NAME}" && git push)
+          if ! git diff --cached --quiet; then
+            git commit -m "Update fabro to ${TAG_NAME}"
+            bash ../installer/push-homebrew.sh
+          fi
 
   update-homebrew-nightly:
     name: Update Homebrew Nightly Formula
@@ -368,4 +371,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/fabro-nightly.rb versions.json
-          git diff --cached --quiet || (git commit -m "Update fabro-nightly to ${TAG_NAME}" && git push)
+          if ! git diff --cached --quiet; then
+            git commit -m "Update fabro-nightly to ${TAG_NAME}"
+            bash ../installer/push-homebrew.sh
+          fi

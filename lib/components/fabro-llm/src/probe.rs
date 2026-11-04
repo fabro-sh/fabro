@@ -4,10 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use fabro_auth::ApiKeyCredentialSource;
-use fabro_types::ModelTestMode;
 use lithos_llm::catalog::{Catalog, ProviderId};
 use lithos_llm::client::{Client, ProbeOptions, ProbeOutcome};
-use lithos_llm::types::ReasoningEffort;
 use strum::IntoStaticStr;
 
 use crate::client::{ClientOptions, LlmSetupError, build_client};
@@ -43,40 +41,22 @@ impl ModelTestOutcome {
     }
 }
 
-/// Probes `selector` (a `provider/model` route or bare selector) in `mode`.
-///
-/// `Basic` asks for one word; `Deep` runs a two-step tool exchange and checks
-/// the total. The probe resolves, authenticates, and retries exactly as a
-/// real request would.
-pub async fn run_model_test(
+/// A credential-health projection of the library's basic probe.
+/// Model-test endpoints return the full library report instead.
+pub async fn run_basic_probe(
     client: &Client,
     selector: &str,
-    mode: ModelTestMode,
-    reasoning_effort: Option<ReasoningEffort>,
-    timeout: Option<Duration>,
+    timeout: Duration,
 ) -> ModelTestOutcome {
-    let mut options = ProbeOptions::new()
-        .tools(mode == ModelTestMode::Deep)
-        .timeout(timeout.unwrap_or_else(|| Duration::from_secs(mode.timeout_secs())));
-    if let Some(effort) = reasoning_effort {
-        options = options.reasoning_effort(effort);
-    }
-    let report = client.probe(selector, options).await;
+    let report = client
+        .probe(selector, ProbeOptions::new().timeout(timeout))
+        .await;
     match report.outcome {
         ProbeOutcome::Passed => ModelTestOutcome::ok(),
         ProbeOutcome::Failed(data) => ModelTestOutcome::error(data.message),
         ProbeOutcome::Incorrect { detail } => ModelTestOutcome::error(detail),
         _ => ModelTestOutcome::error("probe ended in an unknown state"),
     }
-}
-
-/// A basic probe of `selector` bounded by `timeout`.
-pub async fn run_basic_probe(
-    client: &Client,
-    selector: &str,
-    timeout: Duration,
-) -> ModelTestOutcome {
-    run_model_test(client, selector, ModelTestMode::Basic, None, Some(timeout)).await
 }
 
 /// Why an API key could not be probed.
