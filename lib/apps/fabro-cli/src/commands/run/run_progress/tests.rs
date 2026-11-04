@@ -10,6 +10,7 @@ use fabro_types::{
     DirtyStatus, ForkSourceRef, GitContext, GitRunTarget, RunStreamItemKind, fixtures, test_support,
 };
 use fabro_util::terminal::Styles;
+use indicatif::{InMemoryTerm, ProgressDrawTarget};
 use serde_json::{Value, json};
 
 use super::*;
@@ -310,12 +311,30 @@ fn route_progress(item: &RunStreamItem, verbose: bool) -> String {
     let output = Output::default();
     let renderer = ProgressRenderer::new_plain(Box::new(output.clone()), false);
     let mut ui = ProgressUI::with_renderer(renderer, verbose);
+    ui.handle_stream_item(&route_visit(item, "visit.started", None));
+    ui.handle_stream_item(&route_visit(item, "visit.completed", None));
+    output.0.lock().unwrap().clear();
     ui.handle_stream_item(item);
     output.text()
 }
 
+fn route_visit(route: &RunStreamItem, event: &str, label: Option<&str>) -> RunStreamItem {
+    let mut item = visit(
+        0,
+        event,
+        json!({"outcome": {"status": "success"}, "executed": true}),
+    );
+    item.item["subject"] = route.item["subject"].clone();
+    item.item["subject"]["node"]["meta"]["kind"] = json!("agent");
+    item.item["subject"]["visit"] = json!(1);
+    if let Some(label) = label {
+        item.item["subject"]["node"]["meta"]["label"] = json!(label);
+    }
+    item
+}
+
 #[test]
-fn selected_route_labels_render_on_arrows_in_progress_and_pretty_events() {
+fn selected_route_labels_render_beneath_stages_and_in_pretty_events() {
     let mut transcript = String::new();
     for (from, to, label, back) in [
         (
@@ -348,16 +367,16 @@ fn selected_route_labels_render_on_arrows_in_progress_and_pretty_events() {
         assert_eq!(petri_stream::raw_line(&item).unwrap(), before);
     }
     insta::assert_snapshot!(transcript, @r#"
-        → Run tests ── Tests passed ──▶ Open pull request
-    00:00:00    Run tests ── Tests passed ──▶ Open pull request continue
-        → Review changes ── Changes requested ──▶ Revise implementation
-    00:00:00    Review changes ── Changes requested ──▶ Revise implementation continue
-        → Approval ── Approved ──▶ Deploy
-    00:00:00    Approval ── Approved ──▶ Deploy continue
-        ↺ Verify fix ── Still failing ──▶ Investigate  (loop restart)
-    00:00:00    Verify fix ── Still failing ──▶ Investigate continue (loop)
-        → work ── yes ──▶ a
-    00:00:00    work ── yes ──▶ a continue
+            └─ Tests passed
+    00:00:00    Run tests → Open pull request  [Tests passed]
+            └─ Changes requested
+    00:00:00    Review changes → Revise implementation  [Changes requested]
+            └─ Approved
+    00:00:00    Approval → Deploy  [Approved]
+            ↺ Still failing
+    00:00:00    Verify fix ↺ Investigate  [Still failing]
+            └─ yes
+    00:00:00    work → a  [yes]
         → start → work
     00:00:00    start → work continue
         ↺ verify → work  (loop restart)
@@ -374,8 +393,8 @@ fn selected_route_labels_coexist_with_transition_and_condition_details() {
         petri_stream::format_pretty(&item, &Styles::new(false), &mut PrettyState::default())
             .unwrap();
     insta::assert_snapshot!(format!("{}{pretty}", route_progress(&item, true)), @r#"
-        → verify ── Tests passed ──▶ finish  [restart]
-    00:00:00    verify ── Tests passed ──▶ finish restart when outcome=succeeded
+            └─ Tests passed  [restart]
+    00:00:00    verify → finish  [Tests passed] restart when outcome=succeeded
     "#);
 }
 
@@ -417,6 +436,169 @@ fn selected_route_labels_escape_controls_and_preserve_unicode() {
         false,
     );
     insta::assert_snapshot!(route_progress(&item, true), @r#"
-    → review ── Réessayer \"tests\"\n\u{1b}[31m ──▶ revise
+    └─ Réessayer \"tests\"\n\u{1b}[31m
     "#);
+}
+
+fn review_route(back: bool) -> RunStreamItem {
+    applied_route(
+        "review_images",
+        if back { "render_images" } else { "render_html" },
+        &json!(if back {
+            "Regenerate images"
+        } else {
+            "Keep images"
+        }),
+        back,
+    )
+}
+
+fn target_route(source: &RunStreamItem) -> RunStreamItem {
+    let target = source.item["derived"]["target"]["name"].as_str().unwrap();
+    let mut route = applied_route(target, "exit", &Value::Null, false);
+    route.item["subject"]["firing"] = json!(3);
+    route.item["subject"]["node"]["meta"]["edges"] = json!({});
+    route
+}
+
+#[test]
+fn decision_lines_follow_display_labels_or_node_names_in_plain_progress() {
+    let mut transcript = String::new();
+    for back in [false, true] {
+        for labels in [true, false] {
+            let output = Output::default();
+            let renderer = ProgressRenderer::new_plain(Box::new(output.clone()), false);
+            let mut ui = ProgressUI::with_renderer(renderer, true);
+            let source = review_route(back);
+            let target = target_route(&source);
+            let source_label = labels.then_some("Review images");
+            let target_label = labels.then_some(if back {
+                "Render 12 images"
+            } else {
+                "Render HTML reading"
+            });
+            ui.handle_stream_item(&route_visit(&source, "visit.started", source_label));
+            ui.handle_stream_item(&route_visit(&source, "visit.completed", source_label));
+            // The route follows the target's start in Petri's stream.
+            ui.handle_stream_item(&route_visit(&target, "visit.started", target_label));
+            ui.handle_stream_item(&source);
+            ui.handle_stream_item(&route_visit(&target, "visit.completed", target_label));
+            ui.finish();
+            transcript.push_str(&output.text());
+        }
+    }
+    insta::assert_snapshot!(transcript, @r#"
+        ✓ Review images  0ms
+            └─ Keep images
+        ✓ Render HTML reading  0ms
+        ✓ review_images  0ms
+            └─ Keep images
+        ✓ render_html  0ms
+        ✓ Review images  0ms
+            ↺ Regenerate images
+        ✓ Render 12 images  0ms
+        ✓ review_images  0ms
+            ↺ Regenerate images
+        ✓ render_images  0ms
+    "#);
+}
+
+#[test]
+fn tty_decision_stays_with_source_when_another_stage_has_already_finished() {
+    for back in [false, true] {
+        let term = InMemoryTerm::new(24, 100);
+        let renderer = ProgressRenderer::with_draw_target(ProgressDrawTarget::term_like(Box::new(
+            term.clone(),
+        )));
+        let mut ui = ProgressUI::with_renderer(renderer, true);
+        let source = review_route(back);
+        let target = target_route(&source);
+        ui.handle_stream_item(&route_visit(
+            &source,
+            "visit.started",
+            Some("Review images"),
+        ));
+        ui.handle_stream_item(&route_visit(
+            &source,
+            "visit.completed",
+            Some("Review images"),
+        ));
+        ui.handle_stream_item(&route_visit(&target, "visit.started", Some("Next stage")));
+        ui.handle_stream_item(&route_visit(&target, "visit.completed", Some("Next stage")));
+        ui.handle_stream_item(&source);
+        ui.finish();
+        let screen = term.contents();
+        let decision = if back {
+            "↺ Regenerate images"
+        } else {
+            "└─ Keep images"
+        };
+        let lines: Vec<_> = screen
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .collect();
+        assert_eq!(lines.len(), 3, "{screen}");
+        assert!(lines[0].contains("✓ Review images"), "{screen}");
+        assert_eq!(lines[1], format!("        {decision}"));
+        assert!(lines[2].contains("✓ Next stage"), "{screen}");
+        assert!(!screen.contains("review_images"));
+    }
+}
+
+#[test]
+fn detached_or_interleaved_plain_routes_keep_context() {
+    for with_source in [false, true] {
+        let output = Output::default();
+        let renderer = ProgressRenderer::new_plain(Box::new(output.clone()), false);
+        let mut ui = ProgressUI::with_renderer(renderer, true);
+        let source = review_route(false);
+        if with_source {
+            ui.handle_stream_item(&route_visit(
+                &source,
+                "visit.started",
+                Some("Review images"),
+            ));
+            ui.handle_stream_item(&route_visit(
+                &source,
+                "visit.completed",
+                Some("Review images"),
+            ));
+            // An append-only transcript cannot move the decision above this line.
+            ui.renderer.print_line(4, "Other activity");
+        }
+        output.0.lock().unwrap().clear();
+        ui.handle_stream_item(&source);
+        insta::allow_duplicates! {
+            insta::assert_snapshot!(output.text(), @"    → review_images → render_html  [Keep images]");
+        }
+    }
+}
+
+#[test]
+fn tty_self_loop_decisions_attach_to_the_correct_visit() {
+    let term = InMemoryTerm::new(24, 100);
+    let renderer =
+        ProgressRenderer::with_draw_target(ProgressDrawTarget::term_like(Box::new(term.clone())));
+    let mut ui = ProgressUI::with_renderer(renderer, true);
+    let first = applied_route("review", "review", &json!("Regenerate images"), true);
+    let mut second = applied_route("review", "exit", &json!("Keep images"), false);
+    second.item["subject"]["firing"] = json!(3);
+    for (route, name) in [(&first, "First review"), (&second, "Second review")] {
+        ui.handle_stream_item(&route_visit(route, "visit.started", Some(name)));
+        ui.handle_stream_item(&route_visit(route, "visit.completed", Some(name)));
+    }
+    // Both completed visits share a node name; routes arrive in reverse order.
+    ui.handle_stream_item(&second);
+    ui.handle_stream_item(&first);
+    ui.finish();
+    let screen = term.contents();
+    let lines: Vec<_> = screen
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    assert_eq!(lines.len(), 4, "{screen}");
+    assert!(lines[0].contains("✓ First review"), "{screen}");
+    assert_eq!(lines[1], "        ↺ Regenerate images");
+    assert!(lines[2].contains("✓ Second review"), "{screen}");
+    assert_eq!(lines[3], "        └─ Keep images");
 }

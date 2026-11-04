@@ -183,15 +183,6 @@ impl<'a> PetriItem<'a> {
     }
 }
 
-/// Put an edge label on the arrow in both progress and pretty events.
-/// Escape controls so a workflow label cannot create extra terminal lines.
-pub(crate) fn route_arrow(label: Option<&str>) -> String {
-    match label.filter(|label| !label.is_empty()) {
-        Some(label) => format!("── {} ──▶", label.escape_debug()),
-        None => "→".to_string(),
-    }
-}
-
 /// Whether the item is the platform record of the run's terminal lifecycle
 /// transition, which ends the attached stream.
 pub(crate) fn is_terminal_lifecycle(item: &RunStreamItem) -> bool {
@@ -435,6 +426,22 @@ pub(crate) fn format_pretty(
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
             let detail = if back { " (loop)" } else { "" };
+            let edge_label = view.selected_edge_label();
+            let arrow = if edge_label.is_some() && back {
+                "↺"
+            } else {
+                "→"
+            };
+            let route_detail = if let Some(label) = edge_label {
+                let transition = if transition == "continue" || transition.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {transition}")
+                };
+                format!("  [{}]{transition}", label.escape_debug())
+            } else {
+                format!(" {transition}{detail}")
+            };
             // The condition the edge matched, when it has one.
             let condition = view
                 .matched_condition()
@@ -442,12 +449,11 @@ pub(crate) fn format_pretty(
             // Petri records the route after the next visit started, so the
             // line names both ends of the edge.
             Some(format!(
-                "{ts}    {} {} {} {}{}{}",
+                "{ts}    {} {} {}{}{}",
                 styles.dim.apply_to(view.node_name().unwrap_or("?")),
-                styles.dim.apply_to(route_arrow(view.selected_edge_label())),
+                styles.dim.apply_to(arrow),
                 target,
-                styles.dim.apply_to(&transition),
-                styles.dim.apply_to(detail),
+                styles.dim.apply_to(&route_detail),
                 styles.dim.apply_to(&condition),
             ))
         }
