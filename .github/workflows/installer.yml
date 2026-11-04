@@ -1,0 +1,29 @@
+name: Installer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "installer/**"
+      - ".github/workflows/installer.yml"
+      - ".github/workflows/release.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "installer/**"
+      - ".github/workflows/installer.yml"
+      - ".github/workflows/release.yml"
+
+permissions: {}
+
+jobs:
+  homebrew-push:
+    name: Homebrew push retries
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s installer/tests -v
