@@ -103,6 +103,7 @@ fabro-build-support = { path = "../../foundation/build-support" }
 chrono = { workspace = true }
 
 [dev-dependencies]
+indicatif = { workspace = true, features = ["in_memory"] }
 shlex = "1"
 ulid.workspace = true
 regex.workspace = true

@@ -752,7 +752,10 @@ mod tests {
 
     #[tokio::test]
     async fn remote_workflow_dropped_waiter_cancels_child_before_checkout_cleanup() {
-        let (fake, git) = fake_git("printf '%s' $$ > pid; exec /bin/sleep 60");
+        // Publish the PID only after writing it: file existence is the readiness
+        // signal.
+        let (fake, git) =
+            fake_git("printf '%s' $$ > pid.tmp; /bin/mv pid.tmp pid; exec /bin/sleep 60");
         let checkout = tempfile::tempdir().unwrap();
         let path = checkout.path().to_path_buf();
         let worker = tokio::spawn(async move {
@@ -1154,7 +1157,8 @@ mod tests {
     #[tokio::test]
     async fn remote_workflow_timeout_and_cancel_reap_owned_children() {
         for timeout in [true, false] {
-            let (root, mut git) = fake_git("printf '%s' $$ > pid; exec /bin/sleep 60");
+            let (root, mut git) =
+                fake_git("printf '%s' $$ > pid.tmp; /bin/mv pid.tmp pid; exec /bin/sleep 60");
             git.timeout = Duration::from_secs(2);
             let cancel = CancellationToken::new();
             let trigger = async {
