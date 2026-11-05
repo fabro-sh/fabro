@@ -302,7 +302,7 @@ impl TestAppStateBuilder {
             preloaded_vault,
             server_secrets: load_test_server_secrets(server_env_path, self.server_secret_env),
             env_lookup: self.env_lookup,
-            github_api_base_url: None,
+            github_host: None,
             active_config_path,
             http_client: Some(
                 fabro_http::test_http_client().expect("test HTTP client should build"),

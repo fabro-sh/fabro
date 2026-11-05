@@ -31,8 +31,8 @@ use fabro_template::validate_static_reference;
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{ApprovalMode, ResolvedGoalSource, ResolvedRunGoal, RunMode};
 use fabro_types::{
-    DirtyStatus, GitContext, GitHubRepositorySlug, GitRunTarget, ManifestPath, ReferenceKind,
-    RunTarget, SandboxProviderKind, WorkflowSettings,
+    DirtyStatus, GitContext, GitHubHost, GitHubRepositorySlug, GitRunTarget, ManifestPath,
+    ReferenceKind, RunTarget, SandboxProviderKind, WorkflowSettings,
 };
 use fabro_workflow::git::{self, GitSyncStatus};
 pub use fabro_workflow_version::CollectedWorkflowClosure;
@@ -60,6 +60,9 @@ pub struct ManifestBuildInput {
     /// Path to the user settings file (for inclusion in
     /// `RunManifest.configs`). `None` skips the user config entry.
     pub user_settings_path:   Option<PathBuf>,
+    /// The GitHub deployment `run.scm` repositories and git origins are
+    /// resolved against; github.com unless the caller configures another.
+    pub github_host:          GitHubHost,
 }
 
 #[derive(Debug)]
@@ -223,7 +226,8 @@ pub fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
         &working_directory,
     )?;
 
-    let configured_repo_origin_url = configured_repo_origin_url(&workflow_settings);
+    let configured_repo_origin_url =
+        configured_repo_origin_url(&input.github_host, &workflow_settings);
     let git = build_legacy_git_context(&working_directory, configured_repo_origin_url.as_deref());
     let args = input.args.filter(|args| !manifest_args_is_empty(args));
 
@@ -357,13 +361,17 @@ pub enum ExactCommitStatus {
 /// branch so clone-based execution can resolve the observed commit.
 #[must_use]
 pub fn observe_git_run_target(
+    host: &GitHubHost,
     repo_path: &Path,
     configured_repo_origin_url: Option<&str>,
 ) -> Option<GitRunTargetObservation> {
     let local = inspect_local_git(repo_path, configured_repo_origin_url)?;
     let legacy_git_context = local.legacy_git_context;
-    let mut run_target =
-        github_run_target(&legacy_git_context.origin_url, &legacy_git_context.branch);
+    let mut run_target = github_run_target(
+        host,
+        &legacy_git_context.origin_url,
+        &legacy_git_context.branch,
+    );
     let mut exact_commit = ExactCommitStatus::Unpublished;
     if let Some(target) = run_target.as_mut() {
         let publish_status = publish_manifest_branch_best_effort(
@@ -459,6 +467,7 @@ pub enum RunTargetDerivationError {
 /// Returns the reason a clone-based target could not be derived; every
 /// variant's message is written for the CLI caller.
 pub fn derive_run_target_for_provider(
+    host: &GitHubHost,
     provider: &SandboxProviderKind,
     canonical_cwd: &Path,
     configured_repo_origin_url: Option<&str>,
@@ -476,7 +485,7 @@ pub fn derive_run_target_for_provider(
             dirty_worktree: false,
         });
     }
-    let Some(observation) = observe_git_run_target(canonical_cwd, configured_repo_origin_url)
+    let Some(observation) = observe_git_run_target(host, canonical_cwd, configured_repo_origin_url)
     else {
         return Ok(DerivedRunTarget {
             target:         none_target_for_unversioned_directory(canonical_cwd)?,
@@ -546,6 +555,7 @@ fn none_target_for_unversioned_directory(
 ///
 /// Returns an error when either config exists but cannot be read or parsed.
 pub fn configured_repo_origin_url_for_location(
+    host: &GitHubHost,
     location: &WorkflowLocation,
 ) -> Result<Option<String>> {
     let workflow = location
@@ -565,7 +575,7 @@ pub fn configured_repo_origin_url_for_location(
         repository: workflow.repository.or(project.repository),
         github:     workflow.github.or(project.github),
     };
-    Ok(configured_repo_origin_url_from_scm_layer(&scm))
+    Ok(configured_repo_origin_url_from_scm_layer(host, &scm))
 }
 
 struct LocalGitObservation {
@@ -623,8 +633,8 @@ fn build_legacy_git_context(
     Some(local.legacy_git_context)
 }
 
-fn github_run_target(origin_url: &str, branch: &str) -> Option<GitRunTarget> {
-    let (owner, repository) = fabro_github::parse_github_owner_repo(origin_url).ok()?;
+fn github_run_target(host: &GitHubHost, origin_url: &str, branch: &str) -> Option<GitRunTarget> {
+    let (owner, repository) = fabro_github::parse_github_owner_repo(host, origin_url).ok()?;
     let slug = GitHubRepositorySlug::try_new(&format!("{owner}/{repository}"))?;
     let validated = RunTarget::Git(GitRunTarget {
         repo:   slug.to_string(),
@@ -632,7 +642,7 @@ fn github_run_target(origin_url: &str, branch: &str) -> Option<GitRunTarget> {
         tag:    None,
         sha:    None,
     })
-    .validate()
+    .validate(host)
     .ok()?;
     let RunTarget::Git(target) = validated.target else {
         unreachable!("a validated Git target must remain a Git target")
@@ -640,9 +650,10 @@ fn github_run_target(origin_url: &str, branch: &str) -> Option<GitRunTarget> {
     Some(target)
 }
 
-fn configured_repo_origin_url(settings: &WorkflowSettings) -> Option<String> {
+fn configured_repo_origin_url(host: &GitHubHost, settings: &WorkflowSettings) -> Option<String> {
     let scm = &settings.run.scm;
     configured_repo_origin_url_from_scm(
+        host,
         scm.provider.as_deref(),
         scm.owner.as_deref(),
         scm.repository.as_deref(),
@@ -650,6 +661,7 @@ fn configured_repo_origin_url(settings: &WorkflowSettings) -> Option<String> {
 }
 
 fn configured_repo_origin_url_from_scm(
+    host: &GitHubHost,
     provider: Option<&str>,
     owner: Option<&str>,
     repository: Option<&str>,
@@ -662,13 +674,17 @@ fn configured_repo_origin_url_from_scm(
     if owner.trim().is_empty() || repository.trim().is_empty() {
         return None;
     }
-    let origin = format!("https://github.com/{owner}/{repository}");
+    let origin = host.repository_url(owner, repository);
     let normalized = fabro_github::normalize_repo_origin_url(&origin);
     (!normalized.is_empty()).then_some(normalized)
 }
 
-fn configured_repo_origin_url_from_scm_layer(scm: &RunScmLayer) -> Option<String> {
+fn configured_repo_origin_url_from_scm_layer(
+    host: &GitHubHost,
+    scm: &RunScmLayer,
+) -> Option<String> {
     configured_repo_origin_url_from_scm(
+        host,
         scm.provider.as_deref(),
         scm.owner.as_deref(),
         scm.repository.as_deref(),
@@ -865,6 +881,36 @@ pub(crate) mod test_fixtures {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn scm_origin_and_run_target_follow_the_configured_host() {
+        let ghes = GitHubHost::new("https://ghe.example.com", None).unwrap();
+        assert_eq!(
+            configured_repo_origin_url_from_scm(
+                &ghes,
+                Some("github"),
+                Some("acme"),
+                Some("widgets")
+            )
+            .as_deref(),
+            Some("https://ghe.example.com/acme/widgets")
+        );
+        assert_eq!(
+            configured_repo_origin_url_from_scm(
+                &GitHubHost::default(),
+                None,
+                Some("acme"),
+                Some("widgets")
+            )
+            .as_deref(),
+            Some("https://github.com/acme/widgets")
+        );
+
+        let target =
+            github_run_target(&ghes, "https://ghe.example.com/acme/widgets", "main").unwrap();
+        assert_eq!(target.repo, "acme/widgets");
+        assert!(github_run_target(&ghes, "https://github.com/acme/widgets", "main").is_none());
+    }
+
     use fabro_workflow::git::head_sha;
 
     use super::*;
@@ -2050,8 +2096,12 @@ exit 1
         ]);
         run_git(&workspace, &["push", "origin", "feature"]);
 
-        let observation =
-            observe_git_run_target(&workspace, Some("https://github.com/acme/widgets")).unwrap();
+        let observation = observe_git_run_target(
+            &GitHubHost::default(),
+            &workspace,
+            Some("https://github.com/acme/widgets"),
+        )
+        .unwrap();
         let target = observation.run_target.as_ref().unwrap();
         let legacy = &observation.legacy_git_context;
 
@@ -2077,8 +2127,12 @@ exit 1
             "https://github.com/acme/widgets",
         ]);
 
-        let observation =
-            observe_git_run_target(&workspace, Some("https://github.com/acme/widgets")).unwrap();
+        let observation = observe_git_run_target(
+            &GitHubHost::default(),
+            &workspace,
+            Some("https://github.com/acme/widgets"),
+        )
+        .unwrap();
         let target = observation.run_target.as_ref().unwrap();
 
         assert_eq!(target.sha, observation.legacy_git_context.sha);
@@ -2112,8 +2166,12 @@ exit 1
         ]);
         mark_origin_branch_synced(&workspace, "feature");
 
-        let observation =
-            observe_git_run_target(&workspace, Some("https://github.com/acme/widgets")).unwrap();
+        let observation = observe_git_run_target(
+            &GitHubHost::default(),
+            &workspace,
+            Some("https://github.com/acme/widgets"),
+        )
+        .unwrap();
         let target = observation.run_target.as_ref().unwrap();
 
         assert_eq!(target.sha, None);
@@ -2138,7 +2196,8 @@ exit 1
             std::fs::create_dir_all(&workspace).unwrap();
             init_git_repo(&workspace, branch, "https://github.com/acme/widgets");
 
-            let observation = observe_git_run_target(&workspace, None).unwrap();
+            let observation =
+                observe_git_run_target(&GitHubHost::default(), &workspace, None).unwrap();
 
             assert_eq!(observation.run_target, None, "branch {branch}");
             assert_eq!(observation.legacy_git_context.branch, branch);
@@ -2162,9 +2221,12 @@ exit 1
             "https://github.com/acme/widgets",
         ]);
 
-        let failed =
-            observe_git_run_target(&failed_workspace, Some("https://github.com/acme/widgets"))
-                .unwrap();
+        let failed = observe_git_run_target(
+            &GitHubHost::default(),
+            &failed_workspace,
+            Some("https://github.com/acme/widgets"),
+        )
+        .unwrap();
         assert_eq!(failed.run_target.as_ref().unwrap().sha, None);
         assert!(failed.legacy_git_context.sha.is_some());
         assert_eq!(failed.legacy_git_context.dirty, DirtyStatus::Clean);
@@ -2179,6 +2241,7 @@ exit 1
         );
 
         let mismatched = observe_git_run_target(
+            &GitHubHost::default(),
             &mismatched_workspace,
             Some("https://github.com/acme/configured"),
         )
@@ -2198,7 +2261,7 @@ exit 1
         init_git_repo(&workspace, "feature", bare_origin.to_str().unwrap());
         std::fs::write(workspace.join("dirty.txt"), "dirty").unwrap();
 
-        let unsupported = observe_git_run_target(&workspace, None).unwrap();
+        let unsupported = observe_git_run_target(&GitHubHost::default(), &workspace, None).unwrap();
         assert!(unsupported.run_target.is_none());
         assert_eq!(unsupported.legacy_git_context.dirty, DirtyStatus::Dirty);
         assert_eq!(
@@ -2208,15 +2271,15 @@ exit 1
 
         let not_repo = temp.path().join("not-repo");
         std::fs::create_dir_all(&not_repo).unwrap();
-        assert!(observe_git_run_target(&not_repo, None).is_none());
+        assert!(observe_git_run_target(&GitHubHost::default(), &not_repo, None).is_none());
 
         let unborn = temp.path().join("unborn");
         std::fs::create_dir_all(&unborn).unwrap();
         run_git(&unborn, &["init", "--quiet"]);
-        assert!(observe_git_run_target(&unborn, None).is_none());
+        assert!(observe_git_run_target(&GitHubHost::default(), &unborn, None).is_none());
 
         run_git(&workspace, &["checkout", "--detach", "--quiet"]);
-        assert!(observe_git_run_target(&workspace, None).is_none());
+        assert!(observe_git_run_target(&GitHubHost::default(), &workspace, None).is_none());
     }
 
     fn init_git_repo(path: &Path, branch: &str, origin_url: &str) {

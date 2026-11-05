@@ -4,26 +4,26 @@
 //! can still override any header by setting their own value first — the
 //! defaults here only fill in what's missing.
 
-use axum::extract::Request;
+use std::sync::Arc;
+
+use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, header};
 use axum::middleware::Next;
 use axum::response::Response;
 
-use crate::csp;
-
-pub async fn layer(req: Request, next: Next) -> Response {
+pub async fn layer(State(csp_policy): State<Arc<String>>, req: Request, next: Next) -> Response {
     let is_https = request_is_https(&req);
     let mut response = next.run(req).await;
     apply_defaults(response.headers_mut(), is_https);
-    apply_csp(response.headers_mut());
+    apply_csp(response.headers_mut(), &csp_policy);
     response
 }
 
-fn apply_csp(headers: &mut HeaderMap) {
+fn apply_csp(headers: &mut HeaderMap, policy: &str) {
     // Report-only while we tune the policy: browsers evaluate violations and log
     // them to the console without blocking any resources. Switch back to the
     // enforcing `content-security-policy` header once the policy is clean.
-    if let Ok(value) = HeaderValue::from_str(csp::policy()) {
+    if let Ok(value) = HeaderValue::from_str(policy) {
         headers
             .entry(HeaderName::from_static(
                 "content-security-policy-report-only",
@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn csp_is_report_only_not_enforced() {
         let mut headers = HeaderMap::new();
-        apply_csp(&mut headers);
+        apply_csp(&mut headers, "default-src 'self'");
         assert!(headers.contains_key("content-security-policy-report-only"));
         assert!(!headers.contains_key("content-security-policy"));
     }

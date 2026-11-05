@@ -334,7 +334,9 @@ async fn start_webhook_strategy(
                 );
                 return Ok(None);
             };
-            match TailscaleFunnelManager::start(port, &app_id, &private_key_pem).await {
+            match TailscaleFunnelManager::start(port, &state.github_host, &app_id, &private_key_pem)
+                .await
+            {
                 Ok(manager) => Ok(Some(manager)),
                 Err(err) => {
                     error!(
@@ -356,8 +358,13 @@ async fn start_webhook_strategy(
                     )
                 })?;
             let webhook_url = format!("{}{WEBHOOK_ROUTE}", server_api_url.trim_end_matches('/'));
-            match fabro_github::update_app_webhook_config(&app_id, &private_key_pem, &webhook_url)
-                .await
+            match fabro_github::update_app_webhook_config(
+                &state.github_host,
+                &app_id,
+                &private_key_pem,
+                &webhook_url,
+            )
+            .await
             {
                 Ok(()) => info!(url = %webhook_url, "GitHub App webhook URL updated"),
                 Err(err) => warn!(
@@ -737,7 +744,7 @@ where
         preloaded_vault: startup_vault.into_vault(),
         server_secrets,
         env_lookup,
-        github_api_base_url: None,
+        github_host: None,
         active_config_path,
         http_client: None,
         sandbox_inventory: None,

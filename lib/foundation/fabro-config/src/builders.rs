@@ -4,14 +4,15 @@ use std::path::Path;
 
 use fabro_types::settings::run::McpServerSettings;
 use fabro_types::settings::{RunNamespace, WorkflowNamespace};
-use fabro_types::{ServerSettings, UserSettings, WorkflowSettings};
+use fabro_types::{GitHubHost, ServerSettings, UserSettings, WorkflowSettings};
 use fabro_util::error::SharedError;
 
 use crate::defaults::DEFAULTS_LAYER;
 use crate::load::load_settings_path;
 use crate::parse::{SettingsSource, validate_settings_source};
 use crate::resolve::{
-    ResolveError, resolve_cli, resolve_project, resolve_run, resolve_server, resolve_workflow,
+    ResolveError, resolve_cli, resolve_github_host, resolve_project, resolve_run, resolve_server,
+    resolve_workflow,
 };
 use crate::user::load_settings_config;
 use crate::{
@@ -84,6 +85,20 @@ impl ServerSettingsBuilder {
     pub fn load_from(path: &Path) -> Result<ServerSettings> {
         let layer = load_settings_path(path, SettingsSource::ActiveSettings)?;
         Self::from_layer(&layer)
+    }
+
+    /// The configured GitHub host alone, for callers that have no complete
+    /// server configuration to resolve (the CLI without a local server).
+    pub fn load_default_github_host() -> Result<GitHubHost> {
+        let layer = load_settings_config(None)?;
+        let github = layer
+            .server
+            .and_then(|server| server.integrations)
+            .and_then(|integrations| integrations.github)
+            .unwrap_or_default();
+        let mut errors = Vec::new();
+        let host = resolve_github_host(&github, &mut errors);
+        finish_result(host, "failed to resolve the GitHub host", errors)
     }
 
     pub fn from_toml(source: &str) -> Result<ServerSettings> {

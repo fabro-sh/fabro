@@ -109,7 +109,7 @@ use tracing::{info, warn};
 use super::publish;
 use super::runner::{self, WorkerTitlePhase};
 use crate::args::RunWorkerMode;
-use crate::command_context;
+use crate::{command_context, user_config};
 
 /// What the worker holds when it hands a run to Petri.
 pub(super) struct PetriWorker<'a> {
@@ -221,10 +221,17 @@ pub(super) async fn execute(worker: PetriWorker<'_>) -> Result<()> {
             None
         }
     };
-    let read_tokens = publish::read_token_source(&worker.run_state.spec, github.as_ref());
-    runtime.stage_credentials =
-        StageCredentials::for_run(&worker.run_state.spec, github.as_ref(), read_tokens.clone())?;
+    let github_host = user_config::github_host()?;
+    let read_tokens =
+        publish::read_token_source(&worker.run_state.spec, github.as_ref(), &github_host);
+    runtime.stage_credentials = StageCredentials::for_run(
+        &worker.run_state.spec,
+        github.as_ref(),
+        &github_host,
+        read_tokens.clone(),
+    )?;
     let mut source = RunSource::for_run(
+        &github_host,
         worker.run_state.spec.target.as_ref(),
         &worker.run_state.spec.settings.run,
         None,
@@ -236,6 +243,7 @@ pub(super) async fn execute(worker: PetriWorker<'_>) -> Result<()> {
         run_id,
         &worker.run_state.spec,
         github,
+        github_host,
         Arc::new(VaultCredentialSource::new(Arc::clone(&vault))),
         Arc::new(catalog),
         Arc::clone(&records),

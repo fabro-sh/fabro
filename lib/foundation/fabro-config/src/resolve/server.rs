@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use fabro_types::SandboxProviderKind;
 use fabro_types::settings::server::{
     GithubIntegrationSettings, GithubIntegrationStrategy, IntegrationWebhooksSettings,
     ObjectStoreProvider, ObjectStoreSettings, SandboxPluginSettings, ServerApiSettings,
@@ -11,6 +10,7 @@ use fabro_types::settings::server::{
     ServerSchedulerSettings, ServerStorageSettings, ServerWebSettings, SlackIntegrationSettings,
     WebhookStrategy,
 };
+use fabro_types::{GitHubHost, SandboxProviderKind};
 use fabro_util::Home;
 
 use super::{
@@ -19,9 +19,10 @@ use super::{
 };
 use crate::user::default_storage_dir;
 use crate::{
-    IntegrationWebhooksLayer, ObjectStoreLocalLayer, ObjectStoreS3Layer, ServerApiLayer,
-    ServerArtifactsLayer, ServerAuthLayer, ServerIntegrationsLayer, ServerLayer, ServerListenLayer,
-    ServerSandboxLayer, ServerSandboxProviderLayer, ServerStorageLayer, ServerWebLayer,
+    GithubIntegrationLayer, IntegrationWebhooksLayer, ObjectStoreLocalLayer, ObjectStoreS3Layer,
+    ServerApiLayer, ServerArtifactsLayer, ServerAuthLayer, ServerIntegrationsLayer, ServerLayer,
+    ServerListenLayer, ServerSandboxLayer, ServerSandboxProviderLayer, ServerStorageLayer,
+    ServerWebLayer,
 };
 
 pub fn resolve_server(layer: &ServerLayer, errors: &mut Vec<ResolveError>) -> ServerNamespace {
@@ -29,7 +30,7 @@ pub fn resolve_server(layer: &ServerLayer, errors: &mut Vec<ResolveError>) -> Se
     let listen = resolve_listen(layer.listen.as_ref(), errors);
     let web = resolve_web(layer.web.as_ref());
     let auth = resolve_auth(layer.auth.as_ref(), errors);
-    let integrations = resolve_integrations(layer.integrations.as_ref());
+    let integrations = resolve_integrations(layer.integrations.as_ref(), errors);
     validate_github_webhook_strategy(&integrations, layer.api.as_ref(), errors);
 
     let api_url = layer.api.as_ref().and_then(|api| api.url.clone());
@@ -330,7 +331,10 @@ fn resolve_object_store(
     }
 }
 
-fn resolve_integrations(layer: Option<&ServerIntegrationsLayer>) -> ServerIntegrationsSettings {
+fn resolve_integrations(
+    layer: Option<&ServerIntegrationsLayer>,
+    errors: &mut Vec<ResolveError>,
+) -> ServerIntegrationsSettings {
     ServerIntegrationsSettings {
         github: layer
             .and_then(|integrations| integrations.github.as_ref())
@@ -344,13 +348,15 @@ fn resolve_integrations(layer: Option<&ServerIntegrationsLayer>) -> ServerIntegr
                     github.client_id.as_deref(),
                 );
                 warn_if_demoted_template("server.integrations.github.slug", github.slug.as_deref());
+                let host = resolve_github_host(github, errors);
                 GithubIntegrationSettings {
-                    enabled:   github.enabled.unwrap_or(true),
-                    strategy:  github.strategy.unwrap_or_default(),
-                    app_id:    github.app_id.clone(),
+                    host,
+                    enabled: github.enabled.unwrap_or(true),
+                    strategy: github.strategy.unwrap_or_default(),
+                    app_id: github.app_id.clone(),
                     client_id: github.client_id.clone(),
-                    slug:      github.slug.clone(),
-                    webhooks:  github.webhooks.as_ref().map(resolve_github_webhooks),
+                    slug: github.slug.clone(),
+                    webhooks: github.webhooks.as_ref().map(resolve_github_webhooks),
                 }
             })
             .unwrap_or_default(),
@@ -373,6 +379,21 @@ fn resolve_integrations(layer: Option<&ServerIntegrationsLayer>) -> ServerIntegr
                 },
             ),
     }
+}
+
+pub(crate) fn resolve_github_host(
+    layer: &GithubIntegrationLayer,
+    errors: &mut Vec<ResolveError>,
+) -> GitHubHost {
+    let default = GitHubHost::default();
+    let web_url = layer.web_url.as_deref().unwrap_or(default.web_url());
+    GitHubHost::new(web_url, layer.api_url.as_deref()).unwrap_or_else(|err| {
+        errors.push(ResolveError::Invalid {
+            path:   format!("server.integrations.github.{}", err.field()),
+            reason: err.to_string(),
+        });
+        default
+    })
 }
 
 fn resolve_github_webhooks(layer: &IntegrationWebhooksLayer) -> IntegrationWebhooksSettings {

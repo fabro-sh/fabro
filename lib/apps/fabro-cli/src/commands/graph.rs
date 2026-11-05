@@ -22,6 +22,7 @@ use crate::args::{GraphArgs, GraphDirection, GraphOutputFormat};
 use crate::command_context::CommandContext;
 use crate::commands::run::output::api_diagnostics_to_local;
 use crate::shared::{absolute_or_current, print_diagnostics, print_json_pretty, relative_path};
+use crate::user_config;
 
 pub(crate) async fn run(
     args: &GraphArgs,
@@ -39,6 +40,7 @@ pub(crate) async fn run(
         cwd: ctx.cwd().to_path_buf(),
         environment_defaults: fabro_environment::seeded_catalog_layer(),
         user_settings_path: Some(active_settings_path(None)),
+        github_host: user_config::github_host()?,
         ..Default::default()
     })?;
     let client = ctx.server().await?;

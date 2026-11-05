@@ -39,7 +39,7 @@ use fabro_static::EnvVars;
 use fabro_store::platform_records::{PlatformRecord, PullRequestCreatedRecord};
 use fabro_types::settings::run::{PullRequestSettings, RunMode};
 use fabro_types::settings::server::GithubIntegrationStrategy;
-use fabro_types::{GitHubRepositorySlug, RunId, RunSpec, RunTarget};
+use fabro_types::{GitHubHost, GitHubRepositorySlug, RunId, RunSpec, RunTarget};
 use fabro_vault::Vault;
 use fabro_workflow::pull_request::{self, AutoMergeOptions, OpenPullRequestRequest};
 use tokio::time;
@@ -77,11 +77,11 @@ pub(super) fn github_credentials(vault: &Vault) -> Result<Option<GitHubCredentia
 }
 
 /// The run's GitHub repository, when its target names one.
-fn repository(spec: &RunSpec) -> Option<GitHubRepositorySlug> {
+fn repository(spec: &RunSpec, host: &GitHubHost) -> Option<GitHubRepositorySlug> {
     let Some(RunTarget::Git(target)) = spec.target.as_ref() else {
         return None;
     };
-    Some(target.clone().validate().ok()?.repository().clone())
+    Some(target.clone().validate(host).ok()?.repository().clone())
 }
 
 /// A cached token source for the run's repository with `permissions`, or
@@ -89,12 +89,14 @@ fn repository(spec: &RunSpec) -> Option<GitHubRepositorySlug> {
 fn token_source(
     spec: &RunSpec,
     credentials: Option<&GitHubCredentials>,
+    host: &GitHubHost,
     permissions: serde_json::Value,
 ) -> Option<Arc<InstallationTokenSource>> {
-    let repository = repository(spec)?;
+    let repository = repository(spec, host)?;
     let credentials = credentials?;
     match InstallationTokenSource::for_repository(
         credentials,
+        host,
         repository.owner().to_string(),
         repository.repo().to_string(),
         permissions,
@@ -114,8 +116,14 @@ fn token_source(
 pub(super) fn read_token_source(
     spec: &RunSpec,
     credentials: Option<&GitHubCredentials>,
+    host: &GitHubHost,
 ) -> Option<Arc<InstallationTokenSource>> {
-    token_source(spec, credentials, serde_json::json!({ "contents": "read" }))
+    token_source(
+        spec,
+        credentials,
+        host,
+        serde_json::json!({ "contents": "read" }),
+    )
 }
 
 /// Fetch credentials over the run's read-only token source.
@@ -160,6 +168,7 @@ pub(super) struct GitHubPublisher {
     /// The run's model, when its settings name one.
     model:        Option<String>,
     credentials:  Option<GitHubCredentials>,
+    host:         GitHubHost,
     /// The run's `contents: write` token source; `None` without credentials.
     push_tokens:  Option<Arc<InstallationTokenSource>>,
     pull_request: Option<PullRequestSettings>,
@@ -176,6 +185,7 @@ impl GitHubPublisher {
         run_id: RunId,
         spec: &RunSpec,
         credentials: Option<GitHubCredentials>,
+        host: GitHubHost,
         llm_source: Arc<dyn CredentialProvider>,
         catalog: Arc<Catalog>,
         records: Arc<dyn PlatformRecords>,
@@ -192,10 +202,11 @@ impl GitHubPublisher {
         let Some(RunTarget::Git(target)) = spec.target.as_ref() else {
             return None;
         };
-        let repository = repository(spec)?;
+        let repository = repository(spec, &host)?;
         let push_tokens = token_source(
             spec,
             credentials.as_ref(),
+            &host,
             serde_json::json!({ "contents": "write" }),
         );
         Some(Self {
@@ -205,6 +216,7 @@ impl GitHubPublisher {
             goal: spec.graph.goal.clone(),
             model: settings.model.name.clone(),
             credentials,
+            host,
             push_tokens,
             pull_request: settings
                 .pull_request
@@ -243,7 +255,7 @@ impl GitHubPublisher {
             .ok_or_else(|| "no LLM model is available to write the pull request".to_string())?;
         // The run so far, for the pull request's details: best effort.
         let run_state = self.client.get_run_state(&self.run_id).await.ok();
-        let origin_url = self.repository.https_url();
+        let origin_url = self.repository.https_url(&self.host);
         let created = pull_request::open_pull_request(OpenPullRequestRequest {
             run_id:            self.run_id,
             github:            context,
@@ -293,7 +305,15 @@ impl RunPublisher for GitHubPublisher {
             .resolve()
             .await
             .map_err(|err| format!("no push credential for {}: {err:#}", self.repository))?;
-        push(&self.repository, &resolved.token, site, branch, sha).await
+        push(
+            &self.repository,
+            &self.host,
+            &resolved.token,
+            site,
+            branch,
+            sha,
+        )
+        .await
     }
 
     async fn publish(&self, publication: &Publication) -> Result<(), String> {
@@ -313,8 +333,7 @@ impl RunPublisher for GitHubPublisher {
             .credentials
             .as_ref()
             .ok_or_else(|| "GitHub credentials are unavailable".to_string())?;
-        let base_url = fabro_github::github_api_base_url();
-        let context = GitHubContext::new(credentials, &base_url);
+        let context = GitHubContext::new(credentials, &self.host);
         Box::pin(self.open_pull_request(context, settings, publication)).await
     }
 }
@@ -325,12 +344,13 @@ impl RunPublisher for GitHubPublisher {
 /// repository alone and never appears in the error.
 async fn push(
     repository: &GitHubRepositorySlug,
+    host: &GitHubHost,
     token: &SecretString,
     site: &Site,
     branch: &str,
     sha: &str,
 ) -> Result<(), String> {
-    let mut url = repository.https_url();
+    let mut url = repository.https_url(host);
     url.push_str(".git");
     let credential = basic(token);
     let env = credential
@@ -399,6 +419,7 @@ mod tests {
                 RunId::new(),
                 spec,
                 None,
+                GitHubHost::default(),
                 Arc::new(NoCredentials),
                 Arc::new(test_support::test_catalog()),
                 Arc::new(MemoryPlatformRecords::new()),

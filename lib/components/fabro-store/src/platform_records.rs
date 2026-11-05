@@ -27,7 +27,7 @@
 use std::sync::Arc;
 
 use fabro_types::{
-    ArtifactSource, BlobHash, DiffSummary, GitIdentity, PairId, PairTarget, Principal,
+    ArtifactSource, BlobHash, DiffSummary, GitHubHost, GitIdentity, PairId, PairTarget, Principal,
     PullRequestCreationId, PullRequestLink, RunControlAction, RunId, RunNoticeLevel, RunSpec,
     RunStatus,
 };
@@ -557,27 +557,37 @@ pub struct PullRequestFailedRecord {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PullRequestLinkedRecord {
-    pub owner:  String,
-    pub repo:   String,
-    pub number: u64,
+    pub owner:    String,
+    pub repo:     String,
+    pub number:   u64,
+    /// The pull request's URL when it is not on github.com; github.com links
+    /// are derived, so their records are unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub html_url: Option<String>,
 }
 
 impl PullRequestLinkedRecord {
     #[must_use]
     pub fn link(&self) -> PullRequestLink {
         PullRequestLink {
-            owner:  self.owner.clone(),
-            repo:   self.repo.clone(),
-            number: self.number,
+            owner:    self.owner.clone(),
+            repo:     self.repo.clone(),
+            number:   self.number,
+            html_url: self.html_url.clone().unwrap_or_else(|| {
+                GitHubHost::default().pull_request_url(&self.owner, &self.repo, self.number)
+            }),
         }
     }
 
     #[must_use]
     pub fn from_link(link: &PullRequestLink) -> Self {
         Self {
-            owner:  link.owner.clone(),
-            repo:   link.repo.clone(),
-            number: link.number,
+            owner:    link.owner.clone(),
+            repo:     link.repo.clone(),
+            number:   link.number,
+            html_url: (link.html_url
+                != GitHubHost::default().pull_request_url(&link.owner, &link.repo, link.number))
+            .then(|| link.html_url.clone()),
         }
     }
 }
@@ -941,16 +951,18 @@ mod tests {
             }
             PlatformRecordKind::PullRequestLinked => {
                 PlatformRecord::PullRequestLinked(PullRequestLinkedRecord {
-                    owner:  "fabro-sh".to_string(),
-                    repo:   "fabro".to_string(),
-                    number: 7,
+                    owner:    "fabro-sh".to_string(),
+                    repo:     "fabro".to_string(),
+                    number:   7,
+                    html_url: None,
                 })
             }
             PlatformRecordKind::PullRequestUnlinked => {
                 PlatformRecord::PullRequestUnlinked(PullRequestLinkedRecord {
-                    owner:  "fabro-sh".to_string(),
-                    repo:   "fabro".to_string(),
-                    number: 7,
+                    owner:    "fabro-sh".to_string(),
+                    repo:     "fabro".to_string(),
+                    number:   7,
+                    html_url: None,
                 })
             }
             PlatformRecordKind::NotificationSent => {

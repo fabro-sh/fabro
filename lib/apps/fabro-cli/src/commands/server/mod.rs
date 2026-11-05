@@ -224,6 +224,7 @@ async fn run_install_mode(bootstrap: InstallBootstrap, printer: Printer) -> Resu
         &bootstrap.storage_dir,
         &bootstrap.config_path,
     )
+    .with_github_host(user_config::github_host()?)
     .with_finish_hook(persist_install_dev_token_hook());
     install::serve_install_command(bootstrap.bind_request, state, move |bind| {
         announce_install_mode(bind, &token, styles, printer);
