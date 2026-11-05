@@ -42,6 +42,10 @@ pub const RUN_SESSION_RECORDS_MIGRATION_SQL: &str =
 pub const RUN_SESSION_EVENTS_MIGRATION_SQL: &str =
     include_str!("../migrations/2026091802_run_session_events.sql");
 
+/// The global lifecycle stream schema, also used by isolated store fixtures.
+pub const MAIN_EVENTS_MIGRATION_SQL: &str =
+    include_str!("../migrations/2026101601_main_events.sql");
+
 /// The Petri run record migration (`petri_runs`, `petri_records`), exposed
 /// so fixtures in other crates can install the production schema without a
 /// filesystem path into this crate.
