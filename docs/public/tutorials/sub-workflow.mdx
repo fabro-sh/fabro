@@ -19,7 +19,7 @@ First, create a standalone implement-and-test workflow. This is a normal workflo
 
 ```dot title="implement-and-test.fabro"
 digraph ImplementAndTest {
-    graph [goal="Implement the plan and make tests pass"]
+    graph [goal="Implement the plan and make tests pass", max_node_visits=6]
     rankdir=LR
 
     start [shape=Mdiamond, label="Start"]
@@ -31,11 +31,13 @@ digraph ImplementAndTest {
 
     start -> implement -> validate -> gate
     gate -> exit      [label="Pass", condition="outcome=succeeded"]
-    gate -> implement [label="Fix", max_visits=5]
+    gate -> implement [label="Fix"]
 }
 ```
 
 This is the same implement-test-fix loop from the [Branch & Loop](/tutorials/branch-loop) tutorial, packaged as its own file.
+
+The child's `max_node_visits=6` allows one initial implementation and up to five repair passes. If another visit is needed after that, the run fails instead of looping indefinitely. Visit limits belong on the graph (`max_node_visits`) or a node (`max_visits`), not on an edge.
 
 ## The parent workflow
 
@@ -61,8 +63,12 @@ digraph SubWorkflow {
 }
 ```
 
+Save both files in the same directory, then validate and run the parent:
+
 ```bash
-fabro run docs/internal/demo/12-sub-workflow.fabro
+fabro validate implement-and-test.fabro
+fabro validate sub-workflow.fabro
+fabro run sub-workflow.fabro
 ```
 
 ## The house node
