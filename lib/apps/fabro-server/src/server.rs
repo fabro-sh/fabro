@@ -1177,6 +1177,7 @@ pub struct AppState {
     slack_service: Option<Arc<SlackService>>,
     pub(crate) jira_service: Option<Arc<jira::JiraService>>,
     slack_started: AtomicBool,
+    jira_started: AtomicBool,
     github_webhook_secret: Option<String>,
 }
 
@@ -1833,6 +1834,35 @@ fn decode_secret_pem(name: &str, raw: &str) -> Result<String, String> {
         .map_err(|err| format!("{name} base64 decoded to invalid UTF-8: {err}"))
 }
 
+fn start_optional_jira_service(state: &Arc<AppState>) {
+    let Some(service) = state.jira_service.clone() else {
+        return;
+    };
+    if state.jira_started.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    let event_state = Arc::clone(state);
+    tokio::spawn(async move {
+        let mut rx = event_state.global_event_tx.subscribe();
+        loop {
+            match rx.recv().await {
+                Ok(item) => {
+                    service
+                        .observe(
+                            event_state.as_ref(),
+                            item.run_id,
+                            std::slice::from_ref(&item),
+                        )
+                        .await;
+                }
+                Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
 fn start_optional_slack_service(state: &Arc<AppState>) {
     let Some(service) = state.slack_service.clone() else {
         return;
@@ -1927,6 +1957,7 @@ pub fn build_router_with_options(
     options: RouterOptions,
 ) -> Router {
     start_optional_slack_service(&state);
+    start_optional_jira_service(&state);
     let RouterOptions {
         web_enabled,
         static_asset_root,
@@ -2778,6 +2809,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         slack_service,
         jira_service,
         slack_started: AtomicBool::new(false),
+        jira_started: AtomicBool::new(false),
         // Startup snapshot for the sync router build; rotating the webhook
         // secret requires a server restart.
         github_webhook_secret: vault.get(WEBHOOK_SECRET_ENV).map(str::to_string),
