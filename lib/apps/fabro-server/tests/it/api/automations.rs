@@ -1236,10 +1236,11 @@ async fn release_jira_issue_without_claim_is_404() {
         ))
         .await
         .expect("release should respond");
-    response_status(
+    let error = response_json(
         response,
         StatusCode::NOT_FOUND,
         "DELETE /api/v1/automations/nightly/jira-issues/ABC-1 without claim",
     )
     .await;
+    assert_eq!(error["errors"][0]["code"], "jira_issue_claim_not_found");
 }
