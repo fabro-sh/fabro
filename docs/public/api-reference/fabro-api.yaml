@@ -4577,6 +4577,37 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/automations/{id}/jira-issues/{key}:
+    delete:
+      operationId: releaseAutomationJiraIssue
+      tags: [Automations]
+      summary: Release a Jira issue claim
+      description: Deletes the claim that stops an automation from running a Jira issue again, so the next poll can hand the issue to Fabro once more.
+      parameters:
+        - $ref: "#/components/parameters/AutomationId"
+        - $ref: "#/components/parameters/JiraIssueKey"
+      responses:
+        "204":
+          description: Claim released
+        "400":
+          description: Invalid automation id or Jira issue key
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Automation or Jira issue claim not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/automations/{id}/runs:
     get:
       operationId: listAutomationRuns
@@ -6118,6 +6149,16 @@ components:
         type: string
         pattern: "^[a-z0-9][a-z0-9-]{0,62}$"
       example: nightly-deps
+
+    JiraIssueKey:
+      name: key
+      in: path
+      required: true
+      description: Jira issue key.
+      schema:
+        type: string
+        pattern: "^[A-Z][A-Z0-9_]+-[0-9]+$"
+      example: ABC-123
 
     EnvironmentId:
       name: id
