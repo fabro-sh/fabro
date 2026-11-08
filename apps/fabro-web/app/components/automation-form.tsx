@@ -13,6 +13,7 @@ import type {
 
 import {
   findApiTrigger,
+  findJiraTrigger,
   findScheduleTrigger,
   gitTarget,
   type GitRunTarget,
@@ -40,6 +41,10 @@ export interface AutomationFormValues {
   manualEnabled: boolean;
   scheduleEnabled: boolean;
   cron: string;
+  jiraEnabled: boolean;
+  jiraJql: string;
+  jiraInProgressStatus: string;
+  jiraReviewStatus: string;
 }
 
 export const EMPTY_AUTOMATION_FORM: AutomationFormValues = {
@@ -60,6 +65,10 @@ export const EMPTY_AUTOMATION_FORM: AutomationFormValues = {
   manualEnabled:             true,
   scheduleEnabled:           false,
   cron:                      "0 9 * * 1-5",
+  jiraEnabled:               false,
+  jiraJql:                   "",
+  jiraInProgressStatus:      "",
+  jiraReviewStatus:          "",
 };
 
 const CRON_PRESETS: ReadonlyArray<{ label: string; value: string }> = [
@@ -72,6 +81,7 @@ const CRON_PRESETS: ReadonlyArray<{ label: string; value: string }> = [
 export function automationToFormValues(automation: Automation): AutomationFormValues {
   const apiTrigger = findApiTrigger(automation);
   const scheduleTrigger = findScheduleTrigger(automation);
+  const jiraTrigger = findJiraTrigger(automation);
   const target = gitTarget(automation.target);
   const workflowSource = automation.workflow_source;
   return {
@@ -92,6 +102,10 @@ export function automationToFormValues(automation: Automation): AutomationFormVa
     manualEnabled:             apiTrigger?.enabled ?? false,
     scheduleEnabled:           scheduleTrigger?.enabled ?? false,
     cron:                      scheduleTrigger?.expression ?? "0 9 * * 1-5",
+    jiraEnabled:               jiraTrigger?.enabled ?? false,
+    jiraJql:                   jiraTrigger?.jql ?? "",
+    jiraInProgressStatus:      jiraTrigger?.in_progress_status ?? "",
+    jiraReviewStatus:          jiraTrigger?.review_status ?? "",
   };
 }
 
@@ -155,6 +169,16 @@ export function triggersFromFormValues(values: AutomationFormValues): Automation
       expression: values.cron.trim(),
     });
   }
+  if (values.jiraEnabled) {
+    triggers.push({
+      id:                "jira",
+      type:              "jira",
+      enabled:           true,
+      jql:               values.jiraJql.trim(),
+      in_progress_status: values.jiraInProgressStatus.trim() || undefined,
+      review_status:      values.jiraReviewStatus.trim() || undefined,
+    });
+  }
   return triggers;
 }
 
@@ -167,7 +191,8 @@ export function isFormValid(values: AutomationFormValues): boolean {
     values.targetBranch.trim() !== "" &&
     isOptionalShaValid(values.targetSha) &&
     values.workflow.trim() !== "" &&
-    isWorkflowSourceValid(values)
+    isWorkflowSourceValid(values) &&
+    (!values.jiraEnabled || values.jiraJql.trim() !== "")
   );
 }
 
@@ -657,6 +682,62 @@ export function AutomationFormFields({
               </div>
             </div>
           </Row>
+        ) : null}
+        <Row
+          title="Jira board"
+          help="Start a run for each new issue matching a Jira query."
+        >
+          <ToggleSwitch
+            checked={values.jiraEnabled}
+            onChange={(jiraEnabled) => patch({ jiraEnabled })}
+            label="Poll a Jira board"
+          />
+        </Row>
+        {values.jiraEnabled ? (
+          <>
+            <Row
+              title="JQL query"
+              help="Fabro polls this query every minute and starts one run per new issue. Exclude the statuses Fabro moves issues into."
+            >
+              <input
+                type="text"
+                name="jira_jql"
+                aria-label="JQL query"
+                value={values.jiraJql}
+                onChange={(e) => patch({ jiraJql: e.target.value })}
+                placeholder="project = FAB AND status = 'To Do'"
+                autoComplete="off"
+                spellCheck={false}
+                className={`${INPUT_CLASS} font-mono`}
+              />
+            </Row>
+            <Row title="In-progress status" help="Transition name applied when the run starts. Leave empty to skip.">
+              <input
+                type="text"
+                name="jira_in_progress_status"
+                aria-label="In-progress status"
+                value={values.jiraInProgressStatus}
+                onChange={(e) => patch({ jiraInProgressStatus: e.target.value })}
+                placeholder="In Progress"
+                autoComplete="off"
+                spellCheck={false}
+                className={INPUT_CLASS}
+              />
+            </Row>
+            <Row title="Review status" help="Transition name applied when the run succeeds. Leave empty to skip.">
+              <input
+                type="text"
+                name="jira_review_status"
+                aria-label="Review status"
+                value={values.jiraReviewStatus}
+                onChange={(e) => patch({ jiraReviewStatus: e.target.value })}
+                placeholder="In Review"
+                autoComplete="off"
+                spellCheck={false}
+                className={INPUT_CLASS}
+              />
+            </Row>
+          </>
         ) : null}
       </Panel>
     </>
