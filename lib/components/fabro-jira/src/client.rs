@@ -7,6 +7,7 @@ use serde_json::json;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const SEARCH_PAGE_SIZE: &str = "50";
 const COMMENT_PAGE_SIZE: usize = 100;
+const ISSUE_FIELDS: &str = "summary,description,status,issuetype,priority,labels,comment";
 
 #[derive(Debug, thiserror::Error)]
 pub enum JiraError {
@@ -213,7 +214,10 @@ impl JiraClient {
 
     pub async fn get_issue(&self, key: &str) -> Result<JiraIssue, JiraError> {
         let raw: IssueResponse = self
-            .send_json(self.request(Method::Get, &format!("/rest/api/2/issue/{key}")))
+            .send_json(
+                self.request(Method::Get, &format!("/rest/api/2/issue/{key}"))
+                    .query(&[("fields", ISSUE_FIELDS)]),
+            )
             .await?;
         let fields = raw.fields;
         let embedded = fields.comment.unwrap_or_default();
@@ -373,7 +377,12 @@ mod tests {
     async fn get_issue_maps_fields_and_pages_comments() {
         let server = MockServer::start();
         server.mock(|when, then| {
-            when.method(GET).path("/rest/api/2/issue/ABC-1");
+            when.method(GET)
+                .path("/rest/api/2/issue/ABC-1")
+                .query_param(
+                    "fields",
+                    "summary,description,status,issuetype,priority,labels,comment",
+                );
             then.json_body(json!({
                 "key": "ABC-1",
                 "fields": {
