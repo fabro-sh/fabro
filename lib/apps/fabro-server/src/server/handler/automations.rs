@@ -144,6 +144,8 @@ async fn create_automation_run(
             workflow: automation.workflow.clone(),
             run_id,
             temp_root: state.automation_temp_root(),
+            title: None,
+            goal: None,
         })
         .await
     {

@@ -35,6 +35,10 @@ pub enum AutomationValidationError {
     DuplicateTriggerId { id: String },
     #[error("automation can have at most one API trigger")]
     MultipleApiTriggers,
+    #[error("automation can have at most one Jira trigger")]
+    MultipleJiraTriggers,
+    #[error("Jira trigger {trigger_id:?} JQL must not be empty")]
+    EmptyJiraQuery { trigger_id: String },
     #[error("schedule trigger {trigger_id:?} cron expression {expression:?} must have five fields")]
     InvalidCronFieldCount {
         trigger_id: String,
@@ -84,6 +88,13 @@ pub enum AutomationStoreError {
     StoredTriggerShape { id: AutomationId },
     #[error("stored automation {id} has a partial workflow source coordinate")]
     StoredWorkflowSourceShape { id: AutomationId },
+    #[error(
+        "stored Jira claim {issue_key:?} for automation {automation_id} has an invalid run id or timestamp"
+    )]
+    StoredClaimShape {
+        automation_id: AutomationId,
+        issue_key:     String,
+    },
     #[error("stored automation {id} has an invalid revision")]
     InvalidRevision {
         id:     AutomationId,
@@ -171,6 +182,7 @@ impl AutomationStoreError {
             Self::StoredId { .. } => "stored_id",
             Self::StoredTriggerShape { .. } => "stored_trigger_shape",
             Self::StoredWorkflowSourceShape { .. } => "stored_workflow_source_shape",
+            Self::StoredClaimShape { .. } => "stored_claim_shape",
             Self::InvalidRevision { .. } => "invalid_revision",
             Self::Db { .. } => "db",
             Self::InvalidFilename { .. } => "invalid_filename",

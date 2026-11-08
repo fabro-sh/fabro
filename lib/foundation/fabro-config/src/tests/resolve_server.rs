@@ -113,7 +113,42 @@ fn resolved_server_integrations_disable_slack_when_config_is_absent() {
                 "enabled": false,
                 "default_channel": null,
             },
+            "jira": {
+                "enabled": false,
+                "site_url": null,
+                "email": null,
+            },
         })
+    );
+}
+
+#[test]
+fn resolved_server_integrations_disable_jira_without_config() {
+    let settings = resolve_server(&empty_settings_with_auth_methods());
+
+    assert!(!settings.integrations.jira.enabled);
+}
+
+#[test]
+fn resolved_server_integrations_enable_jira_when_config_is_present() {
+    let settings = resolve_server(&parse(
+        r#"
+_version = 1
+
+[server.integrations.jira]
+site_url = "https://acme.atlassian.net/"
+email = "bot@acme.com"
+"#,
+    ));
+
+    assert!(settings.integrations.jira.enabled);
+    assert_eq!(
+        settings.integrations.jira.site_url.as_deref(),
+        Some("https://acme.atlassian.net")
+    );
+    assert_eq!(
+        settings.integrations.jira.email.as_deref(),
+        Some("bot@acme.com")
     );
 }
 

@@ -7077,11 +7077,13 @@ components:
       oneOf:
         - $ref: "#/components/schemas/AutomationApiTrigger"
         - $ref: "#/components/schemas/AutomationScheduleTrigger"
+        - $ref: "#/components/schemas/AutomationJiraTrigger"
       discriminator:
         propertyName: type
         mapping:
           api: "#/components/schemas/AutomationApiTrigger"
           schedule: "#/components/schemas/AutomationScheduleTrigger"
+          jira: "#/components/schemas/AutomationJiraTrigger"
 
     AutomationApiTrigger:
       description: Trigger that allows callers to create runs through the automation API.
@@ -7127,6 +7129,41 @@ components:
           type: string
           description: Five-field cron expression evaluated in UTC.
           example: "0 3 * * *"
+
+    AutomationJiraTrigger:
+      description: Polls Jira Cloud with JQL every minute and starts one run per new issue.
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - type
+        - enabled
+        - jql
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9_-]{0,62}$"
+          example: board
+        type:
+          type: string
+          enum: [jira]
+        enabled:
+          type: boolean
+          example: true
+        jql:
+          type: string
+          description: JQL query selecting the issues that start runs.
+          example: project = ABC AND status = "Ready for Fabro"
+        in_progress_status:
+          type: string
+          nullable: true
+          description: Jira status to move an issue to when its run starts.
+          example: In Progress
+        review_status:
+          type: string
+          nullable: true
+          description: Jira status to move an issue to when its run opens a pull request.
+          example: In Review
 
     CreateAutomationRequest:
       description: Request body for creating an automation.
@@ -15722,12 +15759,14 @@ components:
 
     ServerIntegrationsSettings:
       type: object
-      required: [github, slack]
+      required: [github, slack, jira]
       properties:
         github:
           $ref: "#/components/schemas/GithubIntegrationSettings"
         slack:
           $ref: "#/components/schemas/SlackIntegrationSettings"
+        jira:
+          $ref: "#/components/schemas/JiraIntegrationSettings"
 
     GithubIntegrationSettings:
       type: object
@@ -15765,6 +15804,17 @@ components:
         enabled:
           type: boolean
         default_channel:
+          type: ["string", "null"]
+
+    JiraIntegrationSettings:
+      type: object
+      required: [enabled, site_url, email]
+      properties:
+        enabled:
+          type: boolean
+        site_url:
+          type: ["string", "null"]
+        email:
           type: ["string", "null"]
 
     IntegrationWebhooksSettings:
@@ -16575,7 +16625,7 @@ components:
     IntegrationProvider:
       description: Server integration provider.
       type: string
-      enum: [github, slack]
+      enum: [github, slack, jira]
 
     IntegrationStatus:
       description: Computed runtime integration status.

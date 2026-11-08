@@ -2641,6 +2641,7 @@ dependencies = [
  "fabro-http",
  "fabro-install",
  "fabro-interview",
+ "fabro-jira",
  "fabro-llm",
  "fabro-macros",
  "fabro-manifest",

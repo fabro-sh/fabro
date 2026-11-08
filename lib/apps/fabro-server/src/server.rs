@@ -48,7 +48,7 @@ pub use fabro_api::types::{
     WriteBlobResponse,
 };
 use fabro_auth::SqlVaultCredentialSource;
-use fabro_automation::{self, AutomationStore};
+use fabro_automation::{self, AutomationStore, JiraIssueRunStore};
 use fabro_config::daemon::ServerDaemon;
 use fabro_config::{LlmLayer, RunLayer, Storage, WorkflowSettingsBuilder};
 use fabro_db::DbPool;
@@ -57,6 +57,7 @@ use fabro_interview::{
     Answer, AnswerSubmission, ControlInterviewer, Question, WorkerControlEnvelope,
     WorkerControlOutcome,
 };
+use fabro_jira::JiraClient;
 use fabro_llm::credentials::CredentialProvider;
 use fabro_llm::lithos_catalog::Catalog;
 use fabro_llm::{ClientOptions, FabroClient};
@@ -164,6 +165,8 @@ use crate::{
 
 mod automation_scheduler;
 mod handler;
+pub(crate) mod jira;
+mod jira_poller;
 pub(crate) mod petri_runs;
 mod pull_request_supervisor;
 pub(crate) mod resource_sampler;
@@ -604,7 +607,7 @@ impl Default for SlackConnectionRuntimeState {
     }
 }
 
-fn sanitize_integration_error(error: &str) -> String {
+pub(crate) fn sanitize_integration_error(error: &str) -> String {
     const MAX_ERROR_CHARS: usize = 240;
     let sanitized = error.replace(['\r', '\n'], " ");
     sanitized.chars().take(MAX_ERROR_CHARS).collect()
@@ -1172,6 +1175,7 @@ pub struct AppState {
     /// Test switch: execute runs in this process instead of a worker.
     execute_in_process: bool,
     slack_service: Option<Arc<SlackService>>,
+    pub(crate) jira_service: Option<Arc<jira::JiraService>>,
     slack_started: AtomicBool,
     github_webhook_secret: Option<String>,
 }
@@ -1186,6 +1190,7 @@ pub(crate) struct AppStores {
     pub(crate) auth_codes:      Arc<AuthCodeStore>,
     pub(crate) auth_sessions:   Arc<AuthSessionStore>,
     pub(crate) automations:     Arc<AutomationStore>,
+    pub(crate) jira_claims:     JiraIssueRunStore,
     pub(crate) environments:    Arc<EnvironmentStore>,
     pub(crate) mcp_servers:     Arc<McpServerStore>,
     pub(crate) vault:           Arc<SecretStore>,
@@ -1251,6 +1256,10 @@ impl AppState {
 impl AppState {
     pub(crate) fn automation_store(&self) -> &AutomationStore {
         &self.stores.automations
+    }
+
+    pub(crate) fn jira_claims(&self) -> &JiraIssueRunStore {
+        &self.stores.jira_claims
     }
 
     pub(crate) fn environment_store(&self) -> &EnvironmentStore {
@@ -1363,6 +1372,8 @@ pub(crate) struct AppStateConfig {
     pub(crate) worker_runtime: Option<Arc<dyn WorkerRuntime>>,
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) automation_materializer_override: Option<Arc<dyn AutomationRunMaterializer>>,
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) jira_service_override: Option<jira::JiraService>,
 }
 
 #[derive(Clone)]
@@ -2530,6 +2541,8 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         worker_runtime,
         #[cfg(any(test, feature = "test-support"))]
         automation_materializer_override,
+        #[cfg(any(test, feature = "test-support"))]
+        jira_service_override,
     } = config;
 
     let store_pool = db_pool.clone();
@@ -2541,6 +2554,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
     })
     .context("backfill automation environment selectors")?;
     let automation_store = Arc::new(AutomationStore::new(db_pool.clone()));
+    let jira_claims = JiraIssueRunStore::new(db_pool.clone());
     let local_provider_enabled = resolved_settings
         .server_settings
         .server
@@ -2642,6 +2656,38 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
             None
         }
     };
+    let jira_service = {
+        let jira_settings = &current_server_settings.server.integrations.jira;
+        if jira_settings.enabled {
+            match jira::resolve_jira_credentials(jira_settings, |name| {
+                vault.get(name).map(str::to_string)
+            }) {
+                jira::JiraCredentialResolution::Configured {
+                    site_url,
+                    email,
+                    api_token,
+                } => {
+                    info!("Jira integration enabled");
+                    Some(Arc::new(jira::JiraService::new(
+                        JiraClient::new(site_url, email, api_token)
+                            .context("build Jira HTTP client")?,
+                    )))
+                }
+                jira::JiraCredentialResolution::Missing { names } => {
+                    info!(
+                        missing_inputs = %names.join(","),
+                        "Jira integration disabled; missing credentials"
+                    );
+                    None
+                }
+            }
+        } else {
+            info!("Jira integration disabled by server configuration");
+            None
+        }
+    };
+    #[cfg(any(test, feature = "test-support"))]
+    let jira_service = jira_service_override.map(Arc::new).or(jira_service);
     let worker_tokens = worker_token_keys_from_server_secrets(&server_secrets)?;
     let github_api_base_url = github_api_base_url.unwrap_or_else(fabro_github::github_api_base_url);
     let storage_root = PathBuf::from(&current_server_settings.server.storage.root);
@@ -2681,6 +2727,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
             auth_codes,
             auth_sessions,
             automations: automation_store,
+            jira_claims,
             environments: environment_store,
             mcp_servers: mcp_server_store,
             vault: secret_store,
@@ -2729,6 +2776,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         shutting_down: AtomicBool::new(false),
         execute_in_process,
         slack_service,
+        jira_service,
         slack_started: AtomicBool::new(false),
         // Startup snapshot for the sync router build; rotating the webhook
         // secret requires a server restart.

@@ -56,7 +56,12 @@ async fn connect_creates_parent_directory_and_migrate_is_idempotent() -> anyhow:
     .await?;
     assert_eq!(mcp_servers_table_count, 1);
 
-    for table in ["automations", "automation_triggers"] {
+    for table in [
+        "automations",
+        "automation_triggers",
+        "automation_jira_triggers",
+        "jira_issue_runs",
+    ] {
         let count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?",
         )
@@ -1314,4 +1319,49 @@ async fn table_exists(pool: &sqlx::SqlitePool, table: &str) -> anyhow::Result<bo
             .fetch_one(pool)
             .await?;
     Ok(count == 1)
+}
+
+#[tokio::test]
+async fn jira_issue_runs_rejects_duplicate_claim() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let database = fabro_db::Database::connect(dir.path().join("fabro.sqlite3")).await?;
+    database.migrate().await?;
+
+    let claim = |run_id: &'static str| {
+        sqlx::query(
+            "INSERT INTO jira_issue_runs (automation_id, issue_key, run_id, created_at) \
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind("board")
+        .bind("ABC-1")
+        .bind(run_id)
+        .bind("2026-11-08T00:00:00Z")
+        .execute(database.pool())
+    };
+    claim("run-1").await?;
+    assert!(claim("run-2").await.is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn automation_jira_triggers_reject_blank_jql() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let database = fabro_db::Database::connect(dir.path().join("fabro.sqlite3")).await?;
+    database.migrate().await?;
+
+    insert_minimal_automation(database.pool(), "valid", 1).await?;
+    let insert = |jql: &'static str| {
+        sqlx::query(
+            "INSERT INTO automation_jira_triggers (automation_id, id, enabled, jql) \
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind("valid")
+        .bind("board")
+        .bind(true)
+        .bind(jql)
+        .execute(database.pool())
+    };
+    assert!(insert("   ").await.is_err());
+    insert("project = ABC").await?;
+    Ok(())
 }

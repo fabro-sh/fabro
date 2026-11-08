@@ -4,12 +4,12 @@ use std::path::Path;
 use fabro_types::SandboxProviderKind;
 use fabro_types::settings::server::{
     GithubIntegrationSettings, GithubIntegrationStrategy, IntegrationWebhooksSettings,
-    ObjectStoreProvider, ObjectStoreSettings, SandboxPluginSettings, ServerApiSettings,
-    ServerArtifactsSettings, ServerAuthGithubSettings, ServerAuthMethod, ServerAuthSettings,
-    ServerIntegrationsSettings, ServerListenSettings, ServerLoggingSettings, ServerNamespace,
-    ServerSandboxProviderSettings, ServerSandboxProvidersSettings, ServerSandboxSettings,
-    ServerSchedulerSettings, ServerStorageSettings, ServerWebSettings, SlackIntegrationSettings,
-    WebhookStrategy,
+    JiraIntegrationSettings, ObjectStoreProvider, ObjectStoreSettings, SandboxPluginSettings,
+    ServerApiSettings, ServerArtifactsSettings, ServerAuthGithubSettings, ServerAuthMethod,
+    ServerAuthSettings, ServerIntegrationsSettings, ServerListenSettings, ServerLoggingSettings,
+    ServerNamespace, ServerSandboxProviderSettings, ServerSandboxProvidersSettings,
+    ServerSandboxSettings, ServerSchedulerSettings, ServerStorageSettings, ServerWebSettings,
+    SlackIntegrationSettings, WebhookStrategy,
 };
 use fabro_util::Home;
 
@@ -369,6 +369,33 @@ fn resolve_integrations(layer: Option<&ServerIntegrationsLayer>) -> ServerIntegr
                     SlackIntegrationSettings {
                         enabled:         slack.enabled.unwrap_or(true),
                         default_channel: slack.default_channel.clone(),
+                    }
+                },
+            ),
+        jira:   layer
+            .and_then(|integrations| integrations.jira.as_ref())
+            .map_or(
+                JiraIntegrationSettings {
+                    enabled:  false,
+                    site_url: None,
+                    email:    None,
+                },
+                |jira| {
+                    warn_if_demoted_template(
+                        "server.integrations.jira.site_url",
+                        jira.site_url.as_deref(),
+                    );
+                    warn_if_demoted_template(
+                        "server.integrations.jira.email",
+                        jira.email.as_deref(),
+                    );
+                    JiraIntegrationSettings {
+                        enabled:  jira.enabled.unwrap_or(true),
+                        site_url: jira
+                            .site_url
+                            .as_deref()
+                            .map(|url| url.trim_end_matches('/').to_string()),
+                        email:    jira.email.clone(),
                     }
                 },
             ),

@@ -47,6 +47,14 @@ fn automation_response_round_trips_public_json_shape() {
                 "type": "schedule",
                 "enabled": true,
                 "expression": "0 3 * * *"
+            },
+            {
+                "type": "jira",
+                "id": "board",
+                "enabled": true,
+                "jql": "project = ABC AND status = \"Ready for Fabro\"",
+                "in_progress_status": "In Progress",
+                "review_status": "In Review"
             }
         ]
     });

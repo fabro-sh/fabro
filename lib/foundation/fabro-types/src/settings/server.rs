@@ -287,6 +287,7 @@ pub struct ServerLoggingSettings {
 pub struct ServerIntegrationsSettings {
     pub github: GithubIntegrationSettings,
     pub slack:  SlackIntegrationSettings,
+    pub jira:   JiraIntegrationSettings,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -310,6 +311,23 @@ impl Default for SlackIntegrationSettings {
         Self {
             enabled:         true,
             default_channel: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JiraIntegrationSettings {
+    pub enabled:  bool,
+    pub site_url: Option<String>,
+    pub email:    Option<String>,
+}
+
+impl Default for JiraIntegrationSettings {
+    fn default() -> Self {
+        Self {
+            enabled:  true,
+            site_url: None,
+            email:    None,
         }
     }
 }
