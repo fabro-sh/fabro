@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Runs each time the orb wakes. Setup enables Docker's socket; make sure it is
+# listening so the first Docker call starts the daemon.
+set -euo pipefail
+
+sudo systemctl start docker.socket
