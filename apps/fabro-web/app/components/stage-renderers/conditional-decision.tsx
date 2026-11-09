@@ -70,7 +70,7 @@ export function ConditionalDecision({
             targetStage ? (
               <Link
                 to={stagePath(runId, targetStage.id)}
-                className="group rounded-md bg-teal-500/10 px-3 py-2 text-center transition-colors hover:bg-teal-500/20 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal-500"
+                className="group rounded-md bg-teal-500/10 px-3 py-2 text-center transition-colors hover:bg-teal-500/20 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
               >
                 <div className="text-[10px] font-medium uppercase tracking-wider text-teal-500">
                   To

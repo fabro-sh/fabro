@@ -36,13 +36,13 @@ import {
 const DOCK_MAX_HEIGHT = "max-h-[60vh]";
 
 export const DOCK_HEADER_BUTTON =
-  "inline-flex shrink-0 items-center gap-1.5 rounded-md bg-overlay px-2 py-1 text-xs font-medium text-fg-2 outline-1 -outline-offset-1 outline-line-strong transition-colors hover:bg-overlay-strong hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-overlay disabled:hover:text-fg-2";
+  "inline-flex shrink-0 items-center gap-1.5 rounded-md bg-overlay px-2 py-1 text-xs font-medium text-fg-2 outline-1 -outline-offset-1 outline-line-strong transition-colors hover:bg-overlay-strong hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-overlay disabled:hover:text-fg-2";
 
 export const DOCK_CHOICE_BUTTON =
-  "inline-flex items-center justify-center gap-1.5 rounded-lg bg-overlay px-3.5 py-2 text-left text-sm font-medium text-fg-2 outline-1 -outline-offset-1 outline-line-strong transition-colors hover:bg-overlay-strong hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500 disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex items-center justify-center gap-1.5 rounded-lg bg-overlay px-3.5 py-2 text-left text-sm font-medium text-fg-2 outline-1 -outline-offset-1 outline-line-strong transition-colors hover:bg-overlay-strong hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-current disabled:cursor-not-allowed disabled:opacity-60";
 
 export const DOCK_CHOICE_BUTTON_SELECTED =
-  "inline-flex items-center justify-center gap-1.5 rounded-lg bg-teal-500/15 px-3.5 py-2 text-left text-sm font-medium text-fg outline-1 -outline-offset-1 outline-teal-500/60 transition-colors hover:bg-teal-500/20 focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500";
+  "inline-flex items-center justify-center gap-1.5 rounded-lg bg-teal-500/15 px-3.5 py-2 text-left text-sm font-medium text-fg outline-1 -outline-offset-1 outline-teal-500/60 transition-colors hover:bg-teal-500/20 focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-current";
 
 /**
  * How the dock signals its state.
@@ -153,7 +153,7 @@ export function RunDockShell({
           aria-expanded={!collapsed}
           aria-controls={contentId}
           aria-label={collapsed ? `Expand ${label}` : `Collapse ${label}`}
-          className="inline-flex size-6.5 shrink-0 items-center justify-center rounded-md text-fg-3 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500"
+          className="inline-flex size-6.5 shrink-0 items-center justify-center rounded-md text-fg-3 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
         >
           <ChevronUpIcon
             className={`size-4 transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${

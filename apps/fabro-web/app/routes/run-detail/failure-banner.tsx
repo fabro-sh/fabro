@@ -6,7 +6,7 @@ export function RunFailureBanner({ failure }: { failure: RunFailureView }) {
   return (
     <section aria-label="Why this run failed" className="mb-6">
       <details className="group rounded-lg bg-panel-alt outline-1 -outline-offset-1 outline-line">
-        <summary className="flex cursor-pointer list-none items-start gap-3 rounded-lg px-4 py-3.5 transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500 [&::-webkit-details-marker]:hidden">
+        <summary className="flex cursor-pointer list-none items-start gap-3 rounded-lg px-4 py-3.5 transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-current [&::-webkit-details-marker]:hidden">
           <ExclamationTriangleIcon
             className="mt-0.5 size-4 shrink-0 text-coral"
             aria-hidden="true"

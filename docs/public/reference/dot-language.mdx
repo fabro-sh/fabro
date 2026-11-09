@@ -412,11 +412,11 @@ simplify [label="Simplify", prompt="@prompts/simplify.md"]
 audit [shape=tab, output_schema="@schemas/audit-result.schema.json"]
 ```
 
-The `@` prefix tells Fabro to load the referenced file relative to the workflow file. Paths support `~` (home directory) and `..` (parent directory):
+The `@` prefix tells Fabro to load the referenced file relative to the workflow file. Keep supporting files inside the workflow bundle. Bundled child workflows cannot resolve `..` to reach a parent's files; place their shared inputs beside them instead:
 
 ```dot
-shared [prompt="@~/shared-prompts/review.md"]
-parent [prompt="@../common/plan.md"]
+// In shared/testing.fabro, this refers to shared/ticket.md.
+check [prompt="@ticket.md"]
 ```
 
 Untracked `@file` references (files not committed to git) are inlined into the Graphviz source at prepare time, so they work even inside sandboxes that only see the git tree.

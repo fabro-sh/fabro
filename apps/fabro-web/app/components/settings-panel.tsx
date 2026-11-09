@@ -164,7 +164,7 @@ export function NumberValue({ value }: { value: number }) {
 export function Dot({ on }: { on: boolean }) {
   return (
     <span
-      className={`size-1.5 rounded-full ${on ? "bg-emerald-400" : "bg-fg-muted"}`}
+      className={`size-1.5 rounded-full ${on ? "bg-mint" : "bg-fg-muted"}`}
       aria-hidden="true"
     />
   );

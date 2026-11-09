@@ -57,7 +57,7 @@ export default function SidebarWelcome() {
               <ThreadPrimitive.Suggestion asChild prompt={example.prompt} send>
                 <button
                   type="button"
-                  className="flex w-full items-start gap-3 rounded-xl bg-panel-alt/60 px-4 py-3.5 text-left ring-1 ring-line transition-colors hover:bg-panel-alt hover:ring-line-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500"
+                  className="flex w-full items-start gap-3 rounded-xl bg-panel-alt/60 px-4 py-3.5 text-left ring-1 ring-line transition-colors hover:bg-panel-alt hover:ring-line-strong focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
                 >
                   <example.Icon
                     aria-hidden="true"

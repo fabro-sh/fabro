@@ -31,7 +31,7 @@ export default function CustomComposer() {
             <button
               type="submit"
               aria-label="Send message"
-              className="inline-flex size-9 items-center justify-center rounded-full bg-teal-500 text-on-primary transition-colors hover:bg-teal-300 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex size-9 items-center justify-center rounded-full bg-primary text-on-primary transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
               <ArrowUpIcon className="size-4" />
             </button>

@@ -10,6 +10,7 @@ import {
   ClipboardDocumentIcon,
 } from "@heroicons/react/20/solid";
 
+import { useAppearance } from "./appearance-provider";
 import { SECONDARY_BUTTON_CLASS, Tooltip } from "./ui";
 import { ErrorState } from "./state";
 import { useToast } from "./toast";
@@ -22,14 +23,13 @@ import {
   terminalAccessCommandLabel,
 } from "./terminal-view-helpers";
 import {
-  TERMINAL_BACKGROUND,
   useTerminalSession,
   type ConnectionStatus,
   type TerminalConnectionError,
 } from "../hooks/use-terminal-session";
 
 const ICON_BUTTON_CLASS =
-  "inline-flex size-9 items-center justify-center rounded-lg text-fg-2 outline-1 -outline-offset-1 outline-white/10 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500";
+  "inline-flex size-9 items-center justify-center rounded-lg text-fg-2 outline-1 -outline-offset-1 outline-line-strong transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-current";
 
 function terminalAccessCommandCopiedMessage(provider: string | null): string {
   return provider === "docker" ? "Docker exec command copied." : "SSH command copied.";
@@ -77,7 +77,7 @@ function StatusPill({
   return (
     <output
       aria-live="polite"
-      className="inline-flex items-center gap-2 rounded-full bg-overlay py-1 pr-3 pl-2 text-xs font-medium text-fg-2 outline-1 -outline-offset-1 outline-white/10"
+      className="inline-flex items-center gap-2 rounded-full bg-overlay py-1 pr-3 pl-2 text-xs font-medium text-fg-2 outline-1 -outline-offset-1 outline-line-strong"
     >
       <span
         className={`size-1.5 rounded-full ${statusDotClasses(status)}`}
@@ -106,6 +106,7 @@ export default function TerminalView({
   chromeless?: boolean;
 }) {
   const { push } = useToast();
+  const { terminalColors } = useAppearance();
   const stateQuery = useRunState(runId);
   const sandbox = stateQuery.data?.sandbox ?? null;
   const provider = sandboxInstance(sandbox)?.provider ?? null;
@@ -152,7 +153,7 @@ export default function TerminalView({
     <section
       className="flex h-full min-h-0 flex-col"
       aria-labelledby={headingId}
-      style={chromeless ? { backgroundColor: TERMINAL_BACKGROUND } : undefined}
+      style={chromeless ? { backgroundColor: terminalColors.background } : undefined}
     >
       <h2 id={headingId} className="sr-only">Terminal</h2>
       {!chromeless && (
@@ -211,7 +212,7 @@ export default function TerminalView({
       ) : (
         <div
           className="min-h-0 flex-1 overflow-hidden rounded border border-line pb-3"
-          style={{ backgroundColor: TERMINAL_BACKGROUND }}
+          style={{ backgroundColor: terminalColors.background }}
         >
           <div ref={terminalEl} className="h-full min-h-0 p-3" />
         </div>

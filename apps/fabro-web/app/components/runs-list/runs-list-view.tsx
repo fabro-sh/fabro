@@ -137,12 +137,13 @@ export function RunsListView({
 
   return (
     <div className="space-y-3">
-      <div className="-mx-4 -my-2 overflow-x-auto whitespace-nowrap sm:-mx-6 lg:-mx-8">
-        <div className="inline-block min-w-full px-4 py-2 align-middle sm:px-6 lg:px-8">
-          <table className="w-full text-sm">
+      <div className="card overflow-hidden">
+        {/* Not scroll-pane: its overscroll rule would trap the page's vertical wheel over the table. */}
+        <div className="overflow-x-auto whitespace-nowrap">
+          <table className="w-full text-left text-[12.5px]">
             <thead>
-              <tr className="border-b border-line text-xs font-medium text-fg-3">
-                <th scope="col" className="w-8 whitespace-nowrap px-3 py-2.5">
+              <tr className="text-[11px] font-bold text-muted">
+                <th scope="col" className="w-8 whitespace-nowrap px-3 py-2">
                   <SelectionCheckbox
                     checked={allOnPageSelected}
                     indeterminate={someOnPageSelected}
@@ -153,7 +154,7 @@ export function RunsListView({
                 </th>
                 <SortHeader label="Status" sortKey="status" activeSort={sort} direction={direction} onClick={onSortClick} />
                 {show("created_by") && (
-                  <th scope="col" className="w-8 whitespace-nowrap px-3 py-2.5 font-medium">
+                  <th scope="col" className="w-8 whitespace-nowrap px-3 py-2">
                     By
                   </th>
                 )}
@@ -180,9 +181,9 @@ export function RunsListView({
                   <SortHeader label="Changes" sortKey="changes" activeSort={sort} direction={direction} align="right" onClick={onSortClick} />
                 )}
                 {show("pr") && (
-                  <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-right font-medium">PR</th>
+                  <th scope="col" className="whitespace-nowrap px-3 py-2 text-right">PR</th>
                 )}
-                <th scope="col" className="w-10 whitespace-nowrap px-3 py-2.5">
+                <th scope="col" className="w-10 whitespace-nowrap px-3 py-2">
                   <span className="sr-only">Actions</span>
                 </th>
               </tr>

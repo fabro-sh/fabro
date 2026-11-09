@@ -122,7 +122,7 @@ export default function VncPanel({ runId, provider, leading }: VncPanelProps) {
           <Tooltip label="Reconnect">
             <button
               type="button"
-              className="inline-flex size-9 items-center justify-center rounded-lg text-fg-2 outline-1 -outline-offset-1 outline-white/10 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex size-9 items-center justify-center rounded-lg text-fg-2 outline-1 -outline-offset-1 outline-line-strong transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-current disabled:cursor-not-allowed disabled:opacity-50"
               onClick={() => void vncQuery.mutate()}
               aria-label="Reconnect VNC"
               disabled={!supported || vncQuery.isValidating}
@@ -135,7 +135,7 @@ export default function VncPanel({ runId, provider, leading }: VncPanelProps) {
           </Tooltip>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-line bg-neutral-950">
+      <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-line bg-panel-alt">
         <VncBody
           provider={provider}
           loading={supported && vncQuery.isLoading}
@@ -161,7 +161,7 @@ function StatusPill({
   return (
     <output
       aria-live="polite"
-      className="inline-flex items-center gap-2 rounded-full bg-overlay py-1 pr-3 pl-2 text-xs font-medium text-fg-2 outline-1 -outline-offset-1 outline-white/10"
+      className="inline-flex items-center gap-2 rounded-full bg-overlay py-1 pr-3 pl-2 text-xs font-medium text-fg-2 outline-1 -outline-offset-1 outline-line-strong"
     >
       <span className={`size-1.5 rounded-full ${dot}`} aria-hidden="true" />
       <span>{label}</span>

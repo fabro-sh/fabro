@@ -84,7 +84,7 @@ function ChildRow({
       {row.stageId ? (
         <Link
           to={stagePath(runId, row.stageId)}
-          className="group flex flex-1 items-center gap-3 rounded -m-1 p-1 transition-colors hover:bg-overlay focus-visible:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal-500"
+          className="group flex flex-1 items-center gap-3 rounded -m-1 p-1 transition-colors hover:bg-overlay focus-visible:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
         >
           {inner}
         </Link>

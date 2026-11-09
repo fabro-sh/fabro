@@ -45,7 +45,7 @@ export function ReviewTargetQuestion({
         target="_blank"
         rel="noopener noreferrer"
         referrerPolicy="no-referrer"
-        className="inline-flex items-baseline gap-1 font-semibold text-teal-300 underline decoration-teal-500/50 underline-offset-2 transition-colors hover:text-fg focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500"
+        className="inline-flex items-baseline gap-1 font-semibold text-teal-300 underline decoration-teal-500/50 underline-offset-2 transition-colors hover:text-fg focus-visible:rounded-sm focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
       >
         <span>{target.label}</span>
         <ArrowTopRightOnSquareIcon

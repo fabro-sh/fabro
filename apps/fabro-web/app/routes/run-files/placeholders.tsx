@@ -11,7 +11,7 @@ export function SensitivePlaceholder({ name }: { name: string }) {
   return (
     <div className={PLACEHOLDER_CLASSES}>
       <span className="font-mono text-fg-2">{name}</span>
-      <span className="rounded bg-rose-950/40 px-2 py-0.5 text-xs text-rose-200">
+      <span className="rounded bg-coral/10 px-2 py-0.5 text-xs text-coral">
         sensitive: contents omitted
       </span>
     </div>

@@ -38,6 +38,7 @@
             "group": "Defining Workflows",
             "icon": "diagram-project",
             "pages": [
+              "workflows/visual-builder",
               "workflows/stages-and-nodes",
               "workflows/transitions",
               "workflows/variables",

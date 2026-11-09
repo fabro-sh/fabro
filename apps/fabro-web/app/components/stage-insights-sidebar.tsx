@@ -120,7 +120,7 @@ export function StageInsightsSidebar({ stage, contextWindow }: StageInsightsSide
           aria-expanded={!collapsed}
           aria-label={collapsed ? "Expand agent sidebar" : "Collapse agent sidebar"}
           title={collapsed ? "Expand agent sidebar" : "Collapse agent sidebar"}
-          className={`inline-flex size-7 shrink-0 items-center justify-center rounded-md text-fg-3 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 ${collapsed ? "mx-auto" : "-mr-1"}`}
+          className={`inline-flex size-7 shrink-0 items-center justify-center rounded-md text-fg-3 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current ${collapsed ? "mx-auto" : "-mr-1"}`}
         >
           {collapsed ? (
             <ChevronDoubleRightIcon className="size-4" />
@@ -266,7 +266,7 @@ function CollapsibleSection({
         type="button"
         onClick={toggle}
         aria-expanded={open}
-        className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-teal-500"
+        className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
       >
         <ChevronRightIcon
           className={`size-3 shrink-0 text-fg-muted transition-transform duration-150 ${open ? "rotate-90" : ""}`}
@@ -449,7 +449,7 @@ function ContextWindowSection({ collapsed, snapshot, compactions }: ContextWindo
         type="button"
         onClick={toggle}
         aria-expanded={open}
-        className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-teal-500"
+        className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
       >
         <ChevronRightIcon
           className={`size-3 shrink-0 text-fg-muted transition-transform duration-150 ${open ? "rotate-90" : ""}`}

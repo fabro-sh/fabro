@@ -137,12 +137,12 @@ export function InlineErrorBanner({
   onRetry: () => void;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md border border-rose-500/30 bg-rose-950/20 px-4 py-3 text-sm text-rose-100">
+    <div className="flex items-center justify-between gap-3 rounded-md border border-coral/30 bg-coral/10 px-4 py-3 text-sm text-coral">
       <span>{message}</span>
       <button
         type="button"
         onClick={onRetry}
-        className="min-h-[32px] rounded-md border border-rose-500/40 bg-rose-950/40 px-3 py-1 text-xs font-medium text-rose-50 transition-colors hover:bg-rose-950/60"
+        className="min-h-[32px] rounded-md border border-coral/40 bg-coral/10 px-3 py-1 text-xs font-medium text-coral transition-colors hover:bg-coral/20"
       >
         Retry
       </button>

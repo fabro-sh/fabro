@@ -117,7 +117,7 @@ export default function SettingsLiveEvents() {
                   <button
                     type="button"
                     onClick={clearFilters}
-                    className="rounded px-2 py-1 text-xs text-fg-muted transition-colors hover:bg-overlay hover:text-fg-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-teal-500"
+                    className="rounded px-2 py-1 text-xs text-fg-muted transition-colors hover:bg-overlay hover:text-fg-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
                   >
                     Clear
                   </button>
@@ -200,7 +200,7 @@ function LiveEventRow({
       onClick={onSelect}
       onKeyDown={handleKeyDown}
       aria-pressed={selected}
-      className={`grid w-full grid-cols-[5rem_1fr_10rem_8rem_auto] items-center gap-3 px-5 py-2.5 text-left transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal-500 ${
+      className={`grid w-full grid-cols-[5rem_1fr_10rem_8rem_auto] items-center gap-3 px-5 py-2.5 text-left transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current ${
         selected ? "bg-overlay" : ""
       }`}
     >

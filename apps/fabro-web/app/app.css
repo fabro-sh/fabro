@@ -21,8 +21,27 @@
 
 @import "@assistant-ui/react-ui/styles/index.css" layer(assistant-ui);
 @import "@assistant-ui/react-ui/styles/markdown.css" layer(assistant-ui);
+@import "./components/workflow-builder/builder.css";
+@import "./components/workflow-builder/model-picker.css";
+
+@import "./styles/factory-fonts.css";
+@import "./styles/factory-themes.css";
+@import "./styles/factory-assistant-ui.generated.css";
+@import "./styles/appearance.css";
+@import "./styles/factory-components.css";
+@import "./styles/diagram.css";
 
 @layer base {
+  /* Factory's body weight. Fabro keeps its own sizes, so layouts don't move. */
+  body {
+    font-weight: 500;
+  }
+
+  ::selection {
+    background: var(--selection-bg);
+    color: var(--selection-fg);
+  }
+
   a[href],
   button,
   select,
@@ -36,153 +55,134 @@
   }
 }
 
-@theme {
-  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif,
-    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+/*
+ * Everything Fabro's utilities paint with, mapped onto Factory's semantic tokens in
+ * styles/factory-themes.css. That file sets the same names for all seven palettes in
+ * light and dark, so these one-way mappings cover all 14. `static` keeps every variable
+ * even when no utility uses it, because components read them by name in inline styles.
+ */
+@theme static {
+  --font-sans: "Manrope", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* Palettes override this one. Signal navy's display face is Unbounded. */
+  --font-display: "Unbounded", "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-display);
 
-  /* Primary — Teal */
-  --color-teal-300: #B5DDEF;
-  --color-teal-500: #67B2D7;
-  --color-teal-700: #357F9E;
+  /* Palettes override these too. The values here are Signal navy's. */
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+  --radius-2xl: var(--radius-xl);
+  --radius-3xl: var(--radius-xl);
+  --radius-badge: 999px;
+  --radius-chip: 8px;
+  --radius-btn: 10px;
 
-  /* Neutrals Dark — Navy */
-  --color-navy-950: #0F1729;
-  --color-navy-800: #252C3D;
-  --color-navy-600: #4B5768;
+  /* Factory's three elevations, which are hard offsets in Brutalist and sculpted in
+     Soft graphite. Tailwind's scale folds onto them. */
+  --shadow-2xs: var(--e1);
+  --shadow-xs: var(--e1);
+  --shadow-sm: var(--e1);
+  --shadow-md: var(--e2);
+  --shadow-lg: var(--e2);
+  --shadow-xl: var(--e3);
+  --shadow-2xl: var(--e3);
+  --shadow-e1: var(--e1);
+  --shadow-e2: var(--e2);
+  --shadow-e3: var(--e3);
+  --shadow-signal: var(--e-signal);
 
-  /* Neutrals Light — Ice */
+  /* ── Fabro's contract ── */
+  --color-page: var(--bg);
+  --color-panel: var(--surface);
+  --color-panel-alt: var(--surface-2);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  /* Factory has one secondary text color and Fabro's markup has two, so this one is
+     derived, halfway between two Factory tokens. Contrast is tested on every palette. */
+  --color-fg-3: color-mix(in srgb, var(--fg-2) 50%, var(--muted));
+  --color-fg-muted: var(--muted);
+  /* Hover and pressed washes, translucent so they work on any surface. Derived. */
+  --color-overlay: color-mix(in srgb, var(--fg) 5%, transparent);
+  --color-overlay-strong: color-mix(in srgb, var(--fg) 11%, transparent);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-focus: var(--ring);
+  --color-on-primary: var(--primary-fg);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-backdrop: var(--backdrop);
+
+  /* The accent, under the utility names the app's markup already uses. Text and marks.
+     Filled buttons use bg-primary, because Factory's primary and accent differ. */
+  --color-teal-300: color-mix(in srgb, var(--accent-soft-ink) 88%, var(--fg));
+  --color-teal-500: var(--accent-ink);
+  --color-teal-700: var(--accent-fill);
+
+  /* Status */
+  --color-mint: var(--ok);
+  --color-amber: var(--warn);
+  --color-coral: var(--bad);
+
+  /* Fixed tile behind third-party logos that are drawn for light backgrounds. */
   --color-ice-50: #F7F9FB;
-  --color-ice-100: #E8EDF3;
-  --color-ice-300: #A8B5C5;
 
-  /* Accent */
-  --color-mint: #5AC8A8;
-  --color-amber: #F0A45B;
-  --color-coral: #E86B6B;
-
-  /* ── Semantic tokens ── */
-  --color-page: #0F1729;
-  --color-panel: #252C3D;
-  --color-panel-alt: #1a2133;
-  --color-overlay: rgba(255, 255, 255, 0.04);
-  --color-overlay-strong: rgba(255, 255, 255, 0.10);
-  --color-fg: #ffffff;
-  --color-fg-2: #E8EDF3;
-  --color-fg-3: #A8B5C5;
-  --color-fg-muted: #4B5768;
-  --color-line: rgba(255, 255, 255, 0.06);
-  --color-line-strong: rgba(255, 255, 255, 0.12);
-  --color-focus: rgba(103, 178, 215, 0.4);
-  /* Text color that sits on --color-teal-500 primary fills. */
-  --color-on-primary: #0F1729;
+  /* ── Factory's own utility names, for components ported from it ── */
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-muted: var(--muted);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary-fg: var(--primary-fg);
+  --color-signal: var(--accent-fill);
+  --color-signal-ink: var(--accent-ink);
+  --color-signal-pop: var(--accent-pop);
+  --color-signal-pop-fg: var(--accent-pop-fg);
+  --color-peach: var(--accent-soft);
+  --color-peach-ink: var(--accent-soft-ink);
+  --color-rail: var(--rail);
+  --color-rail-fg: var(--rail-fg);
+  --color-rail-muted: var(--rail-muted);
+  --color-rail-strong: var(--rail-strong);
+  --color-rail-line: var(--rail-line);
+  --color-rail-hover: var(--rail-hover);
+  --color-rail-hover-fg: var(--rail-hover-fg);
+  --color-rail-control: var(--rail-control);
+  --color-rail-control-fg: var(--rail-control-fg);
+  --color-rail-control-line: var(--rail-control-line);
+  --color-ok: var(--ok);
+  --color-ok-bg: var(--ok-bg);
+  --color-bad: var(--bad);
+  --color-bad-bg: var(--bad-bg);
+  --color-warn: var(--warn);
+  --color-warn-bg: var(--warn-bg);
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
+  --color-violet: var(--violet);
+  --color-violet-bg: var(--violet-bg);
 }
 
-/* ── Chart variables ── */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ── @pierre/diffs typography. Colors come from styles/appearance.css. ── */
 
 :root {
-  --chart-gridline: rgba(255, 255, 255, 0.04);
-  --chart-axis-label: rgba(75, 87, 104, 1);
-}
-
-/* ── Background atmosphere ── */
-
-.bg-atmosphere {
-  background-color: var(--color-page);
-  background-image:
-    radial-gradient(ellipse 120% 60% at 15% 5%, rgba(53, 127, 158, 0.12) 0%, transparent 50%),
-    radial-gradient(ellipse 80% 50% at 85% 90%, rgba(90, 200, 168, 0.07) 0%, transparent 45%);
-  background-attachment: fixed;
-}
-
-.bg-atmosphere::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  opacity: 0.07;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-repeat: repeat;
-  background-size: 200px 200px;
-}
-
-/* ── @pierre/diffs brand overrides ── */
-
-:root {
-  --diffs-font-family: "JetBrains Mono", ui-monospace, monospace;
-  --diffs-header-font-family: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --diffs-font-family: var(--font-mono);
+  --diffs-header-font-family: var(--font-sans);
   --diffs-font-size: 13px;
   --diffs-line-height: 20px;
-
-  /* Surfaces */
-  --diffs-bg-buffer-override: #0F1729;
-  --diffs-bg-context-override: #161d2e;
-  --diffs-bg-hover-override: #1c2438;
-  --diffs-bg-separator-override: #252C3D;
-
-  /* Line numbers */
-  --diffs-fg-number-override: #4B5768;
-
-  /* Additions — mint */
-  --diffs-addition-color-override: #5AC8A8;
-  --diffs-fg-number-addition-override: rgba(90, 200, 168, 0.5);
-
-  /* Deletions — coral */
-  --diffs-deletion-color-override: #E86B6B;
-  --diffs-fg-number-deletion-override: rgba(232, 107, 107, 0.5);
 }
 
-/* ── Server-rendered SVG graph overrides ── */
-/* The server injects @media (prefers-color-scheme: dark) which won't reliably
-   fire when the OS is in light mode, so we apply dark graph colors always. */
-
-.graph-svg text { fill: #c6d4e0; }
-.graph-svg [stroke="#357f9e"] { stroke: #67B2D7; }
-.graph-svg [stroke="#666666"] { stroke: #5a7a94; }
-.graph-svg polygon[fill="#357f9e"] { fill: #67B2D7; }
-.graph-svg polygon[fill="#666666"] { fill: #5a7a94; }
-.graph-svg ellipse[fill="#ffffff"],
-.graph-svg polygon[fill="#ffffff"] { fill: #1a2b3c; }
-.graph-svg ellipse[stroke="#357f9e"],
-.graph-svg polygon[stroke="#357f9e"] { stroke: #67B2D7; }
-.graph-svg [fill="#1a1a1a"] { fill: #c6d4e0; }
-
 /* ---------------------------------------------------------------------------
- * assistant-ui theme overrides (--aui-* variables) — mapped to Fabro tokens.
- * Values are HSL component triples so assistant-ui's hsl(var(...)) wrapper
- * works. Scoped to .fabro-chat so the shadcn theme cannot leak out.
- *
- * Source colors come from the @theme block above:
- *   navy-950 #0F1729 = 220 47% 11%
- *   panel    #252C3D = 222 24% 19%
- *   panel-alt #1a2133 = 223 33% 15%
- *   teal-500 #67B2D7 = 200 60% 62%  (Fabro's "teal" is a sky blue)
- *   mint     #5AC8A8 = 163 49% 57%
- *   ice-100  #E8EDF3 = 213 27% 93%
- *   ice-300  #A8B5C5 = 213 22% 72%
+ * assistant-ui settings shared by every palette. The --aui-* colors are generated into
+ * styles/factory-assistant-ui.generated.css, scoped to .fabro-chat so they can't leak out.
  * ------------------------------------------------------------------------- */
 .fabro-chat {
-  --aui-background: 220 47% 11%;
-  --aui-foreground: 0 0% 100%;
-  --aui-card: 222 24% 19%;
-  --aui-card-foreground: 0 0% 100%;
-  --aui-popover: 222 24% 19%;
-  --aui-popover-foreground: 0 0% 100%;
-  --aui-primary: 200 60% 62%;
-  --aui-primary-foreground: 220 47% 11%;
-  --aui-secondary: 223 33% 15%;
-  --aui-secondary-foreground: 0 0% 100%;
-  --aui-muted: 223 33% 15%;
-  --aui-muted-foreground: 213 22% 72%;
-  --aui-accent: 163 49% 57%;
-  --aui-accent-foreground: 220 47% 11%;
-  --aui-destructive: 0 76% 66%;
-  --aui-destructive-foreground: 0 0% 100%;
-  --aui-border: 218 28% 17%;
-  --aui-input: 218 28% 17%;
-  --aui-ring: 200 60% 62%;
-  --aui-radius: 0.5rem;
+  --aui-radius: var(--radius-sm);
   --aui-thread-max-width: 44rem;
 }
 

@@ -57,7 +57,7 @@ const CATEGORY_COLOR: Record<DebugCategory, string> = {
   command: "var(--color-mint)",
   lifecycle: "var(--color-amber)",
   human: "var(--color-coral)",
-  system: "var(--color-ice-300)",
+  system: "var(--color-fg-3)",
   petri: "var(--color-teal-500)",
   platform: "var(--color-amber)",
 };

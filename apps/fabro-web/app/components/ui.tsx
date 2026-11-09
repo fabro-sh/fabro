@@ -1,11 +1,12 @@
-// Shared UI primitives. The install wizard set the visual baseline; this file
-// exposes the primary button, secondary button, input, error message, and
-// copy button so the auth and in-app surfaces can match.
+// Shared UI primitives, drawn from Factory's component library in
+// styles/factory-components.css. Dialog, tooltip and hover-card mechanics stay on
+// HeadlessUI and Radix. Which parts are one-to-one: styles/FACTORY_COMPONENTS.md.
 
 import { Dialog, DialogPanel, DialogTitle } from "@headlessui/react";
 import {
   ClipboardDocumentCheckIcon,
   ClipboardIcon,
+  XMarkIcon,
 } from "@heroicons/react/16/solid";
 import * as HoverCardPrimitive from "@radix-ui/react-hover-card";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
@@ -17,26 +18,34 @@ import {
   type ReactNode,
 } from "react";
 
-export const INPUT_CLASS =
-  "block w-full rounded-lg bg-panel-alt px-3.5 py-2.5 text-base text-fg outline-1 -outline-offset-1 outline-white/10 placeholder:text-fg-muted focus:outline-2 focus:-outline-offset-1 focus:outline-teal-500 sm:text-sm";
+export const INPUT_CLASS = "input";
 
-export const PRIMARY_BUTTON_CLASS =
-  "inline-flex items-center justify-center gap-2 rounded-lg bg-teal-500 px-4 py-2 text-sm font-medium text-on-primary transition-colors hover:bg-teal-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-teal-500";
+export const PRIMARY_BUTTON_CLASS = "btn btn-primary";
 
-export const SECONDARY_BUTTON_CLASS =
-  "inline-flex items-center justify-center gap-2 rounded-lg bg-transparent px-3.5 py-2 text-sm font-medium text-fg-2 outline-1 -outline-offset-1 outline-white/10 hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500 disabled:cursor-not-allowed disabled:opacity-60";
+export const SECONDARY_BUTTON_CLASS = "btn";
 
-const DANGER_BUTTON_CLASS =
-  "inline-flex items-center justify-center gap-2 rounded-lg bg-coral px-4 py-2 text-sm font-medium text-on-primary transition-colors hover:bg-coral/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-coral disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-coral";
+export const DANGER_BUTTON_CLASS = "btn btn-danger";
 
-export const COMPACT_SECONDARY_BUTTON_CLASS =
-  "rounded-md border border-line bg-overlay px-2.5 py-1 text-xs text-fg-2 transition-colors hover:bg-overlay-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-50";
+/** Icon and quiet actions, such as a dialog's close button. */
+export const GHOST_BUTTON_CLASS = "btn btn-ghost";
+
+/** The palette's highlight. Only where Factory itself uses a signal call to action. */
+export const SIGNAL_BUTTON_CLASS = "btn btn-signal";
+
+export const COMPACT_SECONDARY_BUTTON_CLASS = "btn btn-sm";
+
+/** A filter or view control beside a search field. The same 36px height as Factory's filter row. */
+export const TOOLBAR_BUTTON_CLASS = "btn btn-sm h-9";
+
+export const TOOLTIP_SURFACE_CLASS = "tooltip-surface";
+
+export const POPOVER_SURFACE_CLASS = "popover-surface";
 
 export function ErrorMessage({ message }: { message: string }) {
   return (
     <p
       role="alert"
-      className="rounded-md bg-coral/10 px-3 py-2 text-sm/6 text-fg-2 outline-1 -outline-offset-1 outline-coral/40"
+      className="rounded-md bg-bad-bg px-3 py-2 text-[13px] font-semibold text-bad"
     >
       {message}
     </p>
@@ -65,12 +74,12 @@ export function CopyButton({
           // Clipboard may be blocked; leave state unchanged.
         }
       }}
-      className={`inline-flex size-6 shrink-0 items-center justify-center rounded text-fg-muted outline-teal-500 hover:bg-overlay hover:text-fg-2 focus-visible:outline-2 focus-visible:outline-offset-1 ${className}`}
+      className={`inline-flex size-6 shrink-0 items-center justify-center rounded-xs text-muted hover:bg-surface-3 hover:text-fg-2 ${className}`}
       aria-label={copied ? "Copied" : label}
       title={copied ? "Copied" : label}
     >
       {copied ? (
-        <ClipboardDocumentCheckIcon className="size-4 text-mint" />
+        <ClipboardDocumentCheckIcon className="size-4 text-ok" />
       ) : (
         <ClipboardIcon className="size-4" />
       )}
@@ -109,30 +118,43 @@ export function ConfirmDialog({
       }}
       className="relative z-50"
     >
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" aria-hidden="true" />
-      <div className="fixed inset-0 flex items-start justify-center pt-[20vh] px-4">
-        <DialogPanel className="w-full max-w-md rounded-lg border border-line-strong bg-panel shadow-2xl shadow-black/40">
-          <div className="px-5 py-4">
-            <DialogTitle className="text-sm font-semibold text-fg">{title}</DialogTitle>
-            <div className="mt-2 text-sm text-fg-3">{description}</div>
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={onCancel}
-                disabled={pending}
-                className={SECONDARY_BUTTON_CLASS}
-              >
-                {cancelLabel}
-              </button>
-              <button
-                type="button"
-                onClick={onConfirm}
-                disabled={pending}
-                className={tone === "danger" ? DANGER_BUTTON_CLASS : PRIMARY_BUTTON_CLASS}
-              >
-                {pending ? (pendingLabel ?? `${confirmLabel}…`) : confirmLabel}
-              </button>
-            </div>
+      <div className="modal-backdrop fixed inset-0" aria-hidden="true" />
+      <div className="fixed inset-0 flex items-center justify-center p-4">
+        <DialogPanel className="modal modal-confirm flex flex-col">
+          <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
+            <DialogTitle className="text-base font-extrabold">{title}</DialogTitle>
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={pending}
+              aria-label="Close"
+              className={`${GHOST_BUTTON_CLASS} btn-sm`}
+            >
+              <XMarkIcon className="size-4" aria-hidden="true" />
+            </button>
+          </div>
+          <div className="scroll-pane min-h-0 flex-1 px-5 py-4 text-[13px] text-fg-2">
+            {description}
+          </div>
+          <div className="flex flex-wrap justify-end gap-2 border-t border-line px-5 py-3">
+            {/* Opening a destructive question lands on the safe answer, not on the close icon. */}
+            <button
+              type="button"
+              data-autofocus
+              onClick={onCancel}
+              disabled={pending}
+              className={SECONDARY_BUTTON_CLASS}
+            >
+              {cancelLabel}
+            </button>
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={pending}
+              className={tone === "danger" ? DANGER_BUTTON_CLASS : PRIMARY_BUTTON_CLASS}
+            >
+              {pending ? (pendingLabel ?? `${confirmLabel}…`) : confirmLabel}
+            </button>
           </div>
         </DialogPanel>
       </div>
@@ -176,30 +198,40 @@ export function TooltipProvider({
 export function Tooltip({
   label,
   children,
+  side = "top",
+  triggerClassName = "inline-flex",
+  disabled = false,
 }: {
   label: ReactNode;
   children: ReactNode;
+  side?: "top" | "right" | "bottom" | "left";
+  /** The wrapper's display. A full-width row needs something other than the inline default. */
+  triggerClassName?: string;
+  /** Keep the trigger mounted while suppressing its tooltip. */
+  disabled?: boolean;
 }) {
   // Tests and isolated mounts may render <Tooltip> without an ancestor
   // <TooltipProvider>; Radix throws in that case, so supply a local provider.
   const hasProvider = useContext(HasTooltipProviderContext);
+  const [open, setOpen] = useState(false);
+  if (disabled && open) setOpen(false);
 
   if (!canUseOverlayDom()) {
-    return <span className="inline-flex">{children}</span>;
+    return <span className={triggerClassName}>{children}</span>;
   }
 
   const root = (
-    <TooltipPrimitive.Root>
+    <TooltipPrimitive.Root open={!disabled && open} onOpenChange={(next) => setOpen(!disabled && next)}>
       <TooltipPrimitive.Trigger asChild>
-        <span className="inline-flex">{children}</span>
+        <span className={triggerClassName}>{children}</span>
       </TooltipPrimitive.Trigger>
       <TooltipPrimitive.Portal>
         <TooltipPrimitive.Content
-          side="top"
+          side={side}
           align="center"
           sideOffset={6}
           collisionPadding={12}
-          className="pointer-events-none z-50 max-w-[min(32rem,calc(100vw-1.5rem))] rounded-md bg-panel px-2 py-1 text-xs text-fg-2 shadow-lg outline-1 -outline-offset-1 outline-line-strong"
+          className={`pointer-events-none z-50 max-w-[min(32rem,calc(100vw-1.5rem))] ${TOOLTIP_SURFACE_CLASS}`}
         >
           {label}
         </TooltipPrimitive.Content>
@@ -240,7 +272,7 @@ export function HoverCard({
           align="start"
           sideOffset={6}
           collisionPadding={12}
-          className="pointer-events-none z-50 max-w-[18rem] rounded-lg bg-panel p-3 text-xs text-fg-2 shadow-xl outline-1 -outline-offset-1 outline-line-strong"
+          className={`pointer-events-none z-50 ${POPOVER_SURFACE_CLASS}`}
         >
           {content}
         </HoverCardPrimitive.Content>
@@ -251,7 +283,7 @@ export function HoverCard({
 
 export function PopoverHeader({ children }: { children: ReactNode }) {
   return (
-    <div className="mb-1.5 border-b border-line pb-1 font-medium text-fg-2">
+    <div className="mb-1.5 border-b border-line pb-1 text-[13px] font-extrabold text-fg">
       {children}
     </div>
   );
@@ -264,7 +296,7 @@ export function PopoverRows({ children }: { children: ReactNode }) {
 export function PopoverRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <>
-      <dt className="text-fg-3">{label}</dt>
+      <dt className="font-semibold text-muted">{label}</dt>
       <dd className="min-w-0 text-fg">{children}</dd>
     </>
   );

@@ -1,0 +1,119 @@
+---
+title: "Visual Workflow Builder"
+description: "Create Fabro workflows on a canvas, edit their code, and keep portable local drafts"
+---
+
+A **workflow** describes the steps to perform and the transitions between them. A
+**run** is one execution of that workflow. The visual builder creates workflow
+files; saving a draft does not start a run.
+
+Open **Workflows** in the web app, then select **Create +**. A new draft starts
+with Start, an Agent, and Exit connected in order. **Load example** opens a larger
+workflow with planning, development, validation, and delivery groups.
+
+## Build on the canvas
+
+1. Add a node from the node palette. Each type uses a supported Fabro shape and
+   execution handler.
+2. Drag nodes to arrange them on the dotted canvas. Pan and zoom to explore a
+   larger workflow.
+3. Connect a node's output handle to another node's input handle. The arrows
+   determine execution order, including branches and loops.
+4. Select a node to edit its label, shape, model, prompt, and other settings in
+   the inspector on the right. An explicit `type` attribute takes precedence over
+   the shape when choosing execution behavior.
+5. Select an edge to edit its label, condition, and transition settings. Include
+   an unconditional fallback when a node has conditional outgoing edges.
+
+To delete a node, select it and press Delete or Backspace, or select **Delete
+node** in the inspector. Its connected edges are deleted with it, and Undo restores
+them. The **?** help button beside **Settings** answers these common questions in the
+builder.
+
+The workflow **Settings** button opens graph settings, defaults, attached files,
+and visual groups. The builder calls these groups stages; they are DOT subgraphs
+and do not determine execution order. At runtime, a stage is an execution of a
+node, as explained in [Nodes & Stages](/workflows/stages-and-nodes).
+
+To add a stage, select **Add stage** in the canvas toolbar or in **Settings**. Name
+it, then check its nodes in the inspector, or choose a stage from a node's **Stage**
+menu. Dragging a node over a stage does not add it to that stage.
+
+## Write or attach prompts
+
+Select an Agent or Prompt node and choose **Text** to write instructions or
+**File** to attach a text file. Add more prompt blocks and reorder them to control
+the order of the instructions.
+
+Fabro has one `prompt` attribute per node. A single text block becomes an inline
+prompt; a single file becomes an `@path` reference. Multiple blocks are combined
+into one generated prompt file, with blank lines between blocks. Download the
+ZIP bundle to include these files alongside the graph.
+
+Child workflow paths and other file references must also resolve before you run
+the workflow. **Load example** includes the testing, security, and code-review
+child workflows, an editable `shared/ticket.md`, and a README. Its nodes inherit
+the server's default model. Export the ZIP to keep all of those files together.
+
+For a child workflow that reads other files, use **Path** and attach its `.fabro`
+file and dependencies. Fabro currently does not collect files referenced only
+inside **Inline source**. The builder preserves those files and reports the
+unsupported reference in **Issues**; it refuses conversions that would introduce
+this problem. Convert that inline source to a child-workflow file before running.
+
+The example's successful checks proceed toward delivery; an unsuccessful check
+falls back to remediation and returns to testing. Other failed steps stop the
+run. Its checks execute real project commands and block delivery when checks fail
+or cannot run. Before execution, edit the ticket, configure a provider, and review
+the project-specific prerequisites in the bundled README. Without the required
+integrations, delivery writes `PR.md` and `jira-update.md` instead of changing
+GitHub or Jira.
+
+## Switch between Visual and Code
+
+The **Visual / Code** toggle shows two views of the same Fabro graph. Changes in
+the inspector update the code, and valid code updates the canvas. Visual edits
+can normalize formatting, such as expanding chained edges, while preserving
+workflow meaning and comments.
+
+If code has a syntax error, the editor keeps what you typed and retains the last
+valid graph. Canvas edits pause until you fix the code or restore the last valid
+version. Invalid drafts can still be saved and downloaded as source.
+
+Open **Issues** to inspect errors and warnings. These browser checks help with
+graph structure and missing attachments; they cannot verify provider readiness,
+available models, or the full runtime environment. Validate the exported files
+with `fabro validate` and use `fabro preflight` before execution.
+
+## Save and move workflows
+
+Edits autosave in **this browser**, and **Save** writes immediately. The save
+indicator reports failures. Drafts are not synced to Fabro's server or GitHub;
+clearing site data removes them. The Workflows page lists drafts saved in the
+current browser.
+
+The builder's **More actions** menu offers three downloads:
+
+| Download | Includes |
+| --- | --- |
+| `.fabro` | The current graph source, without attached files |
+| ZIP bundle | Graph, run configuration, attached and generated files, and builder metadata |
+| Builder JSON | Draft source, files, positions, and prompt blocks in one file |
+
+**Import** opens a `.fabro`, ZIP bundle, or builder JSON as a new draft. A bundle
+or builder JSON preserves the information needed to continue editing elsewhere.
+
+To version a workflow, extract its ZIP into a directory such as
+`.fabro/workflows/frontend-changes/` in your chosen repository. Review its graph,
+files, and `workflow.toml` before committing. Fabro can load workflows from a
+GitHub repository independently of the repository a run will change; see
+[GitHub](/integrations/github). The builder does not publish changes to GitHub.
+
+## Choose an appearance
+
+Open **Settings → Appearance** to choose Signal navy, Spacious warm, Blue command,
+Rounded Payline, Brutalist, Soft graphite, or Lavender workspace. Choose **Light**,
+**Dark**, or **Match system** separately; Match system follows your operating
+system's light or dark preference while keeping your selected palette. The
+default is Brutalist in light mode. The theme and display mode are saved
+in a cookie for this browser and apply to the app and its diagrams.

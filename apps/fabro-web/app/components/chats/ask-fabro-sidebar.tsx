@@ -133,7 +133,7 @@ export default function AskFabroSidebar({
             type="button"
             onClick={onClose}
             aria-label="Close assistant"
-            className="inline-flex size-8 items-center justify-center rounded-md text-fg-3 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500"
+            className="inline-flex size-8 items-center justify-center rounded-md text-fg-3 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
           >
             <XMarkIcon className="size-4" />
           </button>

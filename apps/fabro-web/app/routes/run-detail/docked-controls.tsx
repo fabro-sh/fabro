@@ -79,7 +79,7 @@ export function RunDetailAskFabroShell({
       })}
 
       {askAvailable && (
-        <div className="fixed top-16 right-0 bottom-0 z-40">
+        <div className="fixed top-[var(--fabro-topbar-height,0px)] right-0 bottom-0 z-40">
           <AskFabroSidebar
             isOpen={askOpen}
             onClose={() => setAskOpen(false)}
@@ -194,9 +194,9 @@ export function RunDetailDockedControls({
     <div
       ref={setDockRef}
       className={classNames(
-        "fixed bottom-0 left-0 z-30 border-t border-line bg-page",
+        "fixed bottom-0 left-[var(--fabro-nav-width,0px)] z-30 border-t border-line bg-page",
         !isResizing &&
-          "transition-[right] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
+          "transition-[left,right] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
       )}
       style={{ right: sidebarWidth }}
     >

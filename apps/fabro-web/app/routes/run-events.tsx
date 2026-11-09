@@ -130,7 +130,7 @@ function ViewToggle({
             type="button"
             onClick={() => onChange(opt.value)}
             aria-pressed={active}
-            className={`rounded px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-teal-500 ${
+            className={`rounded px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current ${
               active
                 ? "bg-overlay-strong text-fg"
                 : "text-fg-muted hover:text-fg-2"
@@ -315,7 +315,7 @@ export function StreamEventsView({
                   <button
                     type="button"
                     onClick={clearFilters}
-                    className="rounded px-2 py-1 text-xs text-fg-muted transition-colors hover:bg-overlay hover:text-fg-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-teal-500"
+                    className="rounded px-2 py-1 text-xs text-fg-muted transition-colors hover:bg-overlay hover:text-fg-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
                   >
                     Clear
                   </button>

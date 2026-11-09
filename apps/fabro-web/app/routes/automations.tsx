@@ -186,7 +186,7 @@ function AutomationCard({
                     aria-label={`${action} schedule ${schedule.id} for ${automation.name}`}
                     aria-busy={saving}
                     title={`${action} schedule`}
-                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-fg-2 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-fg-2 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {saving ? (
                       <ArrowPathIcon className="size-3.5 animate-spin [animation-duration:450ms] motion-reduce:animate-none" aria-hidden="true" />

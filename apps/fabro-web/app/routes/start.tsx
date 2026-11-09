@@ -79,8 +79,6 @@ export default function Start() {
           </h1>
 
           <div className="relative group">
-            <div className="absolute -inset-px rounded-xl bg-gradient-to-b from-teal-500/30 to-mint/20 opacity-0 blur-sm transition-opacity duration-300 group-focus-within:opacity-100" />
-
             <div className="relative rounded-xl bg-panel border border-line-strong group-focus-within:border-focus transition-colors duration-300">
               <textarea
                 ref={textareaRef}
@@ -122,7 +120,7 @@ export default function Start() {
                     onClick={handleSubmit}
                     disabled={!prompt.trim()}
                     aria-label="Submit prompt"
-                    className="flex items-center justify-center size-8 rounded-lg bg-teal-500 text-on-primary transition-all duration-200 hover:bg-teal-300 disabled:opacity-30 disabled:hover:bg-teal-500 disabled:cursor-default"
+                    className="flex items-center justify-center size-8 rounded-lg bg-primary text-on-primary transition-all duration-200 hover:bg-primary-hover disabled:opacity-30 disabled:hover:bg-primary disabled:cursor-default"
                   >
                     <ArrowUpIcon className="size-4" />
                   </button>

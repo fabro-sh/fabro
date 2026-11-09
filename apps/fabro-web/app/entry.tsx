@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router";
 import { SWRConfig } from "swr";
+import { AppearanceProvider } from "./components/appearance-provider";
 import { FabroToaster } from "./components/toast";
 import { useBuildVersionGuard } from "./hooks/use-build-version-guard";
 import { installRoutes } from "./install-router";
@@ -36,14 +37,16 @@ function AppRuntime() {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <SWRConfig
-      value={{
-        revalidateOnFocus: false,
-        dedupingInterval: 2000,
-        shouldRetryOnError: false,
-      }}
-    >
-      <AppRuntime />
-    </SWRConfig>
+    <AppearanceProvider>
+      <SWRConfig
+        value={{
+          revalidateOnFocus: false,
+          dedupingInterval: 2000,
+          shouldRetryOnError: false,
+        }}
+      >
+        <AppRuntime />
+      </SWRConfig>
+    </AppearanceProvider>
   </StrictMode>,
 );

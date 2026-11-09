@@ -1,0 +1,523 @@
+/*
+ * The workflow builder's model picker and its draggable window. Imported once, from
+ * app.css, after builder.css.
+ *
+ * The window is portaled to the body, outside .wfb-theme, so it reads Factory's semantic
+ * tokens directly. Those exist in every palette in light and dark. No fixed colors.
+ */
+
+@layer components {
+  .wfb-model-field {
+    min-width: 0;
+  }
+
+  .wfb-model-mono {
+    font-family: var(--font-mono);
+  }
+
+  /* ── The field ─────────────────────────────────────────────────────────── */
+
+  .wfb-model-trigger {
+    display: flex;
+    min-height: 44px;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .wfb-model-trigger:hover:not(:disabled) {
+    background: var(--surface-2);
+  }
+  .wfb-model-trigger:disabled {
+    cursor: not-allowed;
+  }
+  .wfb-model-trigger[aria-expanded="true"] {
+    border-color: var(--accent-fill);
+  }
+  /* No cue after a mouse click. A keyboard user gets a heavier border in the text color. */
+  .wfb-model-trigger:focus:not(:focus-visible, [aria-expanded="true"]) {
+    border-color: var(--wfb-rule);
+  }
+  .wfb-model-trigger:focus-visible {
+    border-color: currentColor;
+    outline: none;
+    box-shadow: inset 0 0 0 1px currentColor;
+  }
+  .wfb-model-trigger-title {
+    display: flex;
+    min-width: 0;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 6px;
+  }
+  .wfb-model-trigger-icon {
+    flex-shrink: 0;
+    color: var(--muted);
+  }
+
+  /* ── The window ────────────────────────────────────────────────────────── */
+
+  /* The Dialog's root, shaped like ConfirmDialog's. It has to keep a real width: Headless UI
+     closes a dialog whose root measures zero by zero at the corner of the screen. */
+  .wfb-popup-layer {
+    position: relative;
+    z-index: 60;
+    outline: none;
+  }
+
+  /* The DialogPanel. Clear, and over the whole screen, so a background click lands in here. */
+  .wfb-popup-boundary {
+    position: fixed;
+    inset: 0;
+  }
+
+  /* useDraggablePopup sets the position and size. The corners under the tabs are square, so tabs and frame read as one shape. */
+  .wfb-popup {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--line-strong);
+    border-radius: 0 0 var(--radius-md) var(--radius-md);
+    background: var(--surface);
+    color: var(--fg);
+    box-shadow: var(--e3);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .wfb-popup-content {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+    overflow: auto;
+    border-radius: inherit;
+  }
+
+  /* Keyboard cues stay inside the control, in its own text color, which already reads on
+     its fill. --ring can match a filled button exactly. Pointer use shows none. */
+  .wfb-popup :focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: -3px;
+  }
+  /* These two are muted at rest, so focus brings them up to the text color. */
+  .wfb-popup .wfb-popup-tab:focus-visible,
+  .wfb-popup .wfb-model-star:focus-visible {
+    color: var(--fg);
+  }
+  .wfb-popup .input:focus {
+    border-color: currentColor;
+    outline: none;
+    box-shadow: inset 0 0 0 1px currentColor;
+  }
+  .wfb-popup .input[aria-invalid="true"]:focus {
+    border-color: var(--bad);
+    box-shadow: inset 0 0 0 1px var(--bad);
+  }
+  /* An inset outline would sit on top of link text, so a link's cue is a heavier underline. */
+  .wfb-popup .link:focus-visible {
+    outline: none;
+    text-decoration-color: currentColor;
+    text-decoration-thickness: 3px;
+  }
+
+  /* Each tab sits on the frame's top edge and covers it, so tab and frame share one
+     outline. Their height on touch screens must match TAB_OVERHANG in draggable-popup.tsx. */
+  .wfb-popup-tab {
+    position: absolute;
+    bottom: 100%;
+    display: flex;
+    width: 34px;
+    height: 24px;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid var(--line-strong);
+    border-bottom: 0;
+    border-radius: var(--radius-xs) var(--radius-xs) 0 0;
+    background: var(--surface);
+    color: var(--muted);
+    box-shadow: var(--e2);
+    /* The shadow falls around the tab, not down onto the frame it joins. */
+    clip-path: inset(-12px -12px 0 -12px);
+    cursor: pointer;
+  }
+  .wfb-popup-tab:hover {
+    color: var(--fg);
+  }
+  .wfb-popup-grip {
+    left: -1px;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+  }
+  .wfb-popup-close {
+    right: -1px;
+  }
+  .wfb-popup[data-dragging] .wfb-popup-grip {
+    color: var(--fg);
+    cursor: grabbing;
+  }
+
+  /* Read out with the grip at all times, and shown when pointing at it or tabbing to it. */
+  .wfb-popup-grip-hint {
+    position: absolute;
+    bottom: calc(100% + 3px);
+    left: 38px;
+    padding: 0 6px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-xs);
+    background: var(--surface);
+    color: var(--fg-2);
+    font-size: 11px;
+    line-height: 16px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .wfb-popup-grip:hover + .wfb-popup-grip-hint,
+  .wfb-popup-grip:focus-visible + .wfb-popup-grip-hint {
+    opacity: 1;
+  }
+  .wfb-popup[data-dragging] .wfb-popup-grip-hint {
+    opacity: 0;
+  }
+
+  /* ── Search ────────────────────────────────────────────────────────────── */
+
+  .wfb-model-body {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+  }
+
+  .wfb-model-search {
+    position: relative;
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    padding: 8px 8px 4px;
+  }
+  .wfb-model-search-icon {
+    position: absolute;
+    top: 17px;
+    left: 18px;
+    color: var(--muted);
+    pointer-events: none;
+  }
+  .wfb-model-search .wfb-model-search-input {
+    min-width: 0;
+    flex: 1;
+    padding-left: 30px;
+  }
+
+  .wfb-model-count {
+    flex-shrink: 0;
+    min-height: 16px;
+    padding: 0 12px 6px;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 16px;
+  }
+
+  .wfb-model-scroll {
+    min-height: 5rem;
+    flex: 1;
+    /* Keeps a focused row clear of the sticky company header. */
+    scroll-padding-block: 40px 8px;
+    border-top: 1px solid var(--line);
+    padding-bottom: 4px;
+  }
+
+  /* ── Company tiers ─────────────────────────────────────────────────────── */
+
+  .wfb-model-group + .wfb-model-group {
+    border-top: 1px solid var(--line);
+  }
+
+  .wfb-model-group-heading {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface);
+  }
+
+  .wfb-model-group-header,
+  .wfb-model-pinned-header {
+    display: flex;
+    width: 100%;
+    min-height: 34px;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    text-align: left;
+  }
+  .wfb-model-group-header {
+    border: 0;
+    background: var(--surface);
+    color: var(--fg);
+    cursor: pointer;
+  }
+  .wfb-model-group-header:hover {
+    background: var(--surface-2);
+  }
+
+  .wfb-model-chevron {
+    flex-shrink: 0;
+    color: var(--muted);
+    transition: transform 120ms ease-out;
+  }
+  .wfb-model-group-header[aria-expanded="true"] .wfb-model-chevron {
+    transform: rotate(90deg);
+  }
+
+  .wfb-model-group-name {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 13px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .wfb-model-group-count {
+    flex-shrink: 0;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .wfb-model-group-header .wfb-model-chip {
+    margin-left: auto;
+  }
+
+  .wfb-model-pinned-icon {
+    flex-shrink: 0;
+    color: var(--accent-ink);
+  }
+
+  /* ── One model ─────────────────────────────────────────────────────────── */
+
+  .wfb-model-list {
+    display: flex;
+    flex-direction: column;
+    padding: 0 4px 4px;
+  }
+
+  .wfb-model-row {
+    display: flex;
+    align-items: stretch;
+    border-radius: var(--radius-xs);
+  }
+  .wfb-model-row:hover {
+    background: var(--surface-2);
+  }
+  .wfb-model-row:has([aria-current="true"]) {
+    background: var(--accent-soft);
+  }
+
+  .wfb-model-select,
+  .wfb-model-inherit {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 5px 6px;
+    border: 0;
+    border-radius: var(--radius-xs);
+    background: none;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .wfb-model-inherit {
+    width: calc(100% - 8px);
+    margin: 4px 4px 2px;
+  }
+  .wfb-model-inherit:hover {
+    background: var(--surface-2);
+  }
+  .wfb-model-inherit[aria-current="true"] {
+    background: var(--accent-soft);
+  }
+
+  .wfb-model-check {
+    display: flex;
+    width: 16px;
+    height: 18px;
+    flex-shrink: 0;
+    align-items: center;
+    color: var(--accent-soft-ink);
+  }
+
+  .wfb-model-text {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .wfb-model-name {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--fg);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 18px;
+  }
+  .wfb-model-id {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 15px;
+  }
+  .wfb-model-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 3px;
+  }
+
+  .chip.wfb-model-chip {
+    height: 18px;
+    padding: 0 6px;
+    font-size: 10.5px;
+    font-weight: 600;
+  }
+
+  .wfb-model-star {
+    display: flex;
+    width: 34px;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: var(--radius-xs);
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .wfb-model-star:hover {
+    background: var(--surface-3);
+    color: var(--fg);
+  }
+  .wfb-model-star[aria-pressed="true"] {
+    color: var(--accent-ink);
+  }
+
+  /* ── Notes and states ──────────────────────────────────────────────────── */
+
+  .wfb-model-note {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 6px 8px;
+    padding: 6px 8px;
+    border-radius: var(--radius-xs);
+    background: var(--surface-2);
+    color: var(--fg-2);
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .wfb-model-note-loading {
+    justify-content: flex-start;
+    color: var(--muted);
+  }
+  .wfb-model-note-warn {
+    background: var(--warn-bg);
+    color: var(--warn);
+  }
+  .wfb-model-note-bad {
+    background: var(--bad-bg);
+    color: var(--bad);
+  }
+
+  .wfb-model-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 12px;
+    color: var(--fg-2);
+    font-size: 12px;
+    line-height: 16px;
+    overflow-wrap: anywhere;
+  }
+
+  /* ── Footer and custom ID ──────────────────────────────────────────────── */
+
+  .wfb-model-footer {
+    flex-shrink: 0;
+    border-top: 1px solid var(--line);
+  }
+  .wfb-model-footer-line {
+    display: flex;
+    min-height: 40px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 8px 4px 12px;
+  }
+  .wfb-model-star-status {
+    min-width: 0;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 15px;
+  }
+  .wfb-model-star-status-problem {
+    color: var(--warn);
+  }
+
+  .wfb-model-custom {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .wfb-model-hint {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 15px;
+  }
+  .wfb-model-error {
+    color: var(--bad);
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .wfb-model-custom-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  /* ── Touch ─────────────────────────────────────────────────────────────── */
+
+  @media (max-width: 639px), (pointer: coarse) {
+    .wfb-popup-tab {
+      width: 44px;
+      height: 32px;
+    }
+    .wfb-popup-grip-hint {
+      left: 48px;
+    }
+    .wfb-model-star {
+      width: 44px;
+    }
+    .wfb-model-select,
+    .wfb-model-inherit {
+      min-height: 44px;
+    }
+    .wfb-model-group-header {
+      min-height: 44px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .wfb-model-chevron {
+      transition: none;
+    }
+  }
+}

@@ -31,15 +31,9 @@ export function ErrorBoundary() {
     <main className="flex min-h-screen flex-col items-center justify-center px-6 py-24">
       <div className="text-center">
         <p
-          className="font-mono text-[8rem] font-bold leading-none tracking-tighter"
-          style={{
-            background: is404
-              ? "linear-gradient(180deg, var(--color-teal-500) 0%, var(--color-teal-700) 100%)"
-              : "linear-gradient(180deg, var(--color-coral) 0%, #a63e3e 100%)",
-            WebkitBackgroundClip: "text",
-            WebkitTextFillColor: "transparent",
-            opacity: 0.8,
-          }}
+          className={`font-mono text-[8rem] font-bold leading-none tracking-tighter ${
+            is404 ? "text-teal-500" : "text-coral"
+          }`}
         >
           {status}
         </p>

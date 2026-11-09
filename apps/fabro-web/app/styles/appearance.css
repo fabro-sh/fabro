@@ -1,0 +1,200 @@
+/*
+ * How Fabro paints with Factory's palettes.
+ *
+ * factory-themes.css is a byte-identical copy of Factory's file and holds every color.
+ * It keys on `data-theme` and the `.dark` class, which public/appearance-boot.js sets
+ * before first paint and app/lib/appearance.ts keeps current. This file only maps Fabro's
+ * other contracts onto those tokens. Nothing here is a palette: every value is a Factory
+ * token, or one derived from them where Fabro needs a role Factory doesn't have.
+ * Every mapping is tested for contrast on all 14 palettes in appearance.test.ts.
+ *
+ * Provenance and how to update: FACTORY_THEMES.md.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* Diagrams */
+  --diagram-paper: var(--bg);
+  --diagram-surface: var(--surface);
+  --diagram-ink: var(--fg);
+  --diagram-muted: var(--muted);
+  --diagram-soft: var(--muted);
+  --diagram-rule: var(--line);
+  --diagram-accent: var(--accent-fill);
+  --diagram-accent-ink: var(--accent-ink);
+  --diagram-accent-tint: var(--accent-soft);
+  --diagram-edge: var(--muted);
+  --diagram-grid: var(--hatch);
+  --diagram-success: var(--ok);
+  --diagram-success-tint: var(--ok-bg);
+  --diagram-danger: var(--bad);
+  --diagram-danger-tint: var(--bad-bg);
+  --diagram-warning: var(--warn);
+  --diagram-warning-tint: var(--warn-bg);
+  --diagram-node-radius: var(--radius-xs);
+  --diagram-stroke: 1px;
+  --diagram-edge-stroke: 1px;
+  --diagram-paper-image: none;
+  --diagram-paper-size: 22px 22px;
+
+  /* Navigation, for code that reads --nav-*. Factory's --rail-* tokens are also there. */
+  --nav-bg: var(--rail);
+  --nav-bg-image: var(--rail-image);
+  --nav-text: var(--rail-fg);
+  --nav-muted: var(--rail-muted);
+  --nav-brand: var(--rail-strong);
+  --nav-border: var(--rail-line);
+  --nav-divider: var(--rail-line);
+  --nav-hover: var(--rail-hover);
+  --nav-hover-text: var(--rail-hover-fg);
+  --nav-selected: var(--rail-selected);
+  --nav-selected-image: var(--rail-selected-image);
+  --nav-selected-text: var(--rail-selected-fg);
+  --nav-selected-shadow: var(--rail-selected-shadow);
+  /* The marker on the selected row. Factory's rule color can match the selected fill. */
+  --nav-selected-border: var(--rail-indicator);
+  --nav-ring: var(--rail-ring);
+  --nav-logo-filter: none;
+
+  /* Charts. Factory has no series palette, so these reuse its accent and status roles. */
+  --chart-gridline: var(--line);
+  --chart-axis-label: var(--muted);
+  --chart-series-1: var(--accent-fill);
+  --chart-series-2: var(--info);
+  --chart-series-3: var(--ok);
+  --chart-series-4: var(--warn);
+  --chart-series-5: var(--violet);
+
+  /* Pierre code and diff viewers */
+  --diffs-bg-buffer-override: var(--bg);
+  --diffs-bg-context-override: var(--surface);
+  --diffs-bg-hover-override: var(--surface-2);
+  --diffs-bg-separator-override: var(--surface-3);
+  --diffs-fg-number-override: var(--muted);
+  --diffs-addition-color-override: var(--ok);
+  --diffs-fg-number-addition-override: var(--ok);
+  --diffs-deletion-color-override: var(--bad);
+  --diffs-fg-number-deletion-override: var(--bad);
+}
+
+:root.dark {
+  color-scheme: dark;
+}
+
+/* ── Titles ── Factory sets page titles in the palette's display face. */
+
+h1:not(.prose h1, .fabro-chat h1) {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+/* ── Surfaces ── */
+
+.bg-atmosphere {
+  background-color: var(--color-page);
+}
+
+/* Any diagram canvas. */
+.diagram-canvas {
+  background-color: var(--diagram-paper);
+  background-image: var(--diagram-paper-image);
+  background-size: var(--diagram-paper-size);
+}
+
+/* Factory's Appearance chooser: one card per palette, with its swatches. */
+.theme-choice {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.theme-choice:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+}
+
+.theme-choice:has(input:checked) {
+  border-color: var(--accent-fill);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-fill);
+}
+
+.theme-choice:has(input:focus-visible) {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.theme-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  flex: none;
+}
+
+/* Fabro's logo is a light blue mark that washes out on light paper. */
+:root:not(.dark) img[src="/images/logo.svg"],
+:root:not(.dark) img[src="/images/logotype.svg"] {
+  filter: brightness(0.62) saturate(1.25);
+}
+
+/* In the sidebar the ground is the rail, not the page, and most rails are dark in light
+   mode too. Only Spacious warm and Rounded Payline have a light rail. */
+:root[data-theme="readability"]:not(.dark),
+:root[data-theme="payline"]:not(.dark) {
+  --nav-logo-filter: brightness(0.62) saturate(1.25);
+}
+
+:root [style*="--sidebar-bg"] img[src="/images/logo.svg"],
+:root [style*="--sidebar-bg"] img[src="/images/logotype.svg"] {
+  filter: var(--nav-logo-filter);
+}
+
+/* ── Third-party surfaces that resolve color on their own ── */
+
+/* Markdown bodies. */
+.prose {
+  --tw-prose-body: var(--color-fg-3);
+  --tw-prose-headings: var(--color-fg-2);
+  --tw-prose-lead: var(--color-fg-3);
+  --tw-prose-links: var(--color-teal-500);
+  --tw-prose-bold: var(--color-fg-2);
+  --tw-prose-counters: var(--color-fg-muted);
+  --tw-prose-bullets: var(--color-fg-muted);
+  --tw-prose-hr: var(--color-line-strong);
+  --tw-prose-quotes: var(--color-fg-2);
+  --tw-prose-quote-borders: var(--color-line-strong);
+  --tw-prose-captions: var(--color-fg-muted);
+  --tw-prose-kbd: var(--color-fg-2);
+  --tw-prose-code: var(--color-fg-3);
+  --tw-prose-pre-code: var(--color-fg-3);
+  --tw-prose-pre-bg: var(--color-overlay-strong);
+  --tw-prose-th-borders: var(--color-line-strong);
+  --tw-prose-td-borders: var(--color-line);
+}
+
+/* Code and diff viewers. An outer rule beats the viewer's own :host declaration, so the
+   highlighter theme's ground can't replace the palette's surface. */
+diffs-container {
+  --diffs-light-bg: var(--diffs-bg-context-override);
+  --diffs-dark-bg: var(--diffs-bg-context-override);
+}
+
+[data-sonner-toast] {
+  box-shadow: var(--e3);
+}
+
+/* ── Motion ── */
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse,
+  .animate-ping {
+    animation: none;
+  }
+}

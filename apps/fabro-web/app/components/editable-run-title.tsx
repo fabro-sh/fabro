@@ -142,7 +142,7 @@ export function EditableRunTitle({ runId, title }: { runId: string; title: strin
         type="button"
         onClick={enterEdit}
         aria-label="Edit run title"
-        className="group/title -mx-2 flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 py-0.5 text-left text-fg transition-colors hover:bg-overlay focus-visible:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500"
+        className="group/title -mx-2 flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 py-0.5 text-left text-fg transition-colors hover:bg-overlay focus-visible:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-current"
       >
         <span className="min-w-0 truncate">
           <InlineMarkdown content={title} />

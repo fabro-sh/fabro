@@ -1107,7 +1107,7 @@ function EventRow({
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      className={`grid w-full grid-cols-[5rem_1fr_auto_auto] items-center gap-4 px-5 py-2.5 text-left transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal-500 ${
+      className={`grid w-full grid-cols-[5rem_1fr_auto_auto] items-center gap-4 px-5 py-2.5 text-left transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current ${
         selected ? "bg-overlay" : ""
       }`}
     >
@@ -1173,7 +1173,7 @@ function ToolGroupRow({
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      className={`grid w-full grid-cols-[5rem_1fr_auto_auto] items-center gap-4 px-5 py-2.5 text-left transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal-500 ${
+      className={`grid w-full grid-cols-[5rem_1fr_auto_auto] items-center gap-4 px-5 py-2.5 text-left transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current ${
         selected ? "bg-overlay" : ""
       }`}
     >
@@ -1245,7 +1245,7 @@ function CollapsibleContent({
           aria-controls={contentId}
           aria-expanded={expanded}
           onClick={() => setExpanded((current) => !current)}
-          className="text-xs text-teal-500 hover:underline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-teal-500"
+          className="text-xs text-teal-500 hover:underline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
         >
           {expanded
             ? "Collapse"
@@ -1595,7 +1595,7 @@ function ToolGroupChildRow({
       type="button"
       onClick={onToggle}
       aria-expanded={expanded}
-      className={`grid w-full grid-cols-[1fr_auto_auto] items-center gap-3 px-5 py-2.5 text-left transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal-500 ${
+      className={`grid w-full grid-cols-[1fr_auto_auto] items-center gap-3 px-5 py-2.5 text-left transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current ${
         expanded ? "bg-overlay" : ""
       }`}
     >
@@ -1846,7 +1846,7 @@ function EventsTabToggle({
             type="button"
             onClick={() => onTabChange(value)}
             aria-pressed={active}
-            className={`rounded px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-teal-500 ${
+            className={`rounded px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current ${
               active
                 ? "bg-overlay-strong text-fg"
                 : "text-fg-muted hover:text-fg-2"
@@ -1874,7 +1874,7 @@ function EventExportActions({
   const [copied, setCopied] = useState(false);
   const disabled = events.length === 0;
   const buttonClass =
-    "inline-flex size-6 items-center justify-center rounded text-fg-muted transition-colors hover:bg-overlay hover:text-fg-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-teal-500 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-fg-muted";
+    "inline-flex size-6 items-center justify-center rounded text-fg-muted transition-colors hover:bg-overlay hover:text-fg-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-fg-muted";
   return (
     <div className={`flex items-center gap-1 ${className ?? ""}`}>
       <button
@@ -2020,7 +2020,7 @@ function EventsToolbar({
             <button
               type="button"
               onClick={clearFilters}
-              className="rounded px-2 py-1 text-xs text-fg-muted transition-colors hover:bg-overlay hover:text-fg-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-teal-500"
+              className="rounded px-2 py-1 text-xs text-fg-muted transition-colors hover:bg-overlay hover:text-fg-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
             >
               Clear
             </button>

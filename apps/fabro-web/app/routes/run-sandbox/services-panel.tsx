@@ -21,10 +21,10 @@ export interface ServicesPanelProps {
 }
 
 const REFRESH_BUTTON_CLASS =
-  "inline-flex size-9 items-center justify-center rounded-lg text-fg-2 outline-1 -outline-offset-1 outline-white/10 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500 disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex size-9 items-center justify-center rounded-lg text-fg-2 outline-1 -outline-offset-1 outline-line-strong transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-current disabled:cursor-not-allowed disabled:opacity-50";
 
 const PREVIEW_BUTTON_CLASS =
-  "inline-flex items-center justify-center rounded-md px-3 py-1 text-xs font-medium text-fg-2 outline-1 -outline-offset-1 outline-white/10 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500 disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex items-center justify-center rounded-md px-3 py-1 text-xs font-medium text-fg-2 outline-1 -outline-offset-1 outline-line-strong transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-current disabled:cursor-not-allowed disabled:opacity-60";
 
 export default function ServicesPanel({ runId, leading }: ServicesPanelProps) {
   const servicesQuery = useSandboxServices(runId);

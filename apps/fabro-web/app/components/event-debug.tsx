@@ -60,7 +60,7 @@ export function DebugEventRow({
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      className={`grid w-full grid-cols-[5rem_1fr_auto] items-center gap-4 px-5 py-2.5 text-left transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal-500 ${
+      className={`grid w-full grid-cols-[5rem_1fr_auto] items-center gap-4 px-5 py-2.5 text-left transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current ${
         selected ? "bg-overlay" : ""
       }`}
     >
@@ -115,7 +115,7 @@ export function DetailsPanel({
             type="button"
             onClick={onClose}
             aria-label="Close details"
-            className="rounded-md p-1 text-fg-muted transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500"
+            className="rounded-md p-1 text-fg-muted transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
           >
             <XMarkIcon className="size-5" />
           </button>
@@ -191,7 +191,7 @@ export function MultiSelectFilter<T extends string>({
 
   return (
     <Listbox value={selected} onChange={onChange} multiple>
-      <ListboxButton className="inline-flex items-center gap-2 rounded-md bg-panel px-2.5 py-1.5 text-xs text-fg-2 outline-1 -outline-offset-1 outline-line-strong transition-colors hover:bg-overlay-strong focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500">
+      <ListboxButton className="inline-flex items-center gap-2 rounded-md bg-panel px-2.5 py-1.5 text-xs text-fg-2 outline-1 -outline-offset-1 outline-line-strong transition-colors hover:bg-overlay-strong focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-current">
         <FunnelIcon className="size-3.5 text-fg-muted" aria-hidden="true" />
         <span className="tabular-nums">{summary}</span>
         <ChevronUpDownIcon className="size-3.5 text-fg-muted" aria-hidden="true" />
@@ -376,7 +376,7 @@ export function DebugDnaStrip({
           if (isSelected) {
             height = BAR_SELECTED_HEIGHT;
             opacity = 1;
-            boxShadow = "0 0 0 1px rgba(255,255,255,0.55)";
+            boxShadow = "0 0 0 1px var(--color-fg-3)";
           } else if (isHovered) {
             height = BAR_HOVER_HEIGHT;
             opacity = 1;
@@ -451,7 +451,7 @@ const THREAD_CATEGORY_COLOR: Record<ThreadCategory, string> = {
   system: "var(--color-amber)",
   agent: "var(--color-teal-500)",
   tool: "var(--color-mint)",
-  user: "var(--color-ice-300)",
+  user: "var(--color-fg-3)",
   interrupt: "var(--color-coral)",
 };
 
@@ -587,7 +587,7 @@ export function ThreadDnaStrip({
                 background: baseColor,
                 opacity: 1,
                 boxShadow: isSelected
-                  ? "0 0 0 1px rgba(255,255,255,0.55)"
+                  ? "0 0 0 1px var(--color-fg-3)"
                   : "none",
               }
             : {
@@ -598,7 +598,7 @@ export function ThreadDnaStrip({
                 background: baseColor,
                 opacity: isSelected || isHovered ? 1 : 0.9,
                 boxShadow: isSelected
-                  ? "0 0 0 1px rgba(255,255,255,0.55)"
+                  ? "0 0 0 1px var(--color-fg-3)"
                   : "none",
               };
 
