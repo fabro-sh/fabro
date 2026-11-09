@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# Prepares an Amp orb for this repository: the Rust toolchains CI pins, cargo-nextest,
+# the Cargo and Bun dependencies, a Docker daemon with the images the test suite runs,
+# and a warm `target/` for the workspace tests. Runs again on a warm snapshot, so every
+# step must skip work that is already done.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+# Toolchains CI uses (.github/workflows/rust.yml): stable for build and test,
+# the pinned nightly for rustfmt and clippy.
+rust_stable="1.97.1"
+rust_nightly="nightly-2026-04-14"
+
+step() {
+  printf '\n==> %s\n' "$*"
+  step_started=$SECONDS
+}
+done_step() {
+  printf '    (%ss)\n' "$((SECONDS - step_started))"
+}
+
+step "Rust toolchains"
+if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+    sh -s -- -y --profile minimal --default-toolchain "$rust_stable" --no-modify-path
+fi
+# The installer cannot update this running script's environment.
+# shellcheck disable=SC1091
+source "$HOME/.cargo/env"
+installed_toolchains="$(rustup toolchain list)"
+if ! grep -q "^$rust_stable-" <<<"$installed_toolchains"; then
+  rustup toolchain install "$rust_stable" --profile minimal
+fi
+if ! grep -q "^$rust_nightly-" <<<"$installed_toolchains"; then
+  rustup toolchain install "$rust_nightly" --profile minimal --component clippy,rustfmt
+fi
+rustup default "$rust_stable" >/dev/null
+# Amp and supervised services start in `bash -l` shells.
+profile_marker="# fabro: Rust toolchain"
+if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
+  cat >>"$HOME/.bash_profile" <<'EOF'
+
+# fabro: Rust toolchain
+[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+EOF
+fi
+done_step
+
+step "cargo-nextest"
+if ! command -v cargo-nextest >/dev/null; then
+  curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C "$HOME/.cargo/bin"
+fi
+cargo nextest --version
+done_step
+
+step "Cargo dependencies"
+cargo fetch --locked
+done_step
+
+step "Bun dependencies"
+bun install --frozen-lockfile
+done_step
+
+step "Docker"
+# The orb ships Docker disabled. Socket activation starts the daemon on first use.
+# Agent shells do not carry the docker group, so open the socket to every local
+# user; an orb is a single-tenant sandbox.
+socket_dropin=/etc/systemd/system/docker.socket.d/amp-orb.conf
+if [ ! -f "$socket_dropin" ]; then
+  sudo mkdir -p "$(dirname "$socket_dropin")"
+  printf '[Socket]\nSocketMode=0666\n' | sudo tee "$socket_dropin" >/dev/null
+  sudo systemctl daemon-reload
+  sudo systemctl restart docker.socket
+fi
+sudo systemctl enable --now docker.socket >/dev/null 2>&1
+# The images the workspace's Docker tests run (rust.yml, "Pull the images the
+# Docker tests run"): Petri's default runner image at the pin the locked Petri
+# names, and the 22.04 image.
+petri_sandbox_manifest="$(cargo metadata --locked --offline --format-version 1 |
+  jq -r '.packages[] | select(.name == "petri-executor-sandbox") | .manifest_path')"
+runner_pin="$(sed -n 's/^const RUNNER_PIN: &str = "\([0-9a-f]*\)";$/\1/p' \
+  "$(dirname "$petri_sandbox_manifest")/src/backend.rs")"
+test -n "$runner_pin"
+for image in "ghcr.io/lithoscomputer/ubuntu-24.04:slim-$runner_pin" ghcr.io/lithoscomputer/ubuntu-22.04:slim; do
+  if ! docker image inspect "$image" >/dev/null 2>&1; then
+    docker pull -q "$image"
+  fi
+done
+done_step
+
+step "Warm build of the workspace tests"
+# A cold build takes most of the setup budget, so it is capped; whatever finishes
+# stays in target/ and the next setup run or the agent's first build continues it.
+# A failed or cut-off warm-up does not fail setup.
+if timeout 14m cargo nextest run --workspace --locked --no-run; then
+  echo "    target/ is warm"
+else
+  echo "    warm build did not finish (exit $?); continuing"
+fi
+done_step
+
+printf '\nSetup finished in %ss\n' "$SECONDS"
