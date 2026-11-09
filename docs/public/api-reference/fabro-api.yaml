@@ -7203,7 +7203,7 @@ components:
         review_status:
           type: string
           nullable: true
-          description: Jira status to move an issue to when its run opens a pull request.
+          description: Jira status to move an issue to when its run succeeds.
           example: In Review
 
     CreateAutomationRequest:

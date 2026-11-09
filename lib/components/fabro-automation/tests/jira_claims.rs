@@ -113,3 +113,28 @@ async fn claimed_keys_lists_only_that_automation() {
         .collect();
     assert_eq!(listed, ["FAB-1", "FAB-2"]);
 }
+
+#[tokio::test]
+async fn unstarted_listing_skips_marked_and_recent_claims() {
+    let (_dir, store) = test_store().await;
+    let old = at("2026-11-08T10:00:00Z");
+    let cutoff = at("2026-11-08T10:05:00Z");
+    let a = id("a");
+    store.claim(&a, "FAB-1", RunId::new(), old).await.unwrap();
+    store.claim(&a, "FAB-2", RunId::new(), old).await.unwrap();
+    store
+        .claim(&a, "FAB-3", RunId::new(), cutoff)
+        .await
+        .unwrap();
+    assert!(store.mark_run_created(&a, "FAB-2", old).await.unwrap());
+    assert!(!store.mark_run_created(&a, "FAB-9", old).await.unwrap());
+
+    let keys: Vec<_> = store
+        .list_unstarted_before(&a, cutoff)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|claim| claim.issue_key)
+        .collect();
+    assert_eq!(keys, ["FAB-1"]);
+}

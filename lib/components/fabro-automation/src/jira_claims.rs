@@ -70,6 +70,45 @@ impl JiraIssueRunStore {
         Ok(result.rows_affected() == 1)
     }
 
+    /// Marks that the claim's run exists, so it is never treated as stale.
+    pub async fn mark_run_created(
+        &self,
+        automation_id: &AutomationId,
+        issue_key: &str,
+        now: DateTime<Utc>,
+    ) -> Result<bool, AutomationStoreError> {
+        let result = sqlx::query(
+            "UPDATE jira_issue_runs SET run_created_at = ? WHERE automation_id = ? AND issue_key = ?",
+        )
+        .bind(now.to_rfc3339())
+        .bind(automation_id.as_str())
+        .bind(issue_key)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    /// Claims whose run was never marked created and that are older than
+    /// `before`.
+    pub async fn list_unstarted_before(
+        &self,
+        automation_id: &AutomationId,
+        before: DateTime<Utc>,
+    ) -> Result<Vec<JiraIssueClaim>, AutomationStoreError> {
+        let rows = sqlx::query(
+            "SELECT automation_id, issue_key, run_id, created_at FROM jira_issue_runs
+             WHERE automation_id = ? AND run_created_at IS NULL ORDER BY created_at, issue_key",
+        )
+        .bind(automation_id.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+        let claims: Vec<_> = rows.iter().map(claim_from_row).collect::<Result<_, _>>()?;
+        Ok(claims
+            .into_iter()
+            .filter(|c| c.created_at < before)
+            .collect())
+    }
+
     pub async fn claimed_keys(
         &self,
         automation_id: &AutomationId,

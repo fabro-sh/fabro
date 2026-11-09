@@ -1535,15 +1535,13 @@ methods = ["dev-token"]
 site_url = "https://acme.atlassian.net"
 email = "bot@acme.com"
 "#;
-    let service = crate::server::jira::JiraService::new(
-        fabro_jira::JiraClient::new(
-            "https://acme.atlassian.net".to_string(),
-            "bot@acme.com".to_string(),
-            "tok".to_string(),
-        )
-        .unwrap(),
-    );
-    service.record_error("boom");
+    let service = crate::server::jira::JiraService::new(fabro_jira::JiraClient::with_http(
+        "https://acme.atlassian.net".to_string(),
+        "bot@acme.com".to_string(),
+        "tok".to_string(),
+        fabro_http::test_http_client().unwrap(),
+    ));
+    service.record_write_back_error("boom");
     let state = TestAppStateBuilder::new()
         .runtime_settings(
             server_settings_from_toml(source),
@@ -1571,6 +1569,54 @@ email = "bot@acme.com"
 
     assert_eq!(jira["status"], "error");
     assert_eq!(jira["metadata"]["last_error"], "boom");
+}
+
+#[tokio::test]
+async fn system_integrations_reports_jira_restart_required_when_token_arrives_after_startup() {
+    let source = r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.integrations.jira]
+site_url = "https://acme.atlassian.net"
+email = "bot@acme.com"
+"#;
+    let state = TestAppStateBuilder::new()
+        .runtime_settings(
+            server_settings_from_toml(source),
+            manifest_run_defaults_from_toml(source),
+        )
+        .build();
+    state
+        .stores
+        .vault
+        .set("FABRO_JIRA_API_TOKEN", "tok", SecretType::Token, None)
+        .await
+        .unwrap();
+    let app = crate::test_support::build_test_router(state);
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/system/integrations"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response.into_body()).await;
+    let jira = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|integration| integration["provider"] == "jira")
+        .unwrap();
+
+    assert_eq!(jira["status"], "error");
+    assert_eq!(
+        jira["metadata"]["last_error"],
+        "server restart required to load Jira credentials"
+    );
 }
 
 #[tokio::test]

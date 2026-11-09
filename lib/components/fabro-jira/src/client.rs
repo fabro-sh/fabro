@@ -120,13 +120,18 @@ struct RawComment {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Author {
+    #[serde(default)]
     display_name: String,
 }
 
 impl From<RawComment> for JiraComment {
     fn from(raw: RawComment) -> Self {
         Self {
-            author:  raw.author.map_or_else(String::new, |a| a.display_name),
+            author:  raw
+                .author
+                .map(|a| a.display_name)
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| "unknown".to_string()),
             created: raw.created,
             body:    raw.body,
         }
@@ -404,7 +409,8 @@ mod tests {
                 .query_param("startAt", "1")
                 .query_param("maxResults", "100");
             then.json_body(json!({"total": 2, "comments": [
-                {"author": {"displayName": "bob"}, "created": "c2", "body": "second"}
+                {"author": {"displayName": "bob"}, "created": "c2", "body": "second"},
+                {"author": {"accountId": "x"}, "created": "c3", "body": "third"}
             ]}));
         });
         let issue = client(&server).get_issue("ABC-1").await.unwrap();
@@ -415,7 +421,8 @@ mod tests {
         assert_eq!(issue.issue_type.as_deref(), Some("Bug"));
         assert_eq!(issue.priority.as_deref(), Some("High"));
         assert_eq!(issue.labels, ["auth"]);
-        assert_eq!(issue.comments.len(), 2);
+        assert_eq!(issue.comments.len(), 3);
+        assert_eq!(issue.comments[2].author, "unknown");
         assert_eq!(issue.comments[0].author, "alice");
         assert_eq!(issue.comments[1].author, "bob");
         assert_eq!(issue.comments[1].created, "c2");

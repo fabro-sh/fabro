@@ -290,10 +290,10 @@ fn jira_integration_status(state: &AppState, vault: &Vault) -> SystemIntegration
         );
     }
 
-    let last_error = state
-        .jira_service
-        .as_ref()
-        .and_then(|service| service.last_error());
+    let last_error = match state.jira_service.as_ref() {
+        Some(service) => service.last_error(),
+        None => Some("server restart required to load Jira credentials".to_string()),
+    };
     let status = if let Some(last_error) = last_error {
         metadata.insert("last_error".to_string(), last_error);
         IntegrationStatus::Error

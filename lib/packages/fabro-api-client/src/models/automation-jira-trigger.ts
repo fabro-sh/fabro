@@ -30,7 +30,7 @@ export interface AutomationJiraTrigger {
      */
     'in_progress_status'?: string;
     /**
-     * Jira status to move an issue to when its run opens a pull request.
+     * Jira status to move an issue to when its run succeeds.
      */
     'review_status'?: string;
 }

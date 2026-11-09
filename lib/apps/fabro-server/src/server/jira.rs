@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use fabro_jira::JiraClient;
 use fabro_static::EnvVars;
@@ -8,6 +8,7 @@ use fabro_store::platform_records::{
 };
 use fabro_types::settings::server::JiraIntegrationSettings;
 use fabro_types::{FailureReason, RunId, RunStatus, RunStreamItem};
+use fabro_util::error as error_util;
 use tracing::warn;
 
 use super::{AppState, platform_record_of, run_records, sanitize_integration_error};
@@ -15,17 +16,29 @@ use super::{AppState, platform_record_of, run_records, sanitize_integration_erro
 const SITE_URL_SETTING: &str = "server.integrations.jira.site_url";
 const EMAIL_SETTING: &str = "server.integrations.jira.email";
 
-/// The Jira client and the last error it hit, shown on the integrations page.
+/// The Jira client and the last errors it hit (polling and write-back), shown
+/// on the integrations page.
+#[allow(
+    unreachable_pub,
+    reason = "Exposed to integration tests through TestAppStateBuilder::jira_service under test-support."
+)]
 pub struct JiraService {
-    client:     JiraClient,
-    last_error: Arc<Mutex<Option<String>>>,
+    client: JiraClient,
+    errors: Mutex<JiraErrors>,
+}
+
+#[derive(Default)]
+struct JiraErrors {
+    sequence:   u64,
+    poll:       Option<(u64, String)>,
+    write_back: Option<(u64, String)>,
 }
 
 impl JiraService {
     pub(crate) fn new(client: JiraClient) -> Self {
         Self {
             client,
-            last_error: Arc::new(Mutex::new(None)),
+            errors: Mutex::new(JiraErrors::default()),
         }
     }
 
@@ -33,26 +46,40 @@ impl JiraService {
         &self.client
     }
 
+    fn errors(&self) -> std::sync::MutexGuard<'_, JiraErrors> {
+        self.errors
+            .lock()
+            .expect("jira errors lock should not be poisoned")
+    }
+
+    /// The most recently recorded of the poll and write-back errors.
     pub(crate) fn last_error(&self) -> Option<String> {
-        self.last_error
-            .lock()
-            .expect("jira last_error lock should not be poisoned")
-            .clone()
+        let errors = self.errors();
+        [&errors.poll, &errors.write_back]
+            .into_iter()
+            .flatten()
+            .max_by_key(|(sequence, _)| *sequence)
+            .map(|(_, message)| message.clone())
     }
 
-    pub(crate) fn record_error(&self, error: &str) {
-        *self
-            .last_error
-            .lock()
-            .expect("jira last_error lock should not be poisoned") =
-            Some(sanitize_integration_error(error));
+    pub(crate) fn record_poll_error(&self, error: &str) {
+        let mut errors = self.errors();
+        errors.sequence += 1;
+        errors.poll = Some((errors.sequence, sanitize_integration_error(error)));
     }
 
-    pub(crate) fn clear_error(&self) {
-        *self
-            .last_error
-            .lock()
-            .expect("jira last_error lock should not be poisoned") = None;
+    pub(crate) fn clear_poll_error(&self) {
+        self.errors().poll = None;
+    }
+
+    pub(crate) fn record_write_back_error(&self, error: &str) {
+        let mut errors = self.errors();
+        errors.sequence += 1;
+        errors.write_back = Some((errors.sequence, sanitize_integration_error(error)));
+    }
+
+    pub(crate) fn clear_write_back_error(&self) {
+        self.errors().write_back = None;
     }
 }
 
@@ -156,7 +183,7 @@ impl JiraService {
             Ok(Some(claim)) => claim,
             Ok(None) => return,
             Err(err) => {
-                warn!(run_id = %run_id, error = %err, "Skipping Jira write-back: claim could not be read");
+                warn!(run_id = %run_id, error = ?err, "Skipping Jira write-back: claim could not be read");
                 return;
             }
         };
@@ -180,7 +207,7 @@ impl JiraService {
                 )
             }),
             Err(err) => {
-                warn!(run_id = %run_id, issue_key = %issue_key, error = %err, "Skipping Jira write-back: sent notifications could not be read");
+                warn!(run_id = %run_id, issue_key = %issue_key, error = ?err, "Skipping Jira write-back: sent notifications could not be read");
                 return;
             }
         };
@@ -189,11 +216,15 @@ impl JiraService {
         }
 
         let pull_request_url = match run_records::projection(state, run_id).await {
-            Ok(Some(projection)) => projection.pull_request.as_ref().map(|pr| pr.html_url()),
+            Ok(Some(projection)) => projection
+                .pull_request
+                .as_ref()
+                .map(fabro_types::PullRequestLink::html_url),
             Ok(None) => None,
             Err(err) => {
-                warn!(run_id = %run_id, issue_key = %issue_key, error = %err, "Jira write-back could not load the run projection");
-                None
+                // Return rather than post (and dedupe) a comment missing the PR link.
+                warn!(run_id = %run_id, issue_key = %issue_key, error = ?err, "Jira write-back could not load the run projection");
+                return;
             }
         };
         let run_link = state
@@ -202,11 +233,14 @@ impl JiraService {
         let reason = jira_failure_reason(lifecycle);
         let body = jira_comment(event, &run_link, pull_request_url.as_deref(), Some(&reason));
 
+        // A failed comment skips the transition and is retried on the next event.
         if let Err(err) = self.client.add_comment(&issue_key, &body).await {
-            warn!(run_id = %run_id, issue_key = %issue_key, event = event_name, error = %err, "Failed to comment on Jira issue");
-            self.record_error(&err.to_string());
+            let message = error_util::collect_chain(&err).join(": ");
+            warn!(run_id = %run_id, issue_key = %issue_key, event = event_name, error = %message, "Failed to comment on Jira issue");
+            self.record_write_back_error(&message);
             return;
         }
+        self.clear_write_back_error();
         let record = PlatformRecord::NotificationSent(NotificationSentRecord {
             route:      "jira".into(),
             event:      event_name.into(),
@@ -217,7 +251,7 @@ impl JiraService {
             operation:  None,
         });
         if let Err(err) = run_records::append(state, run_id, record).await {
-            warn!(run_id = %run_id, issue_key = %issue_key, error = %err, "the Jira comment was posted but not recorded");
+            warn!(run_id = %run_id, issue_key = %issue_key, error = ?err, "the Jira comment was posted but not recorded");
         }
 
         let trigger_status = match event {
@@ -232,7 +266,7 @@ impl JiraService {
                     }),
                     Ok(None) => None,
                     Err(err) => {
-                        warn!(run_id = %run_id, issue_key = %issue_key, error = %err, "Jira write-back could not load the automation");
+                        warn!(run_id = %run_id, issue_key = %issue_key, error = ?err, "Jira write-back could not load the automation");
                         None
                     }
                 }
@@ -243,8 +277,9 @@ impl JiraService {
             return;
         };
         if let Err(err) = self.client.transition(&issue_key, &status).await {
-            warn!(run_id = %run_id, issue_key = %issue_key, event = event_name, error = %err, "Failed to transition Jira issue");
-            self.record_error(&err.to_string());
+            let message = error_util::collect_chain(&err).join(": ");
+            warn!(run_id = %run_id, issue_key = %issue_key, event = event_name, error = %message, "Failed to transition Jira issue");
+            self.record_write_back_error(&message);
         }
     }
 }
@@ -397,18 +432,20 @@ mod tests {
     }
 
     #[test]
-    fn record_error_sanitizes_and_clear_error_resets() {
-        let service = JiraService::new(
-            JiraClient::new(
-                "https://acme.atlassian.net".to_string(),
-                "bot@acme.com".to_string(),
-                "tok".to_string(),
-            )
-            .unwrap(),
-        );
-        service.record_error("boom\nline");
+    fn errors_are_sanitized_and_last_error_is_the_most_recent_slot() {
+        let service = JiraService::new(JiraClient::with_http(
+            "https://acme.atlassian.net".to_string(),
+            "bot@acme.com".to_string(),
+            "tok".to_string(),
+            fabro_http::test_http_client().unwrap(),
+        ));
+        service.record_poll_error("boom\nline");
         assert_eq!(service.last_error().as_deref(), Some("boom line"));
-        service.clear_error();
+        service.record_write_back_error("later");
+        assert_eq!(service.last_error().as_deref(), Some("later"));
+        service.clear_write_back_error();
+        assert_eq!(service.last_error().as_deref(), Some("boom line"));
+        service.clear_poll_error();
         assert_eq!(service.last_error(), None);
     }
 }

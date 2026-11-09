@@ -20,6 +20,7 @@ CREATE TABLE jira_issue_runs (
     issue_key TEXT NOT NULL,
     run_id TEXT NOT NULL,
     created_at TEXT NOT NULL,
+    run_created_at TEXT,
     PRIMARY KEY (automation_id, issue_key),
     CHECK (length(trim(issue_key)) > 0)
 );
