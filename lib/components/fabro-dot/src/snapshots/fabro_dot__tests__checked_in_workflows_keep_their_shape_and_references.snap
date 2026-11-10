@@ -22,19 +22,6 @@ expression: report
   inline@implement_app
   inline@verify_app
   inline@fix_app
-.fabro/workflows/code-review/code-review.fabro: CodeReview nodes=26 edges=33
-  goal-inline
-  stylesheet-inline
-  file:output_schema:schemas/file-groups.schema.json@grouping
-  file:prompt:prompts/group-files.md.j2@grouping
-  file:output_schema:schemas/findings.schema.json@finder
-  file:prompt:prompts/finder.md.j2@finder
-  file:output_schema:schemas/verdict.schema.json@verifier
-  file:prompt:prompts/verify.md.j2@verifier
-  file:output_schema:schemas/findings.schema.json@sweeper
-  file:prompt:prompts/sweep.md.j2@sweeper
-  file:output_schema:schemas/verdict.schema.json@sweep_verifier
-  file:prompt:prompts/verify.md.j2@sweep_verifier
 .fabro/workflows/context-demo/workflow.fabro: ContextDemo nodes=3 edges=2
   goal-inline
   inline@emit
