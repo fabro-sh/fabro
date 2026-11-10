@@ -11,9 +11,6 @@ evals/swe-bench/repos/
 evals/swe-bench/results/
 evals/swe-bench/dockerfiles/
 __pycache__
-.ai/plans
-.ai/comments
-.ai/tmp
 .worktrees/
 **/*.pending-snap
 .worktrees
@@ -21,3 +18,6 @@ __pycache__
 .mcp.json
 docs/internal/agent
 .amp/portals/*
+
+# AI-generated artifacts stay local.
+/.ai/
