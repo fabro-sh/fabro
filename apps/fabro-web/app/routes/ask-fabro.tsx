@@ -60,7 +60,7 @@ function DemoWorkspace({
           type="button"
           onClick={onOpen}
           disabled={isOpen}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-overlay px-2.5 py-1.5 text-sm font-medium text-fg-2 ring-1 ring-line-strong transition-colors hover:bg-overlay-strong hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
+          className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-overlay px-2.5 py-1.5 text-sm font-medium text-fg-2 ring-1 ring-line-strong transition-colors hover:bg-overlay-strong hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current disabled:cursor-not-allowed disabled:opacity-50"
         >
           <SparklesIcon className="size-4 text-teal-300" />
           Ask Fabro

@@ -16,6 +16,7 @@ import {
   PencilIcon,
 } from "@heroicons/react/24/outline";
 import { formatBytes } from "../lib/format";
+import { GHOST_BUTTON_CLASS, INPUT_CLASS, PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from "../components/ui";
 import { useResizeObserver } from "../hooks/effects";
 import {
   type QueryResult,
@@ -33,10 +34,11 @@ function formatNumber(n: number): string {
 // ── Chart component ──
 
 const BAR_COLORS = [
-  "rgba(90, 200, 168, 0.85)",
-  "rgba(103, 178, 215, 0.85)",
-  "rgba(181, 221, 239, 0.65)",
-  "rgba(240, 164, 91, 0.75)",
+  "var(--chart-series-1)",
+  "var(--chart-series-2)",
+  "var(--chart-series-3)",
+  "var(--chart-series-4)",
+  "var(--chart-series-5)",
 ];
 
 function BarChart({ result }: { result: QueryResult }) {
@@ -111,7 +113,7 @@ function BarChart({ result }: { result: QueryResult }) {
                   textAnchor="end"
                   fill="var(--chart-axis-label)"
                   fontSize="11"
-                  fontFamily="JetBrains Mono, monospace"
+                  className="font-mono"
                 >
                   {tick >= 1000 ? `${(tick / 1000).toFixed(tick >= 10000 ? 0 : 1)}k` : tick}
                 </text>
@@ -151,7 +153,7 @@ function BarChart({ result }: { result: QueryResult }) {
                   textAnchor="middle"
                   fill="var(--chart-axis-label)"
                   fontSize="10"
-                  fontFamily="JetBrains Mono, monospace"
+                  className="font-mono"
                 >
                   {label.length > maxLabelLen
                     ? label.slice(0, Math.max(3, maxLabelLen - 1)) + "\u2026"
@@ -483,11 +485,11 @@ export default function InsightsEditor() {
         className="relative z-50"
       >
         <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm"
+          className="modal-backdrop fixed inset-0"
           aria-hidden="true"
         />
-        <div className="fixed inset-0 flex items-start justify-center pt-[15vh]">
-          <DialogPanel className="w-full max-w-lg rounded-lg border border-line-strong bg-panel shadow-2xl shadow-black/40">
+        <div className="fixed inset-0 flex items-center justify-center p-4">
+          <DialogPanel className="modal w-full max-w-lg">
             <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
               <DialogTitle className="flex items-center gap-2 text-sm font-semibold text-fg">
                 <SparklesIcon className="size-4 text-teal-500" />
@@ -497,13 +499,13 @@ export default function InsightsEditor() {
                 type="button"
                 aria-label="Close SQL AI"
                 onClick={() => setShowAiDialog(false)}
-                className="text-fg-muted transition-colors hover:text-fg-3"
+                className={GHOST_BUTTON_CLASS}
               >
                 <XMarkIcon className="size-4" />
               </button>
             </div>
             <div className="p-5">
-              <label htmlFor="ai-query-prompt" className="mb-2 block text-xs font-medium text-fg-3">
+              <label htmlFor="ai-query-prompt" className="field-label mb-2">
                 Describe what you want to query
               </label>
               <textarea
@@ -512,14 +514,14 @@ export default function InsightsEditor() {
                 value={aiPrompt}
                 onChange={(e) => setAiPrompt(e.target.value)}
                 placeholder="e.g. Show me the average build time per workflow over the last 30 days"
-                className="w-full rounded-md border border-line bg-page/60 px-3 py-2.5 text-sm text-fg-2 placeholder-fg-muted outline-none transition-colors focus:border-focus"
+                className={INPUT_CLASS}
                 rows={3}
               />
               <div className="mt-4 flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setShowAiDialog(false)}
-                  className="rounded-md border border-line px-3 py-1.5 text-sm text-fg-3 transition-colors hover:bg-overlay"
+                  className={SECONDARY_BUTTON_CLASS}
                 >
                   Cancel
                 </button>
@@ -535,7 +537,7 @@ export default function InsightsEditor() {
                     setShowAiDialog(false);
                   }}
                   disabled={aiPrompt.trim().length === 0}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-teal-500/30 bg-teal-500/10 px-3 py-1.5 text-sm font-medium text-teal-300 transition-all hover:border-teal-500/50 hover:bg-teal-500/20 hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
+                  className={PRIMARY_BUTTON_CLASS}
                 >
                   <SparklesIcon className="size-3.5" />
                   Generate SQL

@@ -1,0 +1,264 @@
+/*
+ * The run graph, repainted entirely from CSS variables, so switching palette needs no
+ * re-render and loses no pan, zoom or hover state.
+ *
+ * Graphviz writes its defaults as presentation attributes, and those lose to any
+ * stylesheet rule. Rules below match those default values, so colors a workflow author
+ * set on purpose keep painting. app/lib/run-graph-svg.ts groups each node's shapes in
+ * `.graph-shapes`, apart from its text.
+ *
+ * The thin strokes and connector grammar adapt diagram-design (MIT), see
+ * public/THIRD_PARTY_NOTICES.txt. All color comes from the active Factory palette.
+ */
+
+.graph-svg {
+  background-color: var(--diagram-paper);
+  background-image: var(--diagram-paper-image);
+  background-size: var(--diagram-paper-size);
+}
+
+/* Fallbacks for anything the enhancer doesn't move, such as a node Graphviz wrapped
+   in a link for a URL or tooltip attribute. It keeps its shape and still follows the
+   theme. The more specific rules below paint everything else. */
+.graph-svg svg text {
+  font-family: var(--font-sans);
+  fill: var(--diagram-ink);
+}
+
+.graph-svg svg [stroke="#357f9e"] {
+  stroke: var(--diagram-ink);
+}
+
+.graph-svg svg [stroke="#666666"] {
+  stroke: var(--diagram-edge);
+}
+
+.graph-svg svg [fill="#666666"] {
+  fill: var(--diagram-edge);
+}
+
+/* A graph-level label is the diagram's title. */
+.graph-svg svg .graph > text {
+  font-family: var(--font-display);
+}
+
+/* Graphviz sized the viewport for narrower label fonts. Let a wider label extend
+   past it. The pannable container above is what clips. */
+.graph-svg svg {
+  overflow: visible;
+}
+
+/* ── Nodes ── */
+
+.graph-svg .node {
+  --graph-node-fill: var(--diagram-surface);
+  --graph-node-stroke: var(--diagram-ink);
+  --graph-node-stroke-width: var(--diagram-stroke);
+  outline: none;
+}
+
+.graph-svg .node > .graph-shapes > :is(rect, polygon, ellipse, path)[fill="none"] {
+  fill: var(--graph-node-fill);
+}
+
+.graph-svg .node > .graph-shapes > :is(rect, polygon, polyline, ellipse, path)[stroke="#357f9e"] {
+  stroke: var(--graph-node-stroke);
+}
+
+.graph-svg .node > .graph-shapes > :is(rect, polygon, polyline, ellipse, path) {
+  stroke-width: var(--graph-node-stroke-width);
+}
+
+.graph-svg .node > .graph-shapes > rect {
+  rx: var(--diagram-node-radius);
+  ry: var(--diagram-node-radius);
+}
+
+.graph-svg .node > text {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  fill: var(--diagram-ink);
+}
+
+/* A workflow author's fillcolor picks the ink it needs. */
+.graph-svg .node[data-graph-ink="dark"] > text {
+  fill: #111111;
+}
+
+.graph-svg .node[data-graph-ink="light"] > text {
+  fill: #ffffff;
+}
+
+/* Graphviz sized every node for Helvetica at 12 units and Manrope 600 runs slightly
+   wider, so authored sizes stay and the default steps down to keep the box's padding. */
+.graph-svg .node > text[font-size="12.00"] {
+  font-size: 11.5px;
+}
+
+/* ── Run state ──
+   State wins over any authored color. Fills are opaque, so connectors never show through
+   a node: the palette's own soft accent and failure surfaces, and a quiet mix for
+   completed nodes because a finished run has many of them. Matches GRAPH_STATE_ROLES in
+   app/lib/graph-theme.ts, which proves their contrast on every palette. */
+
+.graph-svg .node[data-run-state] > .graph-shapes > :is(rect, polygon, ellipse, path) {
+  fill: var(--graph-node-fill);
+}
+
+.graph-svg .node[data-run-state] > .graph-shapes > :is(rect, polygon, polyline, ellipse, path) {
+  stroke: var(--graph-node-stroke);
+}
+
+.graph-svg .node[data-run-state] > text {
+  fill: var(--diagram-ink);
+}
+
+.graph-svg .node[data-run-state="running"] {
+  --graph-node-fill: var(--diagram-accent-tint);
+  --graph-node-stroke: var(--diagram-accent-ink);
+  --graph-node-stroke-width: 1.6px;
+  --graph-badge: var(--diagram-accent);
+}
+
+.graph-svg .node[data-run-state="failed"] {
+  --graph-node-fill: var(--diagram-danger-tint);
+  --graph-node-stroke: var(--diagram-danger);
+  --graph-node-stroke-width: 1.6px;
+  --graph-badge: var(--diagram-danger);
+}
+
+.graph-svg .node[data-run-state="completed"] {
+  --graph-node-fill: color-mix(in srgb, var(--diagram-success) 8%, var(--diagram-surface));
+  --graph-node-stroke: var(--diagram-success);
+  --graph-badge: var(--diagram-success);
+}
+
+/* Hover and keyboard focus come after the state rules so they win over them. The
+   stroke is the indicator because outlines on SVG elements are unreliable. */
+.graph-svg .node[data-graph-link]:hover {
+  --graph-node-stroke-width: 2px;
+}
+
+.graph-svg .node[data-graph-link]:focus-visible {
+  --graph-node-stroke: var(--color-focus);
+  --graph-node-stroke-width: 2.6px;
+}
+
+.graph-svg .node[data-graph-link]:focus-visible > .graph-shapes > :is(rect, polygon, polyline, ellipse, path) {
+  stroke: var(--graph-node-stroke);
+}
+
+/* The status badge, so state never depends on telling two hues apart. */
+.graph-svg .graph-badge {
+  display: none;
+  pointer-events: none;
+}
+
+.graph-svg .node[data-run-state] .graph-badge {
+  display: inline;
+}
+
+.graph-svg .graph-badge circle {
+  fill: var(--graph-badge);
+  stroke: var(--diagram-paper);
+  stroke-width: 1.5px;
+}
+
+.graph-svg .graph-badge path {
+  display: none;
+  fill: none;
+  stroke: var(--diagram-paper);
+  stroke-width: 1.6px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.graph-svg .node[data-run-state="completed"] .graph-badge-completed,
+.graph-svg .node[data-run-state="failed"] .graph-badge-failed,
+.graph-svg .node[data-run-state="running"] .graph-badge-running {
+  display: inline;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .graph-svg .node[data-run-state="running"] > .graph-shapes > :is(rect, polygon, ellipse, path) {
+    animation: graph-running-pulse 1.5s ease-in-out infinite;
+  }
+}
+
+@keyframes graph-running-pulse {
+  50% {
+    fill: color-mix(in srgb, var(--diagram-accent) 26%, var(--diagram-surface));
+    stroke-width: 2.6px;
+  }
+}
+
+/* ── Connectors ── */
+
+.graph-svg .edge > .graph-shapes > path[stroke="#666666"] {
+  fill: none;
+  stroke: var(--diagram-edge);
+}
+
+.graph-svg .edge > .graph-shapes > path {
+  stroke-width: var(--diagram-edge-stroke);
+}
+
+.graph-svg .edge > .graph-shapes > polygon[fill="#666666"] {
+  fill: var(--diagram-edge);
+}
+
+.graph-svg .edge > .graph-shapes > polygon[stroke="#666666"] {
+  stroke: var(--diagram-edge);
+}
+
+/* A routed arrowhead's tip lands on the node's stroke, and a mitered stroke would
+   push it through. */
+.graph-svg .edge[data-edge-routed] > .graph-shapes > polygon {
+  stroke: none;
+}
+
+/* The source's return-path grammar: dashed means this connector loops back. */
+.graph-svg .edge[data-edge-kind="return"] > .graph-shapes > path {
+  stroke-dasharray: 5 4;
+}
+
+/* Condition and label text. The paper-colored halo is the source's opaque label
+   mask, without having to measure text that changes width with the theme. */
+.graph-svg .edge > text {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  fill: var(--diagram-muted);
+  stroke: var(--diagram-paper);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  paint-order: stroke fill;
+}
+
+/* ── Groups ── */
+
+.graph-svg .cluster > .graph-shapes > :is(rect, polygon) {
+  fill: color-mix(in srgb, var(--diagram-ink) 3%, transparent);
+  stroke: var(--diagram-soft);
+  stroke-width: 0.8px;
+  stroke-dasharray: 4 3;
+}
+
+.graph-svg .cluster > .graph-shapes > rect {
+  rx: 8px;
+  ry: 8px;
+}
+
+.graph-svg .graph-cluster-labels > text {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  fill: var(--diagram-muted);
+  stroke: var(--diagram-paper);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  paint-order: stroke fill;
+  pointer-events: none;
+}

@@ -103,7 +103,7 @@ export default function ProfileSessions() {
       {revokeError ? (
         <div
           role="alert"
-          className="text-sm text-rose-400"
+          className="text-sm text-coral"
           data-testid="revoke-error"
         >
           {revokeError}

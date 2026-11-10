@@ -63,11 +63,11 @@ export const columnStatuses = [
 
 export const columnStatusDisplay: Record<BoardColumn, { label: string; dot: string; text: string }> = {
   pending:      { label: "Pending",      dot: "bg-fg-muted",  text: "text-fg-muted" },
-  runnable:     { label: "Runnable",     dot: "bg-cyan-500",  text: "text-cyan-500" },
+  runnable:     { label: "Runnable",     dot: "bg-teal-300",  text: "text-teal-300" },
   initializing: { label: "Initializing", dot: "bg-amber",     text: "text-amber" },
   running:      { label: "Running",      dot: "bg-teal-500",  text: "text-teal-500" },
   blocked:      { label: "Blocked",      dot: "bg-amber",     text: "text-amber" },
-  succeeded:    { label: "Succeeded",    dot: "bg-teal-300",  text: "text-teal-300" },
+  succeeded:    { label: "Succeeded",    dot: "bg-mint",      text: "text-mint" },
   failed:       { label: "Failed",       dot: "bg-coral",     text: "text-coral" },
   archived:     { label: "Archived",     dot: "bg-fg-muted",  text: "text-fg-muted" },
   removing:     { label: "Removing",     dot: "bg-fg-muted",  text: "text-fg-muted" },
@@ -194,7 +194,7 @@ export type RunStatus =
 export const runStatusDisplay: Record<RunStatus, { label: string; dot: string; text: string }> = {
   submitted: { label: "Submitted", dot: "bg-fg-muted", text: "text-fg-muted" },
   pending: { label: "Pending", dot: "bg-fg-muted", text: "text-fg-muted" },
-  runnable: { label: "Runnable", dot: "bg-cyan-500", text: "text-cyan-500" },
+  runnable: { label: "Runnable", dot: "bg-teal-300", text: "text-teal-300" },
   starting: { label: "Starting", dot: "bg-amber", text: "text-amber" },
   running: { label: "Running", dot: "bg-teal-500", text: "text-teal-500" },
   blocked: { label: "Blocked", dot: "bg-amber", text: "text-amber" },

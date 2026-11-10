@@ -5,15 +5,15 @@ import {
 } from "@pierre/diffs/react";
 
 import { workerFactory } from "../../lib/pierre-diffs-worker";
+import { PIERRE_HIGHLIGHTER_OPTIONS } from "../../lib/pierre-theme";
 
 const poolOptions = { workerFactory };
-const highlighterOptions = { theme: "pierre-dark" };
 
 export function VirtualizedDiffList({ children }: { children: ReactNode }) {
   return (
     <WorkerPoolContextProvider
       poolOptions={poolOptions}
-      highlighterOptions={highlighterOptions}
+      highlighterOptions={PIERRE_HIGHLIGHTER_OPTIONS}
     >
       <Virtualizer
         className="min-h-0 flex-1 overflow-auto pr-2"

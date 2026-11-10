@@ -163,7 +163,7 @@ function InterviewQuestionDock({
 function ContextPanel({ text }: { text: string }) {
   return (
     <details className="group rounded-lg bg-panel-alt outline-1 -outline-offset-1 outline-line">
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg px-3 py-1.5 font-mono text-[0.6875rem] tracking-wide text-fg-muted uppercase transition-colors hover:text-fg-3 focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500 [&::-webkit-details-marker]:hidden">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg px-3 py-1.5 font-mono text-[0.6875rem] tracking-wide text-fg-muted uppercase transition-colors hover:text-fg-3 focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-current [&::-webkit-details-marker]:hidden">
         <ChevronRightIcon
           className="size-3 shrink-0 transition-transform group-open:rotate-90"
           aria-hidden="true"

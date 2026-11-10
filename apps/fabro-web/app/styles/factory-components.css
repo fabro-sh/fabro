@@ -1,0 +1,843 @@
+/*
+ * Factory's component library, for Fabro.
+ *
+ * The class names, sizes and states below match Factory's own stylesheet, so a Factory
+ * control and a Fabro control with the same job look and behave the same. Every value
+ * reads a semantic token from factory-themes.css, so each control follows all seven
+ * palettes in light and dark. Nothing here is a palette color.
+ *
+ * Origin: adapted from the owner's private Factory UI (ui/src/styles/globals.css and the
+ * Timeline in ui/src/features/process/ProcessPanel.tsx). Owner-authored source, reused on
+ * the owner's authorization. It is not third-party code and is not covered by the notices
+ * in public/THIRD_PARTY_NOTICES.txt.
+ *
+ * What is one-to-one and what is Fabro's own: FACTORY_COMPONENTS.md.
+ */
+
+@layer base {
+  /* Pointer clicks keep the control's normal shape. Keyboard focus stays inside
+     its bounds instead of drawing a second, rounded frame around it. */
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  :focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: -2px;
+  }
+}
+
+@layer components {
+  /* ── Labels and surfaces ── */
+
+  .eyebrow {
+    font-family: var(--font-display);
+    font-size: 10.5px;
+    line-height: 14px;
+    letter-spacing: var(--eyebrow-spacing);
+    text-transform: uppercase;
+    font-weight: 500;
+    color: var(--muted);
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    box-shadow: var(--e1);
+  }
+
+  .raised {
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--e2);
+    border: 1px solid var(--line);
+  }
+
+  .scroll-pane {
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+
+  .hatch {
+    background-image: repeating-linear-gradient(135deg, transparent 0 5px, var(--hatch) 5px 6px);
+  }
+
+  /* Real tabs joined to the panel below them. The active tab shares the panel's fill. */
+  .folder-tabs {
+    display: flex;
+    gap: 2px;
+    align-items: flex-end;
+  }
+
+  .folder-tab {
+    position: relative;
+    isolation: isolate;
+    padding: 7px 18px 8px 14px;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--muted);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+  }
+
+  .folder-tab::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: 12px 12px 0 0;
+    background: var(--surface-3);
+    border: 1px solid var(--line);
+    border-bottom: 0;
+    clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 100%, 0 100%);
+  }
+
+  .folder-tab[aria-selected="true"] {
+    color: var(--fg);
+  }
+
+  .folder-tab[aria-selected="true"]::before {
+    background: var(--surface);
+  }
+
+  .folder-tab[aria-selected="true"]::after {
+    content: "";
+    position: absolute;
+    left: 14px;
+    right: 26px;
+    top: 0;
+    height: 2px;
+    background: var(--accent-fill);
+    border-radius: 2px;
+  }
+
+  /* ── Chips ── */
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: var(--radius-chip);
+    font-size: 11.5px;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+    border: 1px solid transparent;
+    background: var(--surface-3);
+    color: var(--fg-2);
+  }
+
+  .chip-ok {
+    background: var(--ok-bg);
+    color: var(--ok);
+    border-color: var(--ok-rule);
+  }
+
+  .chip-bad {
+    background: var(--bad-bg);
+    color: var(--bad);
+    border-color: var(--bad-rule);
+  }
+
+  .chip-warn {
+    background: var(--warn-bg);
+    color: var(--warn);
+    border-color: var(--warn-rule);
+  }
+
+  .chip-info {
+    background: var(--info-bg);
+    color: var(--info);
+    border-color: var(--info-rule);
+  }
+
+  .chip-outline {
+    background: transparent;
+    border-color: var(--line-strong);
+    color: var(--muted);
+  }
+
+  .chip-live {
+    background: transparent;
+    border-color: var(--accent-fill);
+    color: var(--accent-ink);
+  }
+
+  /* ── Buttons ── */
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 34px;
+    padding: 0 12px;
+    border-radius: var(--radius-btn);
+    font-size: 13px;
+    font-weight: 700;
+    border: 1px solid var(--line-strong);
+    background: var(--surface);
+    color: var(--fg);
+    box-shadow: var(--btn-shadow);
+    cursor: pointer;
+    white-space: nowrap;
+    transition:
+      background-color 140ms ease-out,
+      border-color 140ms ease-out,
+      transform 80ms;
+  }
+
+  .btn:hover:not(:disabled, [aria-disabled="true"]) {
+    background: var(--surface-2);
+  }
+
+  .btn:active:not(:disabled, [aria-disabled="true"]) {
+    transform: translateY(1px);
+  }
+
+  .btn:disabled,
+  .btn[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-sm {
+    height: 28px;
+    padding: 0 9px;
+    font-size: 12px;
+  }
+
+  .btn-primary {
+    background: var(--primary);
+    color: var(--primary-fg);
+    border-color: transparent;
+  }
+
+  .btn-primary:hover:not(:disabled, [aria-disabled="true"]) {
+    background: var(--primary-hover);
+  }
+
+  /* The palette's highlight: orange in Signal, lime in Payline, acid in Brutalist, mint in Graphite. */
+  .btn-signal {
+    background: var(--accent-pop);
+    color: var(--accent-pop-fg);
+    border-color: transparent;
+    box-shadow: var(--e-signal);
+    font-weight: 800;
+  }
+
+  .btn-signal:hover:not(:disabled, [aria-disabled="true"]) {
+    background: var(--accent-pop-hover);
+  }
+
+  .btn-ghost {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+  }
+
+  .btn-ghost:hover:not(:disabled, [aria-disabled="true"]) {
+    background: var(--surface-3);
+  }
+
+  .btn-danger {
+    color: var(--bad);
+  }
+
+  /* A toolbar filter that is narrowing the list. Same colors as Factory's live chip. Not
+     data-active, which HeadlessUI sets on its own buttons while they are open. */
+  .btn[data-filtering="true"] {
+    border-color: var(--accent-fill);
+    color: var(--accent-ink);
+  }
+
+  .link {
+    color: inherit;
+    font-weight: 700;
+    text-decoration: underline;
+    text-decoration-color: var(--accent-fill);
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+    cursor: pointer;
+    background: none;
+    border: 0;
+    padding: 0;
+  }
+
+  /* ── Fields ── */
+
+  .field-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--fg-2);
+    margin-bottom: 4px;
+  }
+
+  .input {
+    width: 100%;
+    height: 34px;
+    padding: 0 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--input);
+    background: var(--surface);
+    color: var(--fg);
+    font-size: 13px;
+  }
+
+  textarea.input {
+    height: auto;
+    padding: 8px 10px;
+    line-height: 1.5;
+    resize: vertical;
+  }
+
+  select.input {
+    appearance: auto;
+    padding-right: 6px;
+  }
+
+  .input::placeholder {
+    color: var(--muted);
+  }
+
+  .input:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .input[aria-invalid="true"] {
+    border-color: var(--bad);
+  }
+
+  /* iOS zooms the page into any field under 16px. */
+  @media (max-width: 639px) {
+    .input {
+      font-size: 16px;
+    }
+  }
+
+  .check {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--primary);
+    cursor: pointer;
+  }
+
+  .check:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  /* ── Menus, dialogs and floating surfaces ── */
+
+  .menu {
+    min-width: 220px;
+    padding: 6px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--fg);
+    box-shadow: var(--e3);
+  }
+
+  .menu-item {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+    background: none;
+    border: 0;
+    cursor: pointer;
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .menu-item:hover,
+  .menu-item:focus-visible,
+  .menu-item[data-focus] {
+    background: var(--surface-3);
+    outline: none;
+  }
+
+  .menu-item:disabled,
+  .menu-item[data-disabled] {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .menu-item-danger {
+    color: var(--bad);
+  }
+
+  .menu-item-danger:hover,
+  .menu-item-danger:focus-visible,
+  .menu-item-danger[data-focus] {
+    background: var(--bad-bg);
+  }
+
+  .modal {
+    width: min(640px, calc(100vw - 32px));
+    max-height: calc(100dvh - 48px);
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    color: var(--fg);
+    box-shadow: var(--e3);
+  }
+
+  /* A question and two buttons. Factory has no confirm dialog, so this is the modal, narrower. */
+  .modal-confirm {
+    width: min(448px, calc(100vw - 32px));
+  }
+
+  .modal-backdrop {
+    background: var(--backdrop);
+  }
+
+  /* Factory uses native title text for short hints. Fabro keeps its Radix tooltips and
+     dresses them in the menu's surface. */
+  .tooltip-surface {
+    padding: 4px 8px;
+    border-radius: var(--radius-xs);
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--fg);
+    box-shadow: var(--e2);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+
+  .popover-surface {
+    max-width: 18rem;
+    padding: 12px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--fg-2);
+    box-shadow: var(--e3);
+    font-size: 12px;
+  }
+
+  /* ── Step glyphs ── 16px squares, always paired with words. Checked means a recorded pass. */
+
+  .glyph {
+    display: inline-grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    flex: none;
+    font-size: 10px;
+    font-weight: 900;
+    line-height: 1;
+  }
+
+  .glyph-passed {
+    background: var(--fg);
+    color: var(--surface);
+  }
+
+  .glyph-stale {
+    border: 1.5px dashed var(--warn);
+    color: var(--warn);
+  }
+
+  .glyph-running {
+    position: relative;
+    border: 2px solid var(--accent-fill);
+    border-radius: 999px;
+  }
+
+  .glyph-running::after {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--accent-fill);
+    animation: factory-pulse 1.6s ease-in-out infinite;
+  }
+
+  .glyph-waiting {
+    border: 1.5px dashed var(--fg-2);
+    color: var(--fg-2);
+  }
+
+  .glyph-changes {
+    background: var(--bad-solid);
+    color: var(--bad-solid-fg);
+  }
+
+  .glyph-blocked {
+    border: 1.5px solid var(--warn);
+    color: var(--warn);
+  }
+
+  .glyph-none {
+    border: 1.5px solid var(--line-strong);
+  }
+
+  .glyph-skip {
+    border: 1.5px dotted var(--muted);
+    color: var(--muted);
+  }
+
+  /* ── Timeline ── Factory's row density, bars and markers on Fabro's elapsed-time rows. */
+
+  .timeline-scroll {
+    container-type: inline-size;
+    min-height: 0;
+    flex: 1 1 auto;
+    border-radius: var(--radius-xs);
+    /* Sideways stays inside (no browser back swipe). Down passes to the page at the end. */
+    overscroll-behavior: contain auto;
+  }
+
+  .timeline-content {
+    --timeline-label: clamp(120px, 26cqw, 210px);
+    --timeline-meta: 136px;
+    --timeline-track-min: 560px;
+    --timeline-axis-height: 24px;
+    position: relative;
+    isolation: isolate;
+    min-width: 100%;
+    /* The track never gets narrower than its minimum, so bars are never crushed. Zoom
+       multiplies the track only, and the labels stay readable beside it. */
+    width: calc(
+      var(--timeline-label) + var(--timeline-meta) +
+        max(var(--timeline-track-min), 100cqw - var(--timeline-label) - var(--timeline-meta)) *
+        var(--timeline-zoom, 1)
+    );
+  }
+
+  .timeline-columns {
+    display: grid;
+    grid-template-columns: var(--timeline-label) minmax(0, 1fr) var(--timeline-meta);
+  }
+
+  .timeline-axis {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    height: var(--timeline-axis-height);
+    background: var(--surface);
+    font-size: 10px;
+    font-weight: 600;
+    line-height: var(--timeline-axis-height);
+    color: var(--muted);
+  }
+
+  .timeline-axis .timeline-label,
+  .timeline-axis .timeline-meta {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--muted);
+  }
+
+  .timeline-axis-track {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .timeline-tick {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    padding-left: 4px;
+    border-left: 1px solid var(--line);
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .timeline-tick[data-align="end"] {
+    padding-left: 0;
+    padding-right: 4px;
+    border-left: 0;
+    border-right: 1px solid var(--line);
+    transform: translateX(-100%);
+  }
+
+  .timeline-axis-gap {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    text-align: center;
+  }
+
+  .timeline-gridlines {
+    position: absolute;
+    top: var(--timeline-axis-height);
+    bottom: 0;
+    left: var(--timeline-label);
+    right: var(--timeline-meta);
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  .timeline-gridline {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: color-mix(in srgb, var(--line) 60%, transparent);
+  }
+
+  .timeline-gap {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-inline: 1px dashed var(--line-strong);
+  }
+
+  .timeline-now {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 1;
+    width: 1px;
+    background: var(--accent-fill);
+  }
+
+  .timeline-group-title {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    display: block;
+    width: max-content;
+    max-width: 100cqw;
+    height: 24px;
+    padding: 5px 8px 5px 4px;
+    background: var(--surface);
+  }
+
+  .timeline-row {
+    height: 24px;
+    border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  }
+
+  .timeline-row-body {
+    height: 23px;
+    color: inherit;
+    text-decoration: none;
+    /* A focused row must not hide under the sticky axis. */
+    scroll-margin-top: var(--timeline-axis-height);
+  }
+
+  .timeline-row-body:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: -2px;
+    border-radius: 4px;
+  }
+
+  /* On the row, not the track: the track is positioned and its fill would hide the gridlines. */
+  .timeline-row:hover,
+  .timeline-row:hover .timeline-label,
+  .timeline-row:hover .timeline-meta {
+    background: var(--surface-2);
+  }
+
+  .timeline-label {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 0 8px 0 4px;
+    background: var(--surface);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--fg-2);
+  }
+
+  .timeline-row[data-status^="phase"] .timeline-label {
+    color: var(--muted);
+  }
+
+  .timeline-track {
+    position: relative;
+    display: block;
+    min-width: 0;
+  }
+
+  .timeline-meta {
+    position: sticky;
+    right: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    min-width: 0;
+    padding: 0 4px 0 8px;
+    background: var(--surface);
+    font-size: 10.5px;
+    color: var(--muted);
+  }
+
+  .timeline-status-word {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+
+  .timeline-duration {
+    flex: none;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Narrow canvas: the label stays, the track scrolls, and the status word stays in the
+     row's accessible name and hover card. */
+  @container (max-width: 640px) {
+    .timeline-content {
+      --timeline-meta: 64px;
+      --timeline-track-min: 420px;
+    }
+
+    .timeline-meta {
+      position: static;
+    }
+
+    .timeline-status-word {
+      display: none;
+    }
+  }
+
+  .timeline-bar {
+    position: absolute;
+    top: 3px;
+    z-index: 1;
+    height: 16px;
+    min-width: 3px;
+    border-radius: min(4px, var(--radius-xs));
+  }
+
+  .timeline-bar-succeeded {
+    background: var(--fg);
+  }
+
+  .timeline-bar-failed {
+    background: var(--bad);
+  }
+
+  .timeline-bar-partially_succeeded {
+    border: 1px dashed var(--warn);
+  }
+
+  .timeline-bar-skipped,
+  .timeline-bar-cancelled {
+    border: 1px solid var(--line-strong);
+  }
+
+  .timeline-bar-pending {
+    border: 1px dashed var(--line-strong);
+  }
+
+  /* Waiting before stages own the run, not running. Thinner than a step, as in Factory. */
+  .timeline-bar-phase,
+  .timeline-bar-phase-open {
+    top: 5px;
+    height: 12px;
+    border: 1px dashed var(--line-strong);
+  }
+
+  .timeline-bar-phase-open {
+    border-color: var(--accent-fill);
+  }
+
+  .bar-running {
+    background-color: var(--accent-fill);
+    background-image: repeating-linear-gradient(90deg, rgb(255 255 255 / 0.25) 0 6px, transparent 6px 12px);
+    background-size: 24px 100%;
+    animation: factory-stripes 1.2s linear infinite;
+  }
+
+  .bar-retrying {
+    background-color: var(--warn);
+  }
+
+  /* A recorded start with no recorded finish: an open bracket, so it never reads as a bar. */
+  .timeline-marker-start {
+    position: absolute;
+    top: 3px;
+    z-index: 1;
+    width: 10px;
+    height: 16px;
+    border: 2px solid var(--fg);
+    border-right: 0;
+    border-radius: 3px 0 0 3px;
+  }
+
+  .timeline-untimed {
+    display: block;
+    padding-left: 6px;
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 23px;
+    white-space: nowrap;
+    color: var(--muted);
+  }
+}
+
+@keyframes factory-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.35;
+    transform: scale(0.7);
+  }
+}
+
+@keyframes factory-stripes {
+  to {
+    background-position: 24px 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .bar-running,
+  .glyph-running::after {
+    animation: none;
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .glyph,
+  .chip,
+  .btn,
+  .folder-tab::before,
+  .card,
+  .raised,
+  .timeline-bar {
+    border: 1px solid CanvasText;
+    forced-color-adjust: auto;
+  }
+
+  .folder-tab[aria-selected="true"] {
+    text-decoration: underline;
+  }
+}

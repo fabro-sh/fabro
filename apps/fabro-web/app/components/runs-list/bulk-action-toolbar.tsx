@@ -31,6 +31,8 @@ import {
   type BatchLifecycleLabel,
 } from "./batch-lifecycle";
 
+const BULK_BUTTON_CLASS = "btn btn-ghost btn-sm";
+
 export function BulkActionToolbar({
   selectedRuns,
   onClear,
@@ -120,13 +122,13 @@ export function BulkActionToolbar({
     <>
       <section
         aria-label="Bulk actions"
-        className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4"
+        className="pointer-events-none fixed right-0 bottom-4 left-[var(--fabro-nav-width,0px)] z-30 flex justify-center px-4"
       >
-        <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-line-strong bg-panel py-2 pl-4 pr-2 text-sm text-fg-2 shadow-lg shadow-black/40">
-          <span className="font-medium">
+        <div className="raised pointer-events-auto flex items-center gap-1 py-1.5 pl-3 pr-1.5 text-[13px] font-bold shadow-e3">
+          <span role="status" className="pr-1">
             {count} {plural(count, "run", "runs")} selected
           </span>
-          <span className="h-5 w-px bg-line" aria-hidden="true" />
+          <span className="mx-1 h-5 w-px bg-line" aria-hidden="true" />
           <BulkActionButton
             label="Archive"
             icon={<ArchiveBoxIcon className="size-4" aria-hidden="true" />}
@@ -144,21 +146,21 @@ export function BulkActionToolbar({
               type="button"
               disabled={pending}
               aria-label="More actions"
-              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm text-fg-2 transition-colors enabled:hover:bg-overlay disabled:cursor-default disabled:opacity-40"
+              className={BULK_BUTTON_CLASS}
             >
               <EllipsisHorizontalIcon className="size-4" aria-hidden="true" />
               <span>More</span>
-              <ChevronUpIcon className="size-3.5 text-fg-3" aria-hidden="true" />
+              <ChevronUpIcon className="size-3.5 text-muted" aria-hidden="true" />
             </MenuButton>
             <MenuItems
-              anchor={{ to: "top end", gap: 4 }}
-              className="z-30 min-w-44 origin-bottom-right rounded-md border border-line-strong bg-panel py-1 text-sm shadow-lg shadow-black/40 focus:outline-none"
+              anchor={{ to: "top end", gap: 6 }}
+              className="menu z-30 origin-bottom-right focus:outline-none"
             >
               <MenuItem>
                 <button
                   type="button"
                   onClick={() => runBulk("Approve", approvable, approveRuns)}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-fg-2 transition-colors data-focus:bg-overlay data-focus:outline-hidden"
+                  className="menu-item"
                 >
                   <CheckIcon className="size-4" aria-hidden="true" />
                   <span>Approve</span>
@@ -168,7 +170,7 @@ export function BulkActionToolbar({
                 <button
                   type="button"
                   onClick={onClickDelete}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-fg-2 transition-colors data-focus:bg-overlay data-focus:outline-hidden"
+                  className="menu-item menu-item-danger"
                 >
                   <TrashIcon className="size-4" aria-hidden="true" />
                   <span>Delete</span>
@@ -182,7 +184,7 @@ export function BulkActionToolbar({
             disabled={pending}
             aria-label="Clear selection"
             title="Clear selection"
-            className="inline-flex size-8 items-center justify-center rounded-full text-fg-3 transition-colors enabled:hover:bg-overlay enabled:hover:text-fg-2 disabled:cursor-default disabled:opacity-40"
+            className={`${BULK_BUTTON_CLASS} w-7 px-0`}
           >
             <XMarkIcon className="size-4" aria-hidden="true" />
           </button>
@@ -223,7 +225,7 @@ function BulkActionButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm text-fg-2 transition-colors enabled:hover:bg-overlay disabled:cursor-default disabled:opacity-40"
+      className={BULK_BUTTON_CLASS}
     >
       {icon}
       <span>{label}</span>

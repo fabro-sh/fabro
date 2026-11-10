@@ -148,7 +148,7 @@ function LinkRow({ label, href, text }: { label: string; href: string; text: str
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex min-w-0 items-center gap-1.5 text-right font-mono text-xs text-teal-500 transition-colors hover:text-teal-300 focus-visible:rounded-sm focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500"
+        className="inline-flex min-w-0 items-center gap-1.5 text-right font-mono text-xs text-teal-500 transition-colors hover:text-teal-300 focus-visible:rounded-sm focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-current"
       >
         <span className="truncate">{text}</span>
         <ArrowTopRightOnSquareIcon className="size-3.5 shrink-0" aria-hidden="true" />
@@ -498,7 +498,7 @@ function ModeToggleButton({
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      className={`rounded px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500 ${
+      className={`rounded px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-current ${
         active
           ? "bg-overlay text-fg"
           : "text-fg-3 hover:bg-overlay/50 hover:text-fg-2"

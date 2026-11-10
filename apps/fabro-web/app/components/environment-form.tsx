@@ -364,7 +364,7 @@ export function EnvironmentFormFields({
       </Panel>
 
       <Disclosure as="div" className="space-y-4" defaultOpen={hasNonDefaultAdvanced(values)}>
-        <DisclosureButton className="group flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-fg-muted transition-colors hover:text-fg-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500">
+        <DisclosureButton className="group flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-fg-muted transition-colors hover:text-fg-3 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current">
           <ChevronRightIcon
             className="size-3.5 transition-transform duration-150 group-data-open:rotate-90"
             aria-hidden="true"
@@ -479,7 +479,7 @@ function ToggleSwitch({
       checked={checked}
       onChange={onChange}
       aria-label={label}
-      className="group relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full bg-overlay-strong outline-1 -outline-offset-1 outline-line-strong transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 data-checked:bg-teal-500"
+      className="group relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full bg-overlay-strong outline-1 -outline-offset-1 outline-line-strong transition-colors duration-150 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current data-checked:bg-teal-500 data-checked:focus-visible:outline-on-primary"
     >
       <span className="pointer-events-none inline-block size-4 translate-x-0.5 rounded-full bg-fg shadow-sm transition-transform duration-150 group-data-checked:translate-x-[1.125rem]" />
     </Switch>

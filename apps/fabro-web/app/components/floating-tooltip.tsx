@@ -7,12 +7,12 @@ import {
   useFloatingTooltipMeasurements,
   type FloatingTooltipSize,
 } from "../hooks/use-floating-tooltip-measurements";
+import { TOOLTIP_SURFACE_CLASS } from "./ui";
 
 type FloatingTooltipPlacement = "top" | "bottom";
 const VIEWPORT_MARGIN = 12;
 const OFFSET = 8;
-const DEFAULT_CLASS_NAME =
-  "whitespace-nowrap rounded-md bg-panel-alt px-2.5 py-1 text-xs text-fg shadow-lg outline-1 -outline-offset-1 outline-line-strong";
+const DEFAULT_CLASS_NAME = `whitespace-nowrap ${TOOLTIP_SURFACE_CLASS}`;
 
 function clamp(value: number, min: number, max: number): number {
   if (max < min) return (min + max) / 2;

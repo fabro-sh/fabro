@@ -5,17 +5,9 @@ import { SECONDARY_BUTTON_CLASS } from "./ui";
 
 type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
 
-// Shared chrome for non-critical "the content isn't there" states. Full-page
-// crashes are handled by the root ErrorBoundary; these render inside the
-// current content column.
-function StatePanel({ children }: { children: ReactNode }) {
-  return (
-    <div className="mx-auto flex max-w-md flex-col items-center rounded-md border border-line bg-panel p-8 text-center">
-      {children}
-    </div>
-  );
-}
-
+// Non-critical "the content isn't there" states, with Factory's empty and notice
+// surfaces. Full-page crashes are handled by the root ErrorBoundary; these render
+// inside the current content column.
 export function EmptyState({
   icon: Icon,
   title,
@@ -28,16 +20,16 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <StatePanel>
+    <div className="mx-auto flex max-w-md flex-col items-center rounded-md border border-dashed border-line-strong px-4 py-6 text-center">
       {Icon ? (
-        <Icon className="mb-3 size-6 text-fg-muted" aria-hidden="true" />
+        <Icon className="mb-3 size-6 text-muted" aria-hidden="true" />
       ) : null}
-      <p className="text-sm font-medium text-fg">{title}</p>
+      <p className="text-sm font-extrabold text-fg">{title}</p>
       {description ? (
-        <p className="mt-1 max-w-[48ch] text-sm/6 text-fg-3">{description}</p>
+        <p className="mt-1 max-w-[48ch] text-[13px] text-muted">{description}</p>
       ) : null}
       {action ? <div className="mt-4">{action}</div> : null}
-    </StatePanel>
+    </div>
   );
 }
 
@@ -51,14 +43,14 @@ export function ErrorState({
   onRetry?: () => void;
 }) {
   return (
-    <StatePanel>
-      <ExclamationTriangleIcon
-        className="mb-3 size-6 text-coral"
-        aria-hidden="true"
-      />
-      <p className="text-sm font-medium text-fg">{title}</p>
+    <div
+      role="alert"
+      className="mx-auto flex max-w-md flex-col items-center rounded-md bg-bad-bg px-4 py-6 text-center text-bad"
+    >
+      <ExclamationTriangleIcon className="mb-3 size-6" aria-hidden="true" />
+      <p className="text-sm font-extrabold">{title}</p>
       {description ? (
-        <p className="mt-1 max-w-[48ch] text-sm/6 text-fg-3">{description}</p>
+        <p className="mt-1 max-w-[48ch] text-[13px] font-semibold">{description}</p>
       ) : null}
       {onRetry ? (
         <button
@@ -69,16 +61,20 @@ export function ErrorState({
           Try again
         </button>
       ) : null}
-    </StatePanel>
+    </div>
   );
 }
 
 export function LoadingState({ label }: { label?: string }) {
   return (
-    <StatePanel>
-      <Spinner className="mb-3 size-5 text-teal-500" />
-      <p className="text-sm text-fg-3">{label ?? "Loading…"}</p>
-    </StatePanel>
+    <div
+      role="status"
+      aria-busy="true"
+      className="mx-auto flex max-w-md flex-col items-center p-6 text-center"
+    >
+      <Spinner className="mb-3 size-5 text-signal" />
+      <p className="text-sm text-muted">{label ?? "Loading…"}</p>
+    </div>
   );
 }
 

@@ -16,7 +16,6 @@ import {
   useFileTree,
 } from "@pierre/trees/react";
 import { themeToTreeStyles } from "@pierre/trees";
-import pierreDark from "@pierre/theme/pierre-dark";
 import {
   File,
   Virtualizer,
@@ -28,8 +27,14 @@ import type { SandboxFileEntry } from "@qltysh/fabro-api-client";
 import { useSandboxFile, useSandboxFiles } from "../../lib/queries";
 import { ApiError } from "../../lib/api-client";
 import { EmptyState, ErrorState, LoadingState } from "../../components/state";
+import { useAppearance } from "../../components/appearance-provider";
 import { SECONDARY_BUTTON_CLASS, Tooltip } from "../../components/ui";
 import { workerFactory } from "../../lib/pierre-diffs-worker";
+import {
+  PIERRE_HIGHLIGHTER_OPTIONS,
+  PIERRE_THEMES,
+  pierreTreeTheme,
+} from "../../lib/pierre-theme";
 import { stringHash } from "../run-files/cache-keys";
 import { useResetFileTreePaths } from "../../hooks/use-file-tree-model";
 
@@ -41,7 +46,6 @@ export const DEFAULT_DIR = "/";
 export const TEXT_PREVIEW_BYTE_LIMIT = 256 * 1024;
 const BINARY_SAMPLE_BYTES = 8 * 1024;
 const pierrePoolOptions = { workerFactory };
-const pierreHighlighterOptions = { theme: "pierre-dark" };
 const EMPTY_SANDBOX_FILE_ENTRIES: SandboxFileEntry[] = [];
 
 type TreeThemeStyle = CSSProperties & Record<`--${string}`, string | number>;
@@ -227,7 +231,7 @@ export default function FilesystemPanel({
           <Tooltip label="Up one level">
             <button
               type="button"
-              className="inline-flex size-9 items-center justify-center rounded-lg text-fg-2 outline-1 -outline-offset-1 outline-white/10 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex size-9 items-center justify-center rounded-lg text-fg-2 outline-1 -outline-offset-1 outline-line-strong transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-current disabled:cursor-not-allowed disabled:opacity-50"
               onClick={() => navigate(parentPath(currentDir))}
               aria-label="Up one level"
               disabled={currentDir === "/"}
@@ -238,7 +242,7 @@ export default function FilesystemPanel({
           <Tooltip label="Refresh">
             <button
               type="button"
-              className="inline-flex size-9 items-center justify-center rounded-lg text-fg-2 outline-1 -outline-offset-1 outline-white/10 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500"
+              className="inline-flex size-9 items-center justify-center rounded-lg text-fg-2 outline-1 -outline-offset-1 outline-line-strong transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-current"
               onClick={() => void filesQuery.mutate()}
               aria-label="Refresh directory listing"
             >
@@ -304,7 +308,7 @@ function Breadcrumbs({
               <button
                 type="button"
                 onClick={() => onNavigate(crumb.path)}
-                className="font-mono text-fg-3 hover:text-fg hover:underline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-teal-500"
+                className="font-mono text-fg-3 hover:text-fg hover:underline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
               >
                 {crumb.name}
               </button>
@@ -373,14 +377,15 @@ function DirectoryPane({
 
   useResetFileTreePaths(model, treeInputs.paths);
 
+  const { appearance } = useAppearance();
   const themeStyles = useMemo<TreeThemeStyle>(
     () => ({
-      ...(themeToTreeStyles(pierreDark) as TreeThemeStyle),
+      ...(themeToTreeStyles(pierreTreeTheme(appearance.mode)) as TreeThemeStyle),
       backgroundColor:                   "transparent",
       "--trees-bg-override":             "transparent",
       "--trees-padding-inline-override": "0px",
     }),
-    [],
+    [appearance.mode],
   );
 
   return (
@@ -529,6 +534,7 @@ function PreviewBody({
   fileName: string;
   filePath: string;
 }) {
+  const { appearance } = useAppearance();
   if (preview.status === "loading") {
     return (
       <div className="flex h-full items-center justify-center p-6">
@@ -589,7 +595,7 @@ function PreviewBody({
   return (
     <WorkerPoolContextProvider
       poolOptions={pierrePoolOptions}
-      highlighterOptions={pierreHighlighterOptions}
+      highlighterOptions={PIERRE_HIGHLIGHTER_OPTIONS}
     >
       <Virtualizer
         className="h-full min-h-0 overflow-auto"
@@ -597,7 +603,11 @@ function PreviewBody({
       >
         <File
           file={file}
-          options={{ theme: "pierre-dark", disableFileHeader: true }}
+          options={{
+            theme: PIERRE_THEMES,
+            themeType: appearance.mode,
+            disableFileHeader: true,
+          }}
         />
       </Virtualizer>
     </WorkerPoolContextProvider>

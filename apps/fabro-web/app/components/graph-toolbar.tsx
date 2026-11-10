@@ -23,7 +23,7 @@ export function GraphToolbar({
   const group =
     "flex items-center gap-0.5 px-0.5 [&:not(:first-child)]:border-l [&:not(:first-child)]:border-line-strong [&:not(:first-child)]:pl-1 [&:not(:first-child)]:ml-1";
   const btn =
-    "flex size-7 items-center justify-center rounded text-fg-muted transition-colors hover:bg-overlay hover:text-fg-3 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-teal-500";
+    "flex size-7 items-center justify-center rounded text-fg-muted transition-colors hover:bg-overlay hover:text-fg-3 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current";
   const btnActive = "bg-overlay-strong text-fg-3";
   const btnDisabled =
     "disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-fg-muted";

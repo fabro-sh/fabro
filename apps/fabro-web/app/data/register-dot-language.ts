@@ -3,11 +3,12 @@ import {
   attachResolvedLanguages,
   getSharedHighlighter,
 } from "@pierre/diffs";
+import { PIERRE_THEMES } from "../lib/pierre-theme";
 import { dotLanguage } from "./dot-grammar";
 
 export async function registerDotLanguage(): Promise<void> {
   const highlighter = await getSharedHighlighter({
-    themes: ["pierre-dark"],
+    themes: [PIERRE_THEMES.dark, PIERRE_THEMES.light],
     langs: [],
   });
   attachResolvedLanguages(

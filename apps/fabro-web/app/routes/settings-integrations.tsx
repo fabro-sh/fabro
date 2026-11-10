@@ -203,7 +203,7 @@ function RuntimeStatusLabel({
     status === "error" || status === "missing_credentials"
       ? "text-amber-500"
       : status === "connected"
-        ? "text-emerald-500"
+        ? "text-mint"
         : "text-fg-2";
 
   return <span className={tone}>{children}</span>;

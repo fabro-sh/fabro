@@ -1,5 +1,6 @@
 import type { AuthSessionUser } from "@qltysh/fabro-api-client";
 import { useAuthMe } from "../lib/queries";
+import { UserAvatar } from "../components/fabro-brand-mark";
 import {
   Mono,
   Muted,
@@ -36,11 +37,7 @@ function BasicsPanel({ user }: { user: AuthSessionUser }) {
     <Panel title="Basics">
       <Row title="Name">
         <div className="flex items-center gap-3">
-          <img
-            alt=""
-            src={user.avatarUrl}
-            className="size-10 rounded-full outline -outline-offset-1 outline-line-strong"
-          />
+          <UserAvatar avatarUrl={user.avatarUrl} className="size-10" />
           <span>{user.name}</span>
         </div>
       </Row>

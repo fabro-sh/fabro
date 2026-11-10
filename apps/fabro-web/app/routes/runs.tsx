@@ -315,13 +315,13 @@ function PrCard({
   const lifecycleLabel = boardLifecycleStatusLabel(pr);
 
   return (
-    <div className="group rounded-md border border-line bg-panel p-4 transition-all duration-200 hover:border-line-strong hover:shadow-lg hover:shadow-black/20">
+    <div className="card group p-4 transition-colors hover:border-line-strong">
       <div className="mb-2 flex items-center gap-1.5">
         <Link to={`/runs/${pr.id}`} className="font-mono text-xs font-medium text-teal-500">
           {pr.repo}
         </Link>
         {lifecycleLabel != null && (
-          <span className="rounded-full border border-line px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wide text-fg-muted">
+          <span className="chip font-mono text-[11px] uppercase tracking-wide">
             {lifecycleLabel}
           </span>
         )}
@@ -342,7 +342,7 @@ function PrCard({
       {pr.checks != null && <ChecksStatus checks={pr.checks} />}
 
       {pr.question != null && (
-        <p className="mt-3 truncate text-xs italic text-amber/70">{pr.question}</p>
+        <p className="mt-3 truncate text-xs italic text-amber">{pr.question}</p>
       )}
 
       <PrCardFooter pr={pr} actions={actions} />
@@ -467,7 +467,7 @@ function ApproveBoardButton({ runId }: { runId: string }) {
       onClick={approveBoardRun}
       onPointerDown={(event) => event.stopPropagation()}
       disabled={pending}
-      className="inline-flex items-center gap-1.5 rounded-md bg-teal-500 px-2.5 py-1 text-[11px] font-medium text-on-primary transition-colors hover:bg-teal-300 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-teal-500"
+      className="inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-on-primary transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-primary"
     >
       <CheckIcon className="size-3" aria-hidden="true" />
       {pending ? "Approving…" : "Approve"}
@@ -564,14 +564,14 @@ function ColumnActionsMenu({ column }: { column: Column }) {
       <MenuItems
         transition
         anchor={{ to: "bottom end", gap: 4 }}
-        className="z-20 w-44 origin-top-right rounded-md bg-panel py-1 outline-1 -outline-offset-1 outline-line-strong transition data-closed:scale-95 data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in"
+        className="menu z-20 w-44 origin-top-right transition data-closed:scale-95 data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in"
       >
         <MenuItem>
           <button
             type="button"
             onClick={handleArchiveAll}
             disabled={pending}
-            className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm text-fg-3 transition-colors data-focus:bg-overlay data-focus:text-fg data-focus:outline-hidden disabled:cursor-not-allowed disabled:opacity-60"
+            className="menu-item justify-between gap-3 data-focus:bg-surface-3 data-focus:outline-hidden"
           >
             <span>{label}</span>
             <span className="font-mono text-xs text-fg-muted">{archivable.length}</span>
@@ -674,15 +674,23 @@ function RunsLandingEmpty({
   return (
     <div className="mt-4 flex flex-col items-center">
       <div className="w-full max-w-xl space-y-5">
-        <p className="text-center text-sm text-fg-muted">
-          Your runs will appear here.
-        </p>
+        <div className="space-y-2 text-center">
+          <h2 className="text-lg font-semibold text-fg-2">Run your first workflow</h2>
+          <p className="text-sm text-fg-muted">
+            A workflow defines the steps for agents, commands, and human decisions.
+            A run is one execution of that workflow.
+          </p>
+        </div>
 
         <div className="rounded-lg border border-line bg-panel/60 p-5">
           <div className="mb-3 flex items-center gap-2.5">
             <CommandLineIcon className="size-4 text-teal-500" />
-            <span className="text-sm font-medium text-fg-2">Quick start</span>
+            <h3 className="text-sm font-medium text-fg-2">Try the hello workflow</h3>
           </div>
+          <p className="mb-3 text-sm text-fg-muted">
+            First, install the CLI and configure a model provider with the Quick
+            Start below. Then open a terminal in your GitHub repository checkout.
+          </p>
           <div className="flex items-start justify-between rounded-md bg-page px-4 py-3">
             <div className="space-y-1.5">
               {quickStartCommands.map((command) => (
@@ -691,13 +699,22 @@ function RunsLandingEmpty({
             </div>
             <CopyButton text={quickStartCommands.join(" && ")} />
           </div>
+          <p className="mt-3 text-sm text-fg-muted">
+            <code className="text-fg-3">fabro repo init</code> creates a starter
+            hello workflow in your project. <code className="text-fg-3">fabro run hello</code>{" "}
+            submits a run to your CLI’s configured server.
+          </p>
+          <p className="mt-3 text-sm text-fg-muted">
+            Runs submitted to this server appear here, where you can follow their
+            progress and open each run to inspect its steps and results.
+          </p>
         </div>
 
         <div className="rounded-lg border border-line bg-panel/60 p-5">
           <h4 className="mb-3 text-sm font-medium text-fg-2">Resources</h4>
           <div className="grid grid-cols-2 gap-3">
             <a
-              href="https://docs.fabro.sh/"
+              href="https://docs.fabro.sh/getting-started/quick-start"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-3 rounded-md bg-page px-4 py-3 transition-colors hover:bg-overlay-strong"
@@ -706,8 +723,8 @@ function RunsLandingEmpty({
                 <path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.744 3.744 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z" />
               </svg>
               <div>
-                <div className="text-sm font-medium text-fg-2">Docs</div>
-                <div className="text-xs text-fg-muted">Guides and reference</div>
+                <div className="text-sm font-medium text-fg-2">Quick Start</div>
+                <div className="text-xs text-fg-muted">Install and configure a provider</div>
               </div>
             </a>
             <a

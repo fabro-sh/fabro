@@ -94,7 +94,7 @@ export default function Setup() {
         {content.steps.map((step, index) => (
           <li key={step.title} className="flex items-start gap-4 py-4">
             <span
-              className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-overlay text-xs font-semibold tabular-nums text-fg-2 outline-1 -outline-offset-1 outline-white/10"
+              className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-overlay text-xs font-semibold tabular-nums text-fg-2 outline-1 -outline-offset-1 outline-line-strong"
               aria-hidden="true"
             >
               {index + 1}

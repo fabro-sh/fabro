@@ -4,6 +4,7 @@ import { stagePath } from "../lib/stage-routes";
 import { ApiError } from "../lib/api-client";
 import { useRun, useRunGraph, useRunGraphSource, useRunStages } from "../lib/queries";
 import { FloatingTooltip } from "../components/floating-tooltip";
+import { POPOVER_SURFACE_CLASS } from "../components/ui";
 import { RunSummaryPanel } from "../components/run-summary-panel";
 import { StagePopover } from "../components/stage-popover";
 import { StageSidebar } from "../components/stage-sidebar";
@@ -11,6 +12,7 @@ import { clampZoom, wheelZoomFactor, zoomAtPoint } from "../lib/graph-viewport";
 import { useElementEvent } from "../hooks/effects";
 import { useRememberedGraphView } from "../hooks/use-remembered-graph-view";
 import { GraphToolbar } from "../components/graph-toolbar";
+import type { TerminalOutcome } from "../lib/run-graph-svg";
 import { EmptyState, ErrorState } from "../components/state";
 import {
   mapRunStagesToSidebarStages,
@@ -58,7 +60,7 @@ export default function RunOverview() {
         ? "The graph render request failed."
         : undefined;
   const apiStatus = runQuery.data?.lifecycle.status;
-  const terminalOutcome: "succeeded" | "failed" | "dead" | null =
+  const terminalOutcome: TerminalOutcome | null =
     apiStatus?.kind === "succeeded" ||
     apiStatus?.kind === "failed" ||
     apiStatus?.kind === "dead"
@@ -159,7 +161,7 @@ export default function RunOverview() {
         {graphSvg === undefined && graphQuery.isLoading ? (
           <div className="flex-1" />
         ) : graphSvg ? (
-          <div className="graph-svg relative flex min-h-0 flex-1 flex-col rounded-md border border-line bg-panel-alt">
+          <div className="graph-svg relative flex min-h-0 flex-1 flex-col rounded-md border border-line">
             <GraphToolbar
               direction={activeDirection}
               setDirection={setDirection}
@@ -201,7 +203,7 @@ export default function RunOverview() {
         <FloatingTooltip
           rect={hoveredNode.rect}
           placement="top"
-          className="max-w-[18rem] rounded-lg bg-panel p-3 text-xs text-fg-2 shadow-xl outline-1 -outline-offset-1 outline-line-strong"
+          className={POPOVER_SURFACE_CLASS}
         >
           <StagePopover
             runId={id!}

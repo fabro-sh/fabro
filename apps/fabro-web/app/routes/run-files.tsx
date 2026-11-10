@@ -15,6 +15,7 @@ import {
   PatchDiff,
   type FileContents,
 } from "@pierre/diffs/react";
+import { useAppearance } from "../components/appearance-provider";
 import { Markdown } from "../components/markdown";
 import { useToast } from "../components/toast";
 import { importChunk } from "../lib/import-chunk";
@@ -292,14 +293,19 @@ const RunFileRow = memo(function RunFileRow({
     };
   }, [file.new_file, newContents, newPath, runId, toSha]);
 
+  const { appearance } = useAppearance();
   const multiFileOptions = useMemo(
     () => ({
       diffStyle,
+      themeType: appearance.mode,
       expandUnchanged: isDeepLinkTarget ? true : undefined,
     }),
-    [diffStyle, isDeepLinkTarget],
+    [appearance.mode, diffStyle, isDeepLinkTarget],
   );
-  const patchOptions = useMemo(() => ({ diffStyle }), [diffStyle]);
+  const patchOptions = useMemo(
+    () => ({ diffStyle, themeType: appearance.mode }),
+    [appearance.mode, diffStyle],
+  );
   const patch = useMemo(() => file.unified_patch ?? null, [file.unified_patch]);
 
   let body: ReactElement | null = null;

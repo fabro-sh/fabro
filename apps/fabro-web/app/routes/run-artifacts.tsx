@@ -139,7 +139,7 @@ function ArtifactList({ runId, files }: { runId: string; files: readonly Artifac
           <a
             href={runArtifactsDownloadUrl(runId)}
             aria-label={`Download all ${files.length} ${plural(files.length, "artifact", "artifacts")} as a ZIP file`}
-            className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-md bg-overlay px-2.5 py-1 text-xs font-medium text-fg-2 outline-1 -outline-offset-1 outline-line-strong hover:bg-overlay-strong hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 sm:min-h-8"
+            className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-md bg-overlay px-2.5 py-1 text-xs font-medium text-fg-2 outline-1 -outline-offset-1 outline-line-strong hover:bg-overlay-strong hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current sm:min-h-8"
           >
             <ArrowDownTrayIcon className="size-3.5 shrink-0" aria-hidden="true" />
             Download all
@@ -166,7 +166,7 @@ function ArtifactFileRow({ runId, file }: { runId: string; file: ArtifactFile })
         <>
           <div className="flex items-center gap-2 px-3 py-2.5 sm:gap-4 sm:px-4">
             {hasEarlier ? (
-              <DisclosureButton className="group shrink-0 rounded-md p-1 text-fg-3 transition-colors hover:bg-overlay hover:text-fg-2 focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500">
+              <DisclosureButton className="group shrink-0 rounded-md p-1 text-fg-3 transition-colors hover:bg-overlay hover:text-fg-2 focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-current">
                 <span className="sr-only">
                   {open ? "Hide" : "Show"} earlier versions of {file.name}
                 </span>
@@ -208,7 +208,7 @@ function ArtifactFileRow({ runId, file }: { runId: string; file: ArtifactFile })
           {hasEarlier && (
             <DisclosurePanel
               as="ul"
-              className="border-t border-line bg-black/15 py-1"
+              className="border-t border-line bg-overlay py-1"
             >
               <EarlierVersions runId={runId} file={file} />
             </DisclosurePanel>
@@ -293,7 +293,7 @@ function DownloadLink({
       href={href}
       download={file.name}
       aria-label={`Download ${file.name} from ${source}`}
-      className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs text-fg-3 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500"
+      className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs text-fg-3 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-current"
     >
       <ArrowDownTrayIcon className="size-3.5" aria-hidden="true" />
       <span className="hidden sm:inline">Download</span>

@@ -28,11 +28,9 @@ import { useToast } from "../toast";
 import { RetryRunDialog } from "../retry-run-dialog";
 import { ConfirmDialog } from "../ui";
 
-const MENU_ITEM_CLASS =
-  "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-fg-3 transition-colors data-focus:bg-overlay data-focus:text-fg data-focus:outline-hidden disabled:cursor-not-allowed disabled:opacity-60";
+const MENU_ITEM_CLASS = "menu-item";
 
-const MENU_ITEM_DANGER_CLASS =
-  "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-coral transition-colors data-focus:bg-coral/10 data-focus:text-coral data-focus:outline-hidden disabled:cursor-not-allowed disabled:opacity-60";
+const MENU_ITEM_DANGER_CLASS = "menu-item menu-item-danger";
 
 export function RowActionsMenu({ run }: { run: RunWithStatus }) {
   const { mutate } = useSWRConfig();
@@ -124,14 +122,14 @@ export function RowActionsMenu({ run }: { run: RunWithStatus }) {
           aria-label={`Actions for ${run.title}`}
           title="Actions"
           onClick={(e) => e.stopPropagation()}
-          className="flex size-7 items-center justify-center rounded text-fg-muted transition-colors hover:bg-overlay hover:text-fg-3 disabled:cursor-not-allowed disabled:opacity-60"
+          className="btn btn-ghost btn-sm w-7 px-0"
         >
           <EllipsisVerticalIcon className="size-4" aria-hidden="true" />
         </MenuButton>
         <MenuItems
           transition
           anchor={{ to: "bottom end", gap: 4 }}
-          className="z-30 w-44 origin-top-right rounded-md bg-panel py-1 outline-1 -outline-offset-1 outline-line-strong transition data-closed:scale-95 data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in"
+          className="menu z-30 origin-top-right transition focus:outline-none data-closed:scale-95 data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in"
         >
           <MenuItem>
             {({ close }) => (

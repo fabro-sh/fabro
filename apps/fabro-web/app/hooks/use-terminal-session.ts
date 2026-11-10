@@ -6,6 +6,7 @@ import {
   buildTerminalWebSocketUrl,
   parseTerminalServerMessage,
 } from "../components/terminal-view-helpers";
+import { useAppearance } from "../components/appearance-provider";
 import { importChunk } from "../lib/import-chunk";
 
 export type ConnectionStatus = "connecting" | "ready" | "closed" | "error";
@@ -15,8 +16,6 @@ export type TerminalConnectionError = {
   recoverable: boolean;
 };
 
-export const TERMINAL_BACKGROUND = "#05080F";
-
 // Pin the cell to a whole-pixel height so xterm's fit math stays exact.
 // fontSize × lineHeight = 13 × (19/13) = 19px → no sub-pixel rounding,
 // no bottom-row clipping.
@@ -24,31 +23,12 @@ const TERMINAL_FONT_SIZE = 13;
 const TERMINAL_CELL_HEIGHT_PX = 19;
 const TERMINAL_LINE_HEIGHT = TERMINAL_CELL_HEIGHT_PX / TERMINAL_FONT_SIZE;
 
-const TERMINAL_THEME = {
-  background:          TERMINAL_BACKGROUND,
-  foreground:          "#E6EDF3",
-  cursor:              "#7AC4E5",
-  cursorAccent:        TERMINAL_BACKGROUND,
-  selectionBackground: "#1F4F73",
+const TERMINAL_FONT_FAMILY =
+  '"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 
-  black:   TERMINAL_BACKGROUND,
-  red:     "#FF6B6B",
-  green:   "#5EE6A8",
-  yellow:  "#FFC857",
-  blue:    "#82AAFF",
-  magenta: "#C792EA",
-  cyan:    "#7AC4E5",
-  white:   "#D5DCE3",
-
-  brightBlack:   "#4B5563",
-  brightRed:     "#FF8B8B",
-  brightGreen:   "#85F5C2",
-  brightYellow:  "#FFD98A",
-  brightBlue:    "#A4C4FF",
-  brightMagenta: "#E0B6FF",
-  brightCyan:    "#A8DFF5",
-  brightWhite:   "#FFFFFF",
-};
+// Programs pick their own ANSI colors, often assuming a dark background. xterm nudges
+// any cell below this ratio until it reads on the active palette.
+const TERMINAL_MINIMUM_CONTRAST = 4.5;
 
 function sendResize(socket: WebSocket | null, terminal: XtermTerminal | null) {
   if (!socket || socket.readyState !== WebSocket.OPEN || !terminal) return;
@@ -80,6 +60,14 @@ export function useTerminalSession({
   const terminalRef = useRef<XtermTerminal | null>(null);
   const fitRef = useRef<XtermFitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  const { terminalColors } = useAppearance();
+  const terminalColorsRef = useRef(terminalColors);
+  terminalColorsRef.current = terminalColors;
+
+  // A theme switch repaints the live terminal without touching its session.
+  useEffect(() => {
+    if (terminalRef.current) terminalRef.current.options.theme = terminalColors;
+  }, [terminalColors]);
 
   useEffect(() => {
     if (!terminalEl.current) return undefined;
@@ -121,11 +109,12 @@ export function useTerminalSession({
       const terminal = new Terminal({
         cursorBlink: true,
         convertEol: true,
-        fontFamily: "\"JetBrains Mono\", ui-monospace, monospace",
+        fontFamily: TERMINAL_FONT_FAMILY,
         fontSize: TERMINAL_FONT_SIZE,
         lineHeight: TERMINAL_LINE_HEIGHT,
+        minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST,
         scrollback: 5000,
-        theme: TERMINAL_THEME,
+        theme: terminalColorsRef.current,
       });
       const fitAddon = new FitAddon();
       terminalRef.current = terminal;

@@ -14,9 +14,10 @@ import {
   type GitStatus,
   type GitStatusEntry,
 } from "@pierre/trees";
-import pierreDark from "@pierre/theme/pierre-dark";
 import type { FileDiff } from "@qltysh/fabro-api-client";
+import { useAppearance } from "../../components/appearance-provider";
 import { useChangedFilesTreeSync } from "../../hooks/use-changed-files-tree-sync";
+import { pierreTreeTheme } from "../../lib/pierre-theme";
 
 type TreeThemeStyle = CSSProperties & Record<`--${string}`, string | number>;
 
@@ -131,14 +132,15 @@ export function FileTreeSidebar({
     syncSelection,
   });
 
+  const { appearance } = useAppearance();
   const themeStyles = useMemo<TreeThemeStyle>(
     () => ({
-      ...(themeToTreeStyles(pierreDark) as TreeThemeStyle),
+      ...(themeToTreeStyles(pierreTreeTheme(appearance.mode)) as TreeThemeStyle),
       backgroundColor:                   "transparent",
       "--trees-bg-override":             "transparent",
       "--trees-padding-inline-override": "0px",
     }),
-    [],
+    [appearance.mode],
   );
 
   return (

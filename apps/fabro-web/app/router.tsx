@@ -15,6 +15,8 @@ import * as AutomationsNew from "./routes/automations-new";
 import * as AutomationsEdit from "./routes/automations-edit";
 import * as AutomationDetail from "./routes/automation-detail";
 import * as Runs from "./routes/runs";
+import * as Workflows from "./routes/workflows";
+import * as WorkflowBuilder from "./routes/workflow-builder";
 import * as RunDetail from "./routes/run-detail";
 import * as RunOverview from "./routes/run-overview";
 import * as RunStages from "./routes/run-stages";
@@ -33,6 +35,7 @@ import * as InsightsEditor from "./routes/insights-editor";
 import * as InsightsNew from "./routes/insights-new";
 import * as Settings from "./routes/settings";
 import * as SettingsIndex from "./routes/settings-index";
+import * as SettingsAppearance from "./routes/settings-appearance";
 import * as SettingsGeneral from "./routes/settings-general";
 import * as SettingsIntegrations from "./routes/settings-integrations";
 import * as SettingsModels from "./routes/settings-models";
@@ -122,6 +125,10 @@ export const routes: RouteObject[] = [
           route("automations/:id", AutomationDetail),
           // Backwards-compatible singular automation route used by older links.
           route("automation/:id", AutomationDetail),
+          route("workflows", Workflows),
+          // One route for /workflows/new and saved drafts, so a new draft's first
+          // save can swap the URL without remounting the editor.
+          route("workflows/:id", WorkflowBuilder),
           route("runs", Runs),
           route("runs/:id", RunDetail, {
             children: [
@@ -148,6 +155,7 @@ export const routes: RouteObject[] = [
           route("settings", Settings, {
             children: [
               indexRoute(SettingsIndex),
+              route("appearance", SettingsAppearance),
               route("models", SettingsModels),
               route("integrations", SettingsIntegrations),
               route("sandboxes", SettingsSandboxes),

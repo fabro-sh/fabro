@@ -988,7 +988,7 @@ function ObjectStoreStep({
               autoCapitalize="off"
             />
           </Field>
-          <p className="rounded-lg bg-overlay px-4 py-3 text-sm/6 text-fg-3 outline-1 -outline-offset-1 outline-white/10">
+          <p className="rounded-lg bg-overlay px-4 py-3 text-sm/6 text-fg-3 outline-1 -outline-offset-1 outline-line-strong">
             Fabro will store run artifacts under this directory.
           </p>
         </div>
@@ -1065,7 +1065,7 @@ function SandboxStep({
           }
         }}
       />
-      <label className="flex cursor-pointer items-start gap-3 rounded-lg bg-overlay px-4 py-3.5 outline-1 -outline-offset-1 outline-white/10 transition-colors hover:bg-overlay-strong hover:outline-white/15">
+      <label className="flex cursor-pointer items-start gap-3 rounded-lg bg-overlay px-4 py-3.5 outline-1 -outline-offset-1 outline-line-strong transition-colors hover:bg-overlay-strong hover:outline-line-strong">
         <input
           type="checkbox"
           name="sandbox_allow_local"
@@ -1076,7 +1076,7 @@ function SandboxStep({
               patch: { allowLocal: event.target.checked },
             })
           }
-          className="mt-0.5 size-4 shrink-0 rounded border-white/20 bg-transparent accent-teal-500 focus:ring-1 focus:ring-teal-500/60"
+          className="mt-0.5 size-4 shrink-0 rounded border-line-strong bg-transparent accent-teal-500 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus"
         />
         <span className="min-w-0">
           <span className="block text-sm font-medium text-fg">
@@ -1118,7 +1118,7 @@ function SandboxStep({
           </Field>
         </div>
       ) : (
-        <p className="rounded-lg bg-overlay px-4 py-3 text-sm/6 text-fg-3 outline-1 -outline-offset-1 outline-white/10">
+        <p className="rounded-lg bg-overlay px-4 py-3 text-sm/6 text-fg-3 outline-1 -outline-offset-1 outline-line-strong">
           Fabro will use the host Docker daemon. Make sure the server has
           access to <code className="font-mono text-fg-2">/var/run/docker.sock</code>.
         </p>
@@ -1487,8 +1487,8 @@ function Stepper({
           const circleClass = isComplete
             ? "bg-mint text-on-primary"
             : isCurrent
-              ? "bg-teal-500 text-on-primary"
-              : "bg-overlay text-fg-muted outline-1 -outline-offset-1 outline-white/10";
+              ? "bg-primary text-on-primary"
+              : "bg-overlay text-fg-muted outline-1 -outline-offset-1 outline-line-strong";
           const labelClass = isCurrent
             ? "text-fg"
             : isComplete
@@ -1517,7 +1517,7 @@ function Stepper({
                 <Link
                   to={step.href}
                   aria-current={isCurrent ? "step" : undefined}
-                  className="flex items-center gap-2 rounded-md outline-teal-500 focus-visible:outline-2 focus-visible:outline-offset-4"
+                  className="flex items-center gap-2 rounded-md outline-teal-500 focus-visible:outline-2 focus-visible:-outline-offset-2"
                 >
                   {inner}
                 </Link>
@@ -1565,7 +1565,7 @@ function WelcomeScreen() {
         ].map(([title, body], index) => (
           <li key={title} className="flex items-start gap-4 py-4">
             <span
-              className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-overlay text-xs font-semibold tabular-nums text-fg-2 outline-1 -outline-offset-1 outline-white/10"
+              className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-overlay text-xs font-semibold tabular-nums text-fg-2 outline-1 -outline-offset-1 outline-line-strong"
               aria-hidden="true"
             >
               {index + 1}
@@ -1756,7 +1756,7 @@ function FinishingScreen({
           <code className="font-mono text-fg">{finishState.restart_url}</code>.
         </div>
       ) : (
-        <div className="flex items-center gap-3 rounded-lg bg-overlay px-4 py-3 outline-1 -outline-offset-1 outline-white/10">
+        <div className="flex items-center gap-3 rounded-lg bg-overlay px-4 py-3 outline-1 -outline-offset-1 outline-line-strong">
           <Spinner className="text-teal-300" />
           <p className="text-sm/6 text-fg-3">
             Polling <code className="font-mono text-fg-2">/health</code>…
@@ -1764,7 +1764,7 @@ function FinishingScreen({
         </div>
       )}
       {finishState.dev_token ? (
-        <div className="rounded-lg bg-overlay p-4 outline-1 -outline-offset-1 outline-white/10">
+        <div className="rounded-lg bg-overlay p-4 outline-1 -outline-offset-1 outline-line-strong">
           <p className="text-xs font-semibold tracking-wide text-fg uppercase">
             Development token
           </p>
@@ -1934,7 +1934,7 @@ function OptionCard({
     "group relative flex items-start gap-3 rounded-lg px-4 py-3.5 text-left outline-1 -outline-offset-1 transition-colors";
   const state = selected
     ? "bg-teal-500/10 outline-teal-500/60"
-    : "bg-overlay outline-white/10 hover:bg-overlay-strong hover:outline-white/15";
+    : "bg-overlay outline-line-strong hover:bg-overlay-strong hover:outline-line-strong";
   return (
     <button
       type="button"
@@ -1947,11 +1947,11 @@ function OptionCard({
         className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full outline-1 -outline-offset-1 ${
           selected
             ? "bg-teal-500 outline-teal-500"
-            : "bg-transparent outline-white/20"
+            : "bg-transparent outline-line-strong"
         }`}
       >
         {selected ? (
-          <span className="size-1.5 rounded-full bg-navy-950" />
+          <span className="size-1.5 rounded-full bg-on-primary" />
         ) : null}
       </span>
       <span className="min-w-0">
@@ -2101,7 +2101,7 @@ function CopyableToken({ token }: { token: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex items-stretch gap-2">
-      <pre className="flex-1 overflow-x-auto rounded-md bg-panel-alt px-3 py-2 font-mono text-sm text-fg-2 outline-1 -outline-offset-1 outline-white/10">
+      <pre className="flex-1 overflow-x-auto rounded-md bg-panel-alt px-3 py-2 font-mono text-sm text-fg-2 outline-1 -outline-offset-1 outline-line-strong">
         <code>{token}</code>
       </pre>
       <button
@@ -2115,7 +2115,7 @@ function CopyableToken({ token }: { token: string }) {
             // Clipboard may be blocked; leave state unchanged.
           }
         }}
-        className="inline-flex items-center gap-1.5 rounded-md bg-overlay px-3 text-xs font-medium text-fg-2 outline-1 -outline-offset-1 outline-white/10 hover:bg-overlay-strong focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500"
+        className="inline-flex items-center gap-1.5 rounded-md bg-overlay px-3 text-xs font-medium text-fg-2 outline-1 -outline-offset-1 outline-line-strong hover:bg-overlay-strong focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-current"
         aria-label={copied ? "Copied" : "Copy token"}
       >
         {copied ? (
@@ -2138,7 +2138,7 @@ function HelpDisclosure({
 }) {
   return (
     <details className="group mt-2">
-      <summary className="inline-flex list-none items-center gap-1 rounded text-xs text-fg-3 outline-teal-500 select-none hover:text-fg-2 focus-visible:outline-2 focus-visible:outline-offset-2 [&::-webkit-details-marker]:hidden">
+      <summary className="inline-flex list-none items-center gap-1 rounded text-xs text-fg-3 outline-teal-500 select-none hover:text-fg-2 focus-visible:outline-2 focus-visible:-outline-offset-2 [&::-webkit-details-marker]:hidden">
         <ChevronDownIcon className="size-3.5 shrink-0 transition-transform group-open:-rotate-180" />
         <span>{summary}</span>
       </summary>
@@ -2159,7 +2159,7 @@ function ExternalLink({
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 font-mono text-teal-300 hover:text-teal-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 rounded"
+      className="inline-flex items-center gap-1 font-mono text-teal-300 hover:text-teal-500 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current rounded"
     >
       {children}
       <ArrowTopRightOnSquareIcon className="size-3 shrink-0" />

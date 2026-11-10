@@ -41,7 +41,9 @@ describe("VirtualizedDiffList", () => {
 
     expect(providerCalls).toHaveLength(1);
     expect(providerCalls[0].poolOptions.workerFactory).toBe(workerFactory);
-    expect(providerCalls[0].highlighterOptions).toEqual({ theme: "pierre-dark" });
+    expect(providerCalls[0].highlighterOptions).toEqual({
+      theme: { dark: "pierre-dark", light: "pierre-light" },
+    });
 
     expect(virtualizerCalls).toHaveLength(1);
     expect(virtualizerCalls[0].className).toContain("min-h-0");

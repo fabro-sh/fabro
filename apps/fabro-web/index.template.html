@@ -1,18 +1,15 @@
 <!doctype html>
-<html lang="en" class="h-full bg-atmosphere scheme-only-dark">
+<html lang="en" class="h-full bg-atmosphere" data-theme="brutalist" data-mode="light">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <script src="/appearance-boot.js"></script>
     <title>Fabro</title>
     <link rel="icon" href="/images/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/images/favicon.ico" sizes="32x32" />
     <link rel="apple-touch-icon" href="/images/apple-touch-icon.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=JetBrains+Mono:wght@400;500;600&display=swap"
-    />
+    <link rel="preload" href="/assets/fonts/manrope-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
     {{styles}}
     {{buildMeta}}
   </head>

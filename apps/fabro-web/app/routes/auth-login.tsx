@@ -138,7 +138,7 @@ function DevTokenCollapsible({
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="mx-auto flex items-center gap-1 rounded text-xs text-fg-3 outline-teal-500 hover:text-fg-2 focus-visible:outline-2 focus-visible:outline-offset-2"
+        className="mx-auto flex items-center gap-1 rounded text-xs text-fg-3 outline-teal-500 hover:text-fg-2 focus-visible:outline-2 focus-visible:-outline-offset-2"
       >
         Use a dev token instead
         <svg

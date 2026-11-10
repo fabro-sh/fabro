@@ -149,7 +149,7 @@ function AutomationHeader({ automation }: { automation: Automation }) {
             <Chip icon={FolderIcon}>
               Run target · {target?.repo ?? UNSUPPORTED_TARGET_LABEL}
               {target ? (
-                <span className="text-fg-muted/70">
+                <span className="text-fg-muted">
                   {" · "}{target.branch}
                   {target.tag ? ` · ${target.tag}` : ""}
                   {target.sha ? ` · ${target.sha.slice(0, 8)}` : ""}

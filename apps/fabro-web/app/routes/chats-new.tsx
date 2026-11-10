@@ -56,7 +56,7 @@ export default function ChatsNew() {
               type="submit"
               disabled={!text.trim()}
               aria-label="Send message"
-              className="inline-flex size-9 items-center justify-center rounded-full bg-teal-500 text-on-primary transition-colors hover:bg-teal-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-teal-500"
+              className="inline-flex size-9 items-center justify-center rounded-full bg-primary text-on-primary transition-colors hover:bg-primary-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
             >
               <ArrowUpIcon className="size-4" />
             </button>

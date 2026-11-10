@@ -1,7 +1,6 @@
 import {
   ChevronDoubleLeftIcon,
   ChevronDoubleRightIcon,
-  ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
 } from "@heroicons/react/24/outline";
@@ -30,29 +29,24 @@ export function ListPager({
   return (
     <nav
       aria-label="Pagination"
-      className="flex items-center justify-between gap-6 pt-2 text-sm text-fg-3"
+      className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 pt-2 text-[12px] font-bold text-muted"
     >
-      <div className="flex items-center gap-3">
-        <label htmlFor="runs-page-size" className="text-fg-3">
-          Rows per page
-        </label>
-        <div className="relative">
-          <select
-            id="runs-page-size"
-            value={pageSize}
-            onChange={(e) => onPageSizeChange(Number(e.target.value))}
-            disabled={disabled}
-            className="appearance-none rounded-md border border-line bg-panel/80 py-1.5 pl-3 pr-8 text-sm text-fg-2 outline-none transition-colors focus:border-focus focus:ring-0 disabled:opacity-60"
-          >
-            {LIST_PAGE_SIZES.map((size) => (
-              <option key={size} value={size}>{size}</option>
-            ))}
-          </select>
-          <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
-        </div>
-      </div>
+      <label htmlFor="runs-page-size" className="flex items-center gap-2">
+        Rows per page
+        <select
+          id="runs-page-size"
+          value={pageSize}
+          onChange={(e) => onPageSizeChange(Number(e.target.value))}
+          disabled={disabled}
+          className="input h-8 w-auto"
+        >
+          {LIST_PAGE_SIZES.map((size) => (
+            <option key={size} value={size}>{size}</option>
+          ))}
+        </select>
+      </label>
 
-      <span className="text-fg-3">
+      <span>
         Page {page}
         {pageCount != null ? <> of {pageCount}</> : null}
       </span>
@@ -109,7 +103,7 @@ function PagerButton({
       title={label}
       onClick={onClick}
       disabled={disabled}
-      className="inline-flex size-8 items-center justify-center rounded-md border border-line bg-panel/80 text-fg-3 transition-colors enabled:hover:bg-panel enabled:hover:text-fg-2 disabled:cursor-default disabled:opacity-40"
+      className="btn btn-sm w-8 px-0"
     >
       {children}
     </button>

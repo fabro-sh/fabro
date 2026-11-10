@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 
 import { importChunk } from "../lib/import-chunk";
+import { enhanceGraphSvg } from "../lib/run-graph-svg";
 
 /**
  * Synchronizes a DOT source with the imperative @viz-js SVG renderer and a DOM
- * container. Async renders are ignored after identity changes or unmount.
+ * container. Async renders are ignored after identity changes or unmount. Render
+ * the container with the `graph-svg` class so the active theme can paint the result.
  */
 export function useRenderedVizDiagram<TIdentity>({
   buildDot,
@@ -36,6 +38,7 @@ export function useRenderedVizDiagram<TIdentity>({
         if (cancelled) return;
 
         const svg = viz.renderSVGElement(buildDot(identity));
+        enhanceGraphSvg(svg);
         prepareSvg?.(svg);
 
         svgRef.current = svg;

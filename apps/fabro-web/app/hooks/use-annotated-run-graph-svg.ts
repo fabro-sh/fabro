@@ -1,12 +1,11 @@
 import { useEffect } from "react";
 
-import { graphTheme } from "../lib/graph-theme";
+import { type Stage } from "../lib/stage-sidebar";
 import {
-  ACTIVE_STAGE_STATES,
-  SUCCEEDED_STAGE_STATES,
-  aggregateGraphNodeStatus,
-  type Stage,
-} from "../lib/stage-sidebar";
+  computeRunGraphNodeStates,
+  enhanceGraphSvg,
+  type TerminalOutcome,
+} from "../lib/run-graph-svg";
 
 const HOVER_OPEN_DELAY_MS = 200;
 
@@ -16,9 +15,10 @@ export interface RunGraphNodeHover {
 }
 
 /**
- * Synchronizes Graphviz SVG markup with imperative DOM annotations, animation
- * nodes, and pointer listeners. Timers and DOM listeners are cleaned up before
- * resubscribe and on unmount.
+ * Synchronizes Graphviz SVG markup with a mounted DOM node: enhances it once per SVG,
+ * then keeps run-state attributes and pointer and keyboard listeners current as stages
+ * change. Colors come from stylesheet variables, so a theme switch needs no work here.
+ * Timers and listeners are cleaned up before resubscribe and on unmount.
  */
 export function useAnnotatedRunGraphSvg({
   graphSvg,
@@ -35,8 +35,10 @@ export function useAnnotatedRunGraphSvg({
   onStageClick: (stageId: string) => void;
   stages: Stage[];
   svgRef: { current: SVGSVGElement | null };
-  terminalOutcome: "succeeded" | "failed" | "dead" | null;
+  terminalOutcome: TerminalOutcome | null;
 }) {
+  // Routing is the expensive part and depends only on the markup. Keeping it apart
+  // from run state means a stage update doesn't restart animations or rebuild the DOM.
   useEffect(() => {
     const inner = innerRef.current;
     if (!inner || !graphSvg) return;
@@ -44,29 +46,18 @@ export function useAnnotatedRunGraphSvg({
     inner.innerHTML = graphSvg;
     const svg = inner.querySelector("svg");
     if (!svg) return;
+    enhanceGraphSvg(svg);
     svgRef.current = svg;
+  }, [graphSvg, innerRef, svgRef]);
+
+  useEffect(() => {
+    const svg = innerRef.current?.querySelector("svg");
+    if (!svg || !graphSvg) return;
 
     const stageById = new Map<string, Stage>();
     for (const stage of stages) stageById.set(stage.id, stage);
+    const { states, stageIdByNode } = computeRunGraphNodeStates(stages, terminalOutcome);
 
-    const gt = graphTheme;
-    const aggregated = aggregateGraphNodeStatus(stages);
-    const runningDotIds = new Set<string>();
-    const failedDotIds = new Set<string>();
-    const completedDotIds = new Set<string>();
-    const dotIdToStageId = new Map<string, string>();
-    for (const [nodeId, { displayStatus, latestStageId }] of aggregated) {
-      dotIdToStageId.set(nodeId, latestStageId);
-      if (ACTIVE_STAGE_STATES.has(displayStatus)) {
-        runningDotIds.add(nodeId);
-      } else if (displayStatus === "failed") {
-        failedDotIds.add(nodeId);
-      } else if (SUCCEEDED_STAGE_STATES.has(displayStatus)) {
-        completedDotIds.add(nodeId);
-      }
-    }
-
-    const ns = "http://www.w3.org/2000/svg";
     let openTimer: ReturnType<typeof setTimeout> | null = null;
     const clearOpenTimer = () => {
       if (openTimer !== null) {
@@ -79,96 +70,43 @@ export function useAnnotatedRunGraphSvg({
       target.addEventListener(type, listener);
       listeners.push({ target, type, listener });
     };
+    const nodes = [...svg.querySelectorAll<SVGGElement>(".node")];
 
-    for (const group of svg.querySelectorAll(".node")) {
+    for (const group of nodes) {
       const nodeId = group.querySelector("title")?.textContent?.trim();
       if (!nodeId) continue;
 
-      const stageId = dotIdToStageId.get(nodeId);
+      const stageId = stageIdByNode.get(nodeId);
       const stage = stageId ? stageById.get(stageId) : undefined;
+      const state = states.get(nodeId);
+      if (state) group.setAttribute("data-run-state", state);
+
       if (stageId) {
-        (group as SVGElement).style.cursor = "pointer";
+        group.style.cursor = "pointer";
+        group.setAttribute("data-graph-link", "");
+        group.setAttribute("tabindex", "0");
+        group.setAttribute("role", "link");
+        group.setAttribute("aria-label", state ? `${nodeId}: ${state}` : nodeId);
         addListener(group, "click", () => onStageClick(stageId));
+        addListener(group, "keydown", (event) => {
+          const { key } = event as KeyboardEvent;
+          if (key !== "Enter" && key !== " ") return;
+          event.preventDefault();
+          onStageClick(stageId);
+        });
       }
       if (stage) {
         addListener(group, "mouseenter", () => {
           clearOpenTimer();
-          const target = group as SVGGElement;
           openTimer = setTimeout(() => {
             openTimer = null;
-            onHoverChange({ stage, rect: target.getBoundingClientRect() });
+            onHoverChange({ stage, rect: group.getBoundingClientRect() });
           }, HOVER_OPEN_DELAY_MS);
         });
         addListener(group, "mouseleave", () => {
           clearOpenTimer();
           onHoverChange(null);
         });
-      }
-
-      if (nodeId === "exit" && terminalOutcome) {
-        const isSuccess = terminalOutcome === "succeeded";
-        const fill = isSuccess ? gt.completedFill : gt.failedFill;
-        const border = isSuccess ? gt.completedBorder : gt.failedBorder;
-        const text = isSuccess ? gt.completedText : gt.failedText;
-        for (const shape of group.querySelectorAll("ellipse, polygon, path")) {
-          shape.setAttribute("fill", fill);
-          shape.setAttribute("stroke", border);
-        }
-        for (const t of group.querySelectorAll("text")) {
-          t.setAttribute("fill", text);
-        }
-      } else if (runningDotIds.has(nodeId)) {
-        for (const shape of group.querySelectorAll("ellipse, polygon, path")) {
-          shape.setAttribute("fill", gt.runningFill);
-          shape.setAttribute("stroke", gt.runningBorder);
-          shape.setAttribute("stroke-width", "2");
-
-          const animFill = document.createElementNS(ns, "animate");
-          animFill.setAttribute("attributeName", "fill");
-          animFill.setAttribute(
-            "values",
-            `${gt.runningFill};${gt.runningPulseFill};${gt.runningFill}`,
-          );
-          animFill.setAttribute("dur", "1.5s");
-          animFill.setAttribute("repeatCount", "indefinite");
-          shape.appendChild(animFill);
-
-          const animStroke = document.createElementNS(ns, "animate");
-          animStroke.setAttribute("attributeName", "stroke");
-          animStroke.setAttribute(
-            "values",
-            `${gt.runningBorder};${gt.runningPulseStroke};${gt.runningBorder}`,
-          );
-          animStroke.setAttribute("dur", "1.5s");
-          animStroke.setAttribute("repeatCount", "indefinite");
-          shape.appendChild(animStroke);
-
-          const animWidth = document.createElementNS(ns, "animate");
-          animWidth.setAttribute("attributeName", "stroke-width");
-          animWidth.setAttribute("values", "2;3.5;2");
-          animWidth.setAttribute("dur", "1.5s");
-          animWidth.setAttribute("repeatCount", "indefinite");
-          shape.appendChild(animWidth);
-        }
-        for (const text of group.querySelectorAll("text")) {
-          text.setAttribute("fill", gt.runningText);
-        }
-      } else if (failedDotIds.has(nodeId)) {
-        for (const shape of group.querySelectorAll("ellipse, polygon, path")) {
-          shape.setAttribute("fill", gt.failedFill);
-          shape.setAttribute("stroke", gt.failedBorder);
-        }
-        for (const text of group.querySelectorAll("text")) {
-          text.setAttribute("fill", gt.failedText);
-        }
-      } else if (completedDotIds.has(nodeId)) {
-        for (const shape of group.querySelectorAll("ellipse, polygon, path")) {
-          shape.setAttribute("fill", gt.completedFill);
-          shape.setAttribute("stroke", gt.completedBorder);
-        }
-        for (const text of group.querySelectorAll("text")) {
-          text.setAttribute("fill", gt.completedText);
-        }
       }
     }
 
@@ -177,7 +115,15 @@ export function useAnnotatedRunGraphSvg({
       for (const { target, type, listener } of listeners) {
         target.removeEventListener(type, listener);
       }
+      for (const group of nodes) {
+        group.removeAttribute("data-run-state");
+        group.removeAttribute("data-graph-link");
+        group.removeAttribute("tabindex");
+        group.removeAttribute("role");
+        group.removeAttribute("aria-label");
+        group.style.cursor = "";
+      }
       onHoverChange(null);
     };
-  }, [graphSvg, innerRef, onHoverChange, onStageClick, stages, svgRef, terminalOutcome]);
+  }, [graphSvg, innerRef, onHoverChange, onStageClick, stages, terminalOutcome]);
 }

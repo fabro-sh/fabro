@@ -1,6 +1,7 @@
 import { AdjustmentsHorizontalIcon, CheckIcon } from "@heroicons/react/24/outline";
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from "@headlessui/react";
 
+import { TOOLBAR_BUTTON_CLASS } from "../ui";
 import { TOGGLEABLE_COLUMNS, toggleableColumnLabels } from "./toggleable-column";
 import type { ToggleableColumn } from "./toggleable-column";
 
@@ -22,27 +23,21 @@ export function ColumnPickerButton({
       }}
       multiple
     >
-      <ListboxButton className="inline-flex items-center gap-1.5 rounded-md border border-line bg-panel/80 px-3 py-2 text-xs font-medium text-fg-muted transition-colors hover:text-fg-3">
+      <ListboxButton className={TOOLBAR_BUTTON_CLASS}>
         <AdjustmentsHorizontalIcon className="size-4" aria-hidden="true" />
         <span>View</span>
       </ListboxButton>
       <ListboxOptions
-        anchor="bottom end"
-        className="z-20 mt-1 min-w-[10rem] rounded-md border border-line bg-panel py-1 text-xs shadow-lg focus:outline-none"
+        anchor={{ to: "bottom end", gap: 6 }}
+        className="menu z-20 focus:outline-none"
       >
         {TOGGLEABLE_COLUMNS.map((col) => (
-          <ListboxOption
-            key={col}
-            value={col}
-            className={({ focus }) =>
-              `flex cursor-pointer items-center justify-between gap-3 px-3 py-1.5 text-fg-2 ${focus ? "bg-overlay" : ""}`
-            }
-          >
+          <ListboxOption key={col} value={col} className="menu-item justify-between">
             {({ selected }) => (
               <>
                 <span>{toggleableColumnLabels[col]}</span>
                 {selected ? (
-                  <CheckIcon className="size-4 shrink-0 text-teal-500" aria-hidden="true" />
+                  <CheckIcon className="size-4 shrink-0 text-signal-ink" aria-hidden="true" />
                 ) : (
                   <span className="size-4 shrink-0" aria-hidden="true" />
                 )}

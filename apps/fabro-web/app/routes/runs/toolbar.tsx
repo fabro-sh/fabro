@@ -1,5 +1,6 @@
 import { ArchiveBoxIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import type { BoardColumn } from "@qltysh/fabro-api-client";
+import { INPUT_CLASS, TOOLBAR_BUTTON_CLASS } from "../../components/ui";
 
 import { ColumnPickerButton } from "../../components/runs-list/column-picker-button";
 import { FilterButton } from "../../components/runs-list/filter-button";
@@ -63,7 +64,7 @@ export function RunsToolbar({
           placeholder="Search runs…"
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
-          className="w-full rounded-md border border-line bg-panel/80 py-2 pl-9 pr-3 text-sm text-fg-2 placeholder-fg-muted outline-none transition-colors focus:border-focus focus:ring-0"
+          className={`${INPUT_CLASS} h-9 pl-9`}
         />
       </div>
 
@@ -101,7 +102,7 @@ export function RunsToolbar({
         onClick={() => onIncludeArchivedChange(!includeArchived)}
         aria-pressed={includeArchived}
         title={includeArchived ? "Hide archived runs" : "Show archived runs"}
-        className={`inline-flex items-center gap-1.5 rounded-md border border-line bg-panel/80 px-3 py-2 text-xs font-medium transition-colors ${includeArchived ? "text-teal-500" : "text-fg-muted hover:text-fg-3"}`}
+        className={`${TOOLBAR_BUTTON_CLASS} ${includeArchived ? "bg-[var(--accent-soft)] text-[var(--accent-soft-ink)]" : ""}`}
       >
         <ArchiveBoxIcon className="size-4" aria-hidden="true" />
         <span>Show archived</span>
@@ -111,12 +112,12 @@ export function RunsToolbar({
         {view === "list" && (
           <ColumnPickerButton hidden={hiddenColumns} onChange={onHiddenColumnsChange} />
         )}
-        <div className="flex rounded-md border border-line bg-panel/80 p-0.5">
+        <div className="flex items-center gap-1" role="group" aria-label="Run view">
           <button
             type="button"
             onClick={() => onViewChange("columns")}
             aria-pressed={view === "columns"}
-            className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${view === "columns" ? "bg-overlay text-teal-500" : "text-fg-muted hover:text-fg-3"}`}
+            className={`${TOOLBAR_BUTTON_CLASS} ${view === "columns" ? "bg-[var(--accent-soft)] text-[var(--accent-soft-ink)]" : ""}`}
             aria-label="Columns view"
           >
             <svg viewBox="0 0 20 20" fill="currentColor" className="size-4" aria-hidden="true">
@@ -127,7 +128,7 @@ export function RunsToolbar({
             type="button"
             onClick={() => onViewChange("list")}
             aria-pressed={view === "list"}
-            className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${view === "list" ? "bg-overlay text-teal-500" : "text-fg-muted hover:text-fg-3"}`}
+            className={`${TOOLBAR_BUTTON_CLASS} ${view === "list" ? "bg-[var(--accent-soft)] text-[var(--accent-soft-ink)]" : ""}`}
             aria-label="List view"
           >
             <svg viewBox="0 0 20 20" fill="currentColor" className="size-4" aria-hidden="true">

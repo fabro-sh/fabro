@@ -10,6 +10,7 @@ import {
   PuzzlePieceIcon,
   ShieldCheckIcon,
   Square3Stack3DIcon,
+  SwatchIcon,
 } from "@heroicons/react/24/outline";
 import { Fragment } from "react";
 import { Link, Outlet, useLocation, useMatches } from "react-router";
@@ -59,6 +60,13 @@ export const navSections: NavSection[] = [
         icon: CubeTransparentIcon,
         description: "Where workflow stages execute.",
         match: (p) => p.startsWith("/settings/sandboxes"),
+      },
+      {
+        name: "Appearance",
+        href: "/settings/appearance",
+        icon: SwatchIcon,
+        description: "Palette and display mode, saved in this browser.",
+        match: (p) => p.startsWith("/settings/appearance"),
       },
     ],
   },

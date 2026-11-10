@@ -1,7 +1,13 @@
 ---
 title: "Quick Start"
-description: "Get up and running with Fabro"
+description: "Set up Fabro locally, run the hello workflow, and inspect the result"
 ---
+
+Fabro runs repeatable processes made of AI agents, commands, and human decisions. A **workflow** defines the steps; a **run** is one execution of those steps. The **server** executes runs and serves the dashboard, where you can follow their progress.
+
+In this guide, you'll install Fabro, configure your local server, and run the included `hello` workflow. Its agent introduces itself so you can check that your setup works before writing your own workflow.
+
+You'll need access to a model provider and a GitHub repository that your server's GitHub account can access. The default execution environment uses Docker and checks out your code from GitHub, so start Docker on the server machine and use a branch whose current commit has been pushed to GitHub.
 
 <Note>
 Fabro runs as a server. This quickstart runs everything locally on your laptop — no deployment required. To self-host the server for a team or 24/7 workflows, see [Deployment](/administration/deployment).
@@ -54,14 +60,44 @@ Release binaries and the multi-arch Docker image ship with [SLSA Build Provenanc
 Self-hosting the server? See [Self-host with Docker](/administration/self-host-docker) and [Server Operations](/reference/server-operations) for the install wizard, auth, and CLI-pointing.
 </Note>
 
+## Set up your local server
+
+Start Fabro from your terminal:
+
+```bash
+fabro server start
+```
+
+On a fresh installation, this opens a setup wizard in your browser. If the browser does not open, use the install URL printed in the terminal. Follow the wizard to configure your server and connect a model provider. You can skip the provider step and add it below, but `hello` needs a configured provider to run.
+
+When the wizard finishes, the setup server exits. Start the configured server:
+
+```bash
+fabro server start
+```
+
+Open the web URL shown by Fabro and keep the **Runs** page open. It will show your first run once you submit it. If you've already configured Fabro, starting the server takes you straight to this stage.
+
+<Tip>
+For terminal-only setup, use `fabro install` instead of the browser wizard. See [Server Operations](/reference/server-operations) for authentication and server management.
+</Tip>
+
 ## Initialize your project
+
+Open a terminal inside your local checkout of that GitHub repository. Replace `my-repo/` with its path:
 
 ```bash
 cd my-repo/
 fabro repo init
 ```
 
-This creates `.fabro/project.toml` and a starter workflow under `.fabro/workflows/hello/`.
+This creates `.fabro/project.toml` and a starter workflow under `.fabro/workflows/hello/`. The `workflow.fabro` file defines the steps (`Start` → `Greet` → `Exit`); `workflow.toml` configures how the workflow runs. Initializing the project does not start a run.
+
+If the repository already has `.fabro/project.toml`, skip `fabro repo init`. Use `fabro workflow list` to check whether it has a `hello` workflow. If not, use a fresh repository for this example, or substitute one of its existing workflow names in the run command below.
+
+<Note>
+The generated `workflow.toml` enables automatic draft pull requests. To try the example without publishing a PR, set `enabled = false` under `[run.pull_request]` in that file before running it.
+</Note>
 
 ## Configure API keys
 
@@ -79,9 +115,19 @@ Exporting a provider key in your shell does not configure server-backed workflow
 
 ## Run your first workflow
 
+From the same repository:
+
 ```bash
 fabro run hello
 ```
+
+The CLI submits the `hello` workflow to your configured server and follows the run. In the dashboard, open **Runs** and select the new run to see its status, steps, and agent output. The `Greet` step asks the agent to introduce itself; when the run finishes successfully, its status is **Succeeded**.
+
+If the run fails, open it to inspect the failed step. Check that the server has a model provider configured and that its selected [environment](/execution/environments) is available. See [Troubleshooting](/administration/troubleshooting) for help.
+
+<Note>
+The CLI and dashboard must connect to the same server. If your run does not appear, check the CLI's server target against the dashboard URL; see [Server Operations](/reference/server-operations).
+</Note>
 
 ## Next steps
 

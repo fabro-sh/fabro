@@ -165,7 +165,7 @@ function LogPanel({ text }: { text: string }) {
             <button
               type="button"
               onClick={clearFilters}
-              className="rounded px-2 py-1 text-xs text-fg-muted transition-colors hover:bg-overlay hover:text-fg-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-teal-500"
+              className="rounded px-2 py-1 text-xs text-fg-muted transition-colors hover:bg-overlay hover:text-fg-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
             >
               Clear
             </button>
@@ -215,7 +215,7 @@ function LevelFilter({
 
   return (
     <Listbox value={selected} onChange={onChange} multiple>
-      <ListboxButton className="inline-flex items-center gap-2 rounded-md bg-panel px-2.5 py-1.5 text-xs text-fg-2 outline-1 -outline-offset-1 outline-line-strong transition-colors hover:bg-overlay-strong focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500">
+      <ListboxButton className="inline-flex items-center gap-2 rounded-md bg-panel px-2.5 py-1.5 text-xs text-fg-2 outline-1 -outline-offset-1 outline-line-strong transition-colors hover:bg-overlay-strong focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-current">
         <FunnelIcon className="size-3.5 text-fg-muted" aria-hidden="true" />
         <span className="tabular-nums">{summary}</span>
         <ChevronUpDownIcon className="size-3.5 text-fg-muted" aria-hidden="true" />

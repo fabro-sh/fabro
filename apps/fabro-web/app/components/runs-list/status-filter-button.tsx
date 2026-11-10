@@ -3,6 +3,7 @@ import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from "@headless
 import type { BoardColumn } from "@qltysh/fabro-api-client";
 
 import { columnStatusDisplay } from "../../data/runs";
+import { TOOLBAR_BUTTON_CLASS } from "../ui";
 import { STATUS_FILTER_OPTIONS } from "./preferences";
 
 export function StatusFilterButton({
@@ -34,38 +35,26 @@ export function StatusFilterButton({
       onChange={(next: BoardColumn[]) => onChange(new Set<BoardColumn>(next))}
       multiple
     >
-      <ListboxButton
-        className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${
-          active
-            ? "border-line-strong bg-panel text-fg-2"
-            : "border-line bg-panel/80 text-fg-muted hover:text-fg-3"
-        }`}
-      >
+      <ListboxButton className={TOOLBAR_BUTTON_CLASS} data-filtering={active || undefined}>
         <PlusCircleIcon className="size-4" aria-hidden="true" />
         <span>{buttonLabel}</span>
       </ListboxButton>
       <ListboxOptions
-        anchor="bottom start"
-        className="z-20 mt-1 min-w-[12rem] rounded-md border border-line bg-panel py-1 text-xs shadow-lg focus:outline-none"
+        anchor={{ to: "bottom start", gap: 6 }}
+        className="menu z-20 focus:outline-none"
       >
         {STATUS_FILTER_OPTIONS.map((status) => {
           const display = columnStatusDisplay[status];
           return (
-            <ListboxOption
-              key={status}
-              value={status}
-              className={({ focus }) =>
-                `flex cursor-pointer items-center justify-between gap-3 px-3 py-1.5 text-fg-2 ${focus ? "bg-overlay" : ""}`
-              }
-            >
+            <ListboxOption key={status} value={status} className="menu-item justify-between">
               {({ selected }) => (
                 <>
                   <span className="flex items-center gap-2">
                     <span className={`size-2 shrink-0 rounded-full ${display.dot}`} aria-hidden="true" />
-                    <span className={selected ? display.text : "text-fg-2"}>{display.label}</span>
+                    <span className={selected ? display.text : undefined}>{display.label}</span>
                   </span>
                   {selected ? (
-                    <CheckIcon className="size-4 shrink-0 text-teal-500" aria-hidden="true" />
+                    <CheckIcon className="size-4 shrink-0 text-signal-ink" aria-hidden="true" />
                   ) : (
                     <span className="size-4 shrink-0" aria-hidden="true" />
                   )}

@@ -39,6 +39,12 @@ describe("browser router", () => {
     expect(paths).toContain("/settings/monitoring");
   });
 
+  test("exposes the appearance settings page", () => {
+    const paths = collectPaths(routes);
+
+    expect(paths).toContain("/settings/appearance");
+  });
+
   test("exposes MCP server settings pages", () => {
     const paths = collectPaths(routes);
 

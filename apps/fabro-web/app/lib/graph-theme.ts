@@ -1,47 +1,26 @@
-export interface GraphTheme {
-  fontcolor: string;
-  edgeColor: string;
-  nodeFill: string;
-  nodeText: string;
-  startFill: string;
-  startBorder: string;
-  startText: string;
-  gateFill: string;
-  gateBorder: string;
-  gateText: string;
-  completedFill: string;
-  completedBorder: string;
-  completedText: string;
-  runningFill: string;
-  runningBorder: string;
-  runningText: string;
-  runningPulseFill: string;
-  runningPulseStroke: string;
-  failedFill: string;
-  failedBorder: string;
-  failedText: string;
+// Which palette roles paint each run state on the graph. styles/diagram.css does the
+// painting, so a theme switch repaints without touching the SVG. This table is the same
+// mapping in a form graph-theme.test.ts can check against every palette.
+
+import type { FactoryPaletteColors } from "./factory-palettes.generated";
+
+export const GRAPH_NODE_STATES = ["running", "failed", "completed"] as const;
+
+export type GraphNodeState = (typeof GRAPH_NODE_STATES)[number];
+
+export interface GraphStateRole {
+  /** The node's outline, which has to hold against both its own fill and the paper. */
+  stroke: keyof FactoryPaletteColors;
+  /** The status badge's circle. */
+  badge: keyof FactoryPaletteColors;
+  /** The palette's surface for this state, or the share of `stroke` mixed into the node. */
+  fill: keyof FactoryPaletteColors | { tintPercent: number };
 }
 
-export const graphTheme: GraphTheme = {
-  fontcolor: "#5a7a94",
-  edgeColor: "#2a3f52",
-  nodeFill: "#1a2b3c",
-  nodeText: "#c6d4e0",
-  startFill: "#0d4f4f",
-  startBorder: "#14b8a6",
-  startText: "#5eead4",
-  gateFill: "#1a2030",
-  gateBorder: "#f59e0b",
-  gateText: "#fbbf24",
-  completedFill: "#0a2a20",
-  completedBorder: "#34d399",
-  completedText: "#6ee7b7",
-  runningFill: "#0d3a3a",
-  runningBorder: "#14b8a6",
-  runningText: "#5eead4",
-  runningPulseFill: "#134e4a",
-  runningPulseStroke: "#5eead4",
-  failedFill: "#2a1215",
-  failedBorder: "#f87171",
-  failedText: "#fca5a5",
+export const GRAPH_STATE_ROLES: Record<GraphNodeState, GraphStateRole> = {
+  // Signal navy's orange fill reads under 3:1 on its own soft surface, so the outline
+  // takes the palette's accent ink and the badge keeps the signal color.
+  running: { stroke: "accentInk", badge: "accentFill", fill: "accentSoft" },
+  failed: { stroke: "bad", badge: "bad", fill: "badBg" },
+  completed: { stroke: "ok", badge: "ok", fill: { tintPercent: 8 } },
 };

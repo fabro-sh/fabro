@@ -30,7 +30,7 @@ function Sidebar() {
         <button
           type="button"
           onClick={() => navigate("/chats/new")}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-overlay-strong px-3 py-2 text-sm font-medium text-fg ring-1 ring-line-strong transition-all hover:bg-overlay-strong hover:ring-line-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500"
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-overlay-strong px-3 py-2 text-sm font-medium text-fg ring-1 ring-line-strong transition-all hover:bg-overlay-strong hover:ring-line-strong focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
         >
           <PencilSquareIcon className="size-4" />
           New chat
