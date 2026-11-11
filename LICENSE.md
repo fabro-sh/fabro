@@ -1,5 +1,6 @@
 MIT License
 
+Copyright (c) 2026 Lithos Computer Co.
 Copyright Qlty Software Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
