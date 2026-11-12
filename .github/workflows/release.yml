@@ -137,6 +137,10 @@ jobs:
         run: |
           mkdir fabro-${{ matrix.target }}
           cp target/${{ matrix.target }}/release/fabro fabro-${{ matrix.target }}/
+          # Legal notices go next to the binary. Keep the binary at
+          # fabro-<target>/fabro: install.sh, `fabro upgrade`, and the
+          # Homebrew formulas all read it from that path.
+          cp LICENSE.md THIRD_PARTY_NOTICES.txt fabro-${{ matrix.target }}/
           tar czf fabro-${{ matrix.target }}.tar.gz fabro-${{ matrix.target }}
           shasum -a 256 fabro-${{ matrix.target }}.tar.gz > fabro-${{ matrix.target }}.tar.gz.sha256
 
@@ -241,7 +245,10 @@ jobs:
           tags: fabro-smoke:amd64
 
       - name: Smoke-test amd64 image
-        run: docker run --rm --platform linux/amd64 fabro-smoke:amd64 fabro version
+        run: |
+          docker run --rm --platform linux/amd64 fabro-smoke:amd64 fabro version
+          docker run --rm --platform linux/amd64 fabro-smoke:amd64 \
+            test -s /usr/share/doc/fabro/LICENSE.md -a -s /usr/share/doc/fabro/THIRD_PARTY_NOTICES.txt
 
       - name: Build arm64 image for smoke test
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
@@ -253,7 +260,10 @@ jobs:
           tags: fabro-smoke:arm64
 
       - name: Smoke-test arm64 image
-        run: docker run --rm --platform linux/arm64 fabro-smoke:arm64 fabro version
+        run: |
+          docker run --rm --platform linux/arm64 fabro-smoke:arm64 fabro version
+          docker run --rm --platform linux/arm64 fabro-smoke:arm64 \
+            test -s /usr/share/doc/fabro/LICENSE.md -a -s /usr/share/doc/fabro/THIRD_PARTY_NOTICES.txt
 
       - id: build
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
