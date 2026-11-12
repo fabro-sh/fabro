@@ -34,6 +34,14 @@ fn describe_all(graph: &WorkflowGraph, position: GraphPosition) -> Vec<String> {
         .collect()
 }
 
+// The workflow text in this test is adapted from the branching example in the
+// Attractor specification.
+//
+// Source: https://github.com/strongdm/attractor/blob/fb57a55ed97372a27ac90102f436947e29f48426/attractor-spec.md
+//
+// Copyright StrongDM, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0 (https://github.com/strongdm/attractor/blob/fb57a55ed97372a27ac90102f436947e29f48426/LICENSE)
 #[test]
 fn reads_the_shape_with_defaults_applied_and_chains_expanded() {
     let graph = parse(

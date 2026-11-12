@@ -10,3 +10,8 @@ digraph Simple {
 
     start -> run_tests -> report -> exit
 }
+
+// Adapted from the "Simple linear workflow" example in the Attractor specification.
+// Source: https://github.com/strongdm/attractor/blob/fb57a55ed97372a27ac90102f436947e29f48426/attractor-spec.md
+// Copyright StrongDM, Inc.
+// SPDX-License-Identifier: Apache-2.0 (https://github.com/strongdm/attractor/blob/fb57a55ed97372a27ac90102f436947e29f48426/LICENSE)

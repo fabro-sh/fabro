@@ -183,3 +183,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions and development wo
 ## License
 
 Fabro is licensed under the [MIT License](LICENSE.md).
+
+Fabro includes third-party open source components. Their licenses and copyright
+notices are in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
