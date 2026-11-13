@@ -21,20 +21,47 @@ done_step() {
   printf '    (%ss)\n' "$((SECONDS - step_started))"
 }
 
+# Orb downloads are sometimes cut off mid-transfer, and a setup that fails
+# publishes no snapshot, so every later orb repeats the cold setup. Network
+# steps therefore retry.
+retry() {
+  local attempt
+  for attempt in 1 2 3 4; do
+    "$@" && return 0
+    echo "    attempt $attempt failed: $*" >&2
+    sleep "$((attempt * 2))"
+  done
+  "$@"
+}
+# Downloads URL $1 to file $2. A file, not a pipe, so a retry starts over
+# instead of appending to a truncated stream; HTTP/1.1 because HTTP/2
+# transfers from static.rust-lang.org have been cut off in orbs.
+download() {
+  curl --proto '=https' --tlsv1.2 --http1.1 -fsSL \
+    --retry 5 --retry-all-errors --retry-delay 2 -o "$2" "$1"
+}
+downloads="$(mktemp -d)"
+trap 'rm -rf "$downloads"' EXIT
+export CARGO_NET_RETRY=10
+
 step "Rust toolchains"
 if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
-    sh -s -- -y --profile minimal --default-toolchain "$rust_stable" --no-modify-path
+  # rustup-init itself, not the sh.rustup.rs wrapper: the wrapper downloads
+  # this binary without retrying a transfer that ends early.
+  download "https://static.rust-lang.org/rustup/dist/$(uname -m)-unknown-linux-gnu/rustup-init" \
+    "$downloads/rustup-init"
+  chmod +x "$downloads/rustup-init"
+  retry "$downloads/rustup-init" -y --profile minimal --default-toolchain "$rust_stable" --no-modify-path
 fi
 # The installer cannot update this running script's environment.
 # shellcheck disable=SC1091
 source "$HOME/.cargo/env"
 installed_toolchains="$(rustup toolchain list)"
 if ! grep -q "^$rust_stable-" <<<"$installed_toolchains"; then
-  rustup toolchain install "$rust_stable" --profile minimal
+  retry rustup toolchain install "$rust_stable" --profile minimal
 fi
 if ! grep -q "^$rust_nightly-" <<<"$installed_toolchains"; then
-  rustup toolchain install "$rust_nightly" --profile minimal --component clippy,rustfmt
+  retry rustup toolchain install "$rust_nightly" --profile minimal --component clippy,rustfmt
 fi
 rustup default "$rust_stable" >/dev/null
 # Amp and supervised services start in `bash -l` shells.
@@ -50,7 +77,8 @@ done_step
 
 step "cargo-nextest"
 if ! command -v cargo-nextest >/dev/null; then
-  curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C "$HOME/.cargo/bin"
+  download https://get.nexte.st/latest/linux "$downloads/nextest.tar.gz"
+  tar zxf "$downloads/nextest.tar.gz" -C "$HOME/.cargo/bin"
 fi
 cargo nextest --version
 done_step
@@ -60,7 +88,7 @@ cargo fetch --locked
 done_step
 
 step "Bun dependencies"
-bun install --frozen-lockfile
+retry bun install --frozen-lockfile
 done_step
 
 step "Docker"
@@ -85,7 +113,7 @@ runner_pin="$(sed -n 's/^const RUNNER_PIN: &str = "\([0-9a-f]*\)";$/\1/p' \
 test -n "$runner_pin"
 for image in "ghcr.io/lithoscomputer/ubuntu-24.04:slim-$runner_pin" ghcr.io/lithoscomputer/ubuntu-22.04:slim; do
   if ! docker image inspect "$image" >/dev/null 2>&1; then
-    docker pull -q "$image"
+    retry docker pull -q "$image"
   fi
 done
 done_step
