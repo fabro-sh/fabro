@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use std::sync::{Arc, LazyLock, PoisonError, RwLock};
 
 use chrono::{DateTime, Utc};
-use fabro_types::{Run, RunId, RunSize, RunStatusKind, RunTiming, timing};
+use fabro_types::{GitHubHost, Run, RunId, RunSize, RunStatusKind, RunTiming, timing};
 use sqlx::query::Query;
 use sqlx::sqlite::{SqliteArguments, SqliteConnection, SqliteRow};
 use sqlx::{QueryBuilder, Row as _, Sqlite, SqlitePool};
@@ -202,13 +202,15 @@ impl RunSummaryStore {
 
     /// Write the `runs` row of a run from its projection, on a connection
     /// the caller holds a transaction on: the columns the list views and
-    /// the scheduler read, and the summary JSON.
+    /// the scheduler read, and the summary JSON. `host` is the GitHub
+    /// deployment the run's origin is classified against.
     pub async fn write_petri_run_row_on_connection(
         connection: &mut SqliteConnection,
+        host: &GitHubHost,
         run_id: &RunId,
         projection: &RunProjection,
     ) -> Result<()> {
-        let record = PreparedRunSummary::from_projection(run_id, projection);
+        let record = PreparedRunSummary::from_projection(host, run_id, projection);
         bind_run_columns(
             sqlx::query(UPSERT_PETRI_RUN_SQL).bind(run_id.to_string()),
             &record,
@@ -408,8 +410,8 @@ struct PreparedRunSummary {
 }
 
 impl PreparedRunSummary {
-    fn from_projection(run_id: &RunId, projection: &RunProjection) -> Self {
-        let mut run = build_summary(projection, run_id);
+    fn from_projection(host: &GitHubHost, run_id: &RunId, projection: &RunProjection) -> Self {
+        let mut run = build_summary(host, projection, run_id);
         if run.timing.is_none() {
             let at = run
                 .timestamps
@@ -706,6 +708,7 @@ mod tests {
         let mut transaction = store.pool.begin().await.unwrap();
         RunSummaryStore::write_petri_run_row_on_connection(
             &mut transaction,
+            &fabro_types::GitHubHost::default(),
             &projection.spec.run_id,
             projection,
         )

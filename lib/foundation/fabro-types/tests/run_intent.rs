@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use fabro_types::{
-    GitRunTarget, RunIntent, RunIntentArgs, RunTarget, WorkflowVersionId, normalize_git_commit_sha,
+    GitHubHost, GitRunTarget, RunIntent, RunIntentArgs, RunTarget, WorkflowVersionId,
+    normalize_git_commit_sha,
 };
 use serde_json::json;
 
@@ -195,7 +196,7 @@ fn target_validation_normalizes_sha_without_network_resolution() {
         tag:    Some("release/v1".to_string()),
         sha:    Some("ABCDEF0123456789ABCDEF0123456789ABCDEF01".to_string()),
     })
-    .validate()
+    .validate(&GitHubHost::default())
     .unwrap();
     let git = validated
         .git
@@ -225,7 +226,7 @@ fn git_target_validation_carries_the_parsed_repository_proof() {
         tag:    None,
         sha:    Some("ABCDEF0123456789ABCDEF0123456789ABCDEF01".to_string()),
     }
-    .validate()
+    .validate(&GitHubHost::default())
     .unwrap();
 
     assert_eq!(validated.repository().owner(), "Fabro-Sh");
@@ -238,7 +239,7 @@ fn git_target_validation_carries_the_parsed_repository_proof() {
 
 #[test]
 fn run_intent_none_target_validates_without_a_git_projection() {
-    let validated = RunTarget::None {}.validate().unwrap();
+    let validated = RunTarget::None {}.validate(&GitHubHost::default()).unwrap();
     assert_eq!(validated.target, RunTarget::None {});
     assert_eq!(validated.git, None);
 }
@@ -249,7 +250,7 @@ fn run_intent_folder_target_is_preserved_for_provider_admission() {
         path: "/srv/fabro/workspaces/example".to_string(),
     };
 
-    let validated = target.clone().validate().unwrap();
+    let validated = target.clone().validate(&GitHubHost::default()).unwrap();
 
     assert_eq!(validated.target, target);
     assert_eq!(validated.git, None);
@@ -266,7 +267,7 @@ fn target_validation_rejects_invalid_grammar() {
             tag:    tag.map(str::to_string),
             sha:    sha.map(str::to_string),
         })
-        .validate()
+        .validate(&GitHubHost::default())
     };
 
     assert_eq!(
@@ -347,4 +348,22 @@ fn git_target_round_trips_all_branch_tag_sha_states() {
             run_target
         );
     }
+}
+
+#[test]
+fn target_validation_derives_the_origin_from_the_configured_host() {
+    let host = GitHubHost::new("https://ghe.example.com", None).unwrap();
+    let validated = RunTarget::Git(GitRunTarget {
+        repo:   "acme/widgets".to_string(),
+        branch: "main".to_string(),
+        tag:    None,
+        sha:    None,
+    })
+    .validate(&host)
+    .unwrap();
+
+    assert_eq!(
+        validated.git.unwrap().origin_url,
+        "https://ghe.example.com/acme/widgets"
+    );
 }

@@ -442,7 +442,7 @@ async fn build_preflight_report(
     check: &ManifestCheck,
     shape: &WorkflowShape,
 ) -> Result<(CheckReport, bool)> {
-    let mut checks = base_preflight_checks(prepared, shape);
+    let mut checks = base_preflight_checks(prepared, shape, &state.github_host);
     if check.has_errors() {
         return Ok((
             CheckReport {
@@ -513,10 +513,17 @@ async fn build_preflight_report(
         prepared,
         &resolved_run,
         github_app.clone(),
+        &state.github_host,
     )
     .await;
-    let github_token_ok =
-        run_github_token_check(&mut checks, prepared, &resolved_run, github_app).await;
+    let github_token_ok = run_github_token_check(
+        &mut checks,
+        prepared,
+        &resolved_run,
+        github_app,
+        &state.github_host,
+    )
+    .await;
 
     let checks_ok = sandbox_ok && repository_access_ok && github_token_ok;
 
@@ -532,12 +539,16 @@ async fn build_preflight_report(
     ))
 }
 
-fn base_preflight_checks(prepared: &PreparedManifest, shape: &WorkflowShape) -> Vec<CheckResult> {
+fn base_preflight_checks(
+    prepared: &PreparedManifest,
+    shape: &WorkflowShape,
+    host: &fabro_types::GitHubHost,
+) -> Vec<CheckResult> {
     let repo_summary = prepared.git.as_ref().map_or_else(
         || "unknown".to_string(),
         |git| {
             let https = fabro_github::ssh_url_to_https(&git.origin_url);
-            fabro_github::parse_github_owner_repo(&https).map_or_else(
+            fabro_github::parse_github_owner_repo(host, &https).map_or_else(
                 |_| git.origin_url.clone(),
                 |(owner, repo)| format!("{owner}/{repo}"),
             )
@@ -699,6 +710,7 @@ async fn run_repository_access_check(
     prepared: &PreparedManifest,
     resolved_run: &RunNamespace,
     github_app: Option<fabro_github::GitHubCredentials>,
+    host: &fabro_types::GitHubHost,
 ) -> bool {
     run_repository_access_check_with(
         checks,
@@ -706,7 +718,8 @@ async fn run_repository_access_check(
         prepared,
         resolved_run,
         github_app,
-        check_git_remote_ref,
+        host,
+        |request, github_app| check_git_remote_ref(request, github_app, host),
     )
     .await
 }
@@ -717,6 +730,7 @@ async fn run_repository_access_check_with<F, Fut>(
     prepared: &PreparedManifest,
     resolved_run: &RunNamespace,
     github_app: Option<fabro_github::GitHubCredentials>,
+    host: &fabro_types::GitHubHost,
     check_remote_ref: F,
 ) -> bool
 where
@@ -734,7 +748,7 @@ where
     };
 
     let origin_url = fabro_github::normalize_repo_origin_url(&git.origin_url);
-    if let Err(err) = fabro_github::parse_github_owner_repo(&origin_url) {
+    if let Err(err) = fabro_github::parse_github_owner_repo(host, &origin_url) {
         checks.push(CheckResult {
             name:        "Repository Access".into(),
             status:      CheckStatus::Error,
@@ -780,11 +794,12 @@ where
 async fn check_git_remote_ref(
     request: GitRemoteRefCheck,
     github_app: Option<fabro_github::GitHubCredentials>,
+    host: &fabro_types::GitHubHost,
 ) -> Result<(), String> {
     let auth_url = match github_app.as_ref() {
         Some(creds) => Some(
             fabro_github::resolve_authenticated_url(
-                &fabro_github::GitHubContext::new(creds, &fabro_github::github_api_base_url()),
+                &fabro_github::GitHubContext::new(creds, host),
                 &request.origin_url,
             )
             .await
@@ -940,14 +955,16 @@ async fn run_github_token_check(
     prepared: &PreparedManifest,
     resolved_run: &RunNamespace,
     github_app: Option<fabro_github::GitHubCredentials>,
+    host: &fabro_types::GitHubHost,
 ) -> bool {
     run_github_token_check_with(
         checks,
         prepared,
         resolved_run,
         github_app,
-        mint_scoped_github_token,
-        probe_github_repository,
+        host,
+        |access, creds| mint_scoped_github_token(access, creds, host),
+        |slug, token| probe_github_repository(slug, token, host),
     )
     .await
 }
@@ -957,6 +974,7 @@ async fn run_github_token_check_with<M, MFut, P, PFut>(
     prepared: &PreparedManifest,
     resolved_run: &RunNamespace,
     github_app: Option<fabro_github::GitHubCredentials>,
+    host: &fabro_types::GitHubHost,
     mint_scoped_token: M,
     probe_repository: P,
 ) -> bool
@@ -998,6 +1016,7 @@ where
             checks,
             prepared,
             github_app,
+            host,
             &integration.permissions,
             perm_details,
         )
@@ -1050,6 +1069,7 @@ where
     // The same validated access value runtime initialization constructs, so
     // preflight and runtime cannot disagree about the effective set.
     let access = match fabro_github::GitHubRepositoryAccess::new(
+        host,
         Some(origin_url),
         &integration.additional_repositories,
         integration.permissions.clone(),
@@ -1163,11 +1183,12 @@ async fn check_primary_only_github_token(
     checks: &mut Vec<CheckResult>,
     prepared: &PreparedManifest,
     github_app: Option<fabro_github::GitHubCredentials>,
+    host: &fabro_types::GitHubHost,
     permissions: &HashMap<String, String>,
     perm_details: Vec<CheckDetail>,
 ) -> bool {
     if let (Some(creds), Some(git)) = (&github_app, prepared.git.as_ref()) {
-        match mint_github_token(creds, &git.origin_url, permissions).await {
+        match mint_github_token(creds, host, &git.origin_url, permissions).await {
             Ok(_) => {
                 checks.push(CheckResult {
                     name:        "GitHub Token".into(),
@@ -1207,9 +1228,10 @@ async fn check_primary_only_github_token(
 async fn mint_scoped_github_token(
     access: fabro_github::GitHubRepositoryAccess,
     creds: fabro_github::GitHubCredentials,
+    host: &fabro_types::GitHubHost,
 ) -> std::result::Result<ResolvedToken, String> {
-    let source =
-        InstallationTokenSource::for_access(&creds, &access).map_err(|err| format!("{err:#}"))?;
+    let source = InstallationTokenSource::for_access(&creds, host, &access)
+        .map_err(|err| format!("{err:#}"))?;
     source.resolve().await.map_err(|err| format!("{err:#}"))
 }
 
@@ -1222,9 +1244,10 @@ async fn mint_scoped_github_token(
 async fn probe_github_repository(
     slug: fabro_types::GitHubRepositorySlug,
     token: ResolvedToken,
+    host: &fabro_types::GitHubHost,
 ) -> std::result::Result<(), String> {
-    let url = slug.https_url();
-    probe_with_replication_retry(token.snapshot, || run_probe_ls_remote(&url, &token)).await
+    let url = slug.https_url(host);
+    probe_with_replication_retry(token.snapshot, || run_probe_ls_remote(host, &url, &token)).await
 }
 
 /// Retry auth-shaped failures with the SAME token: replication of a given
@@ -1347,30 +1370,29 @@ where
     }
 }
 
-async fn run_probe_ls_remote(url: &str, token: &ResolvedToken) -> std::result::Result<(), String> {
+async fn run_probe_ls_remote(
+    host: &fabro_types::GitHubHost,
+    url: &str,
+    token: &ResolvedToken,
+) -> std::result::Result<(), String> {
     let mut command = Command::new("git");
-    fabro_github::apply_probe_git_env(&mut command, token.token.expose());
+    fabro_github::apply_probe_git_env(&mut command, host, token.token.expose());
     command.args(["ls-remote", url, "HEAD"]);
     run_ls_remote(command).await
 }
 
 async fn mint_github_token(
     creds: &fabro_github::GitHubCredentials,
+    host: &fabro_types::GitHubHost,
     origin_url: &str,
     permissions: &HashMap<String, String>,
 ) -> Result<String> {
     let https_url = fabro_github::ssh_url_to_https(origin_url);
-    let (owner, repo) = fabro_github::parse_github_owner_repo(&https_url)?;
+    let (owner, repo) = fabro_github::parse_github_owner_repo(host, &https_url)?;
     let client = fabro_http::http_client()?;
     let perms_json = serde_json::to_value(permissions)?;
     creds
-        .resolve_bearer_token(
-            &client,
-            &owner,
-            &repo,
-            &fabro_github::github_api_base_url(),
-            perms_json,
-        )
+        .resolve_bearer_token(&client, &owner, &repo, host, perms_json)
         .await
 }
 
@@ -1889,6 +1911,7 @@ provider = "local"
             &prepared,
             &resolved,
             None,
+            &fabro_types::GitHubHost::default(),
             move |request, _github_app| {
                 calls_for_check.lock().unwrap().push(request);
                 async { Ok(()) }
@@ -1918,6 +1941,7 @@ provider = "local"
             &prepared,
             &resolved,
             None,
+            &fabro_types::GitHubHost::default(),
             move |request, _github_app| {
                 calls_for_check.lock().unwrap().push(request);
                 async { Ok(()) }
@@ -1959,6 +1983,7 @@ provider = "local"
             &prepared,
             &resolved,
             None,
+            &fabro_types::GitHubHost::default(),
             move |request, _github_app| {
                 calls_for_check.lock().unwrap().push(request);
                 async { Ok(()) }
@@ -1991,6 +2016,7 @@ provider = "local"
             &prepared,
             &resolved,
             None,
+            &fabro_types::GitHubHost::default(),
             |_request, _github_app| async { Err("remote branch not found".to_string()) },
         )
         .await;
@@ -3155,6 +3181,7 @@ dockerfile = { path = "Dockerfile" }
                 &prepared,
                 &resolved,
                 Some(pat_creds()),
+                &fabro_types::GitHubHost::default(),
                 move |access, _creds| {
                     minted_for_seam.lock().unwrap().push(access);
                     async { Ok(static_token("scoped-token")) }
@@ -3212,6 +3239,7 @@ dockerfile = { path = "Dockerfile" }
                 &prepared,
                 &resolved,
                 Some(pat_creds()),
+                &fabro_types::GitHubHost::default(),
                 |_access, _creds| async {
                     Err(
                         "the GitHub App installation cannot see repository acme/keystone; add \
@@ -3250,6 +3278,7 @@ dockerfile = { path = "Dockerfile" }
                 &prepared,
                 &resolved,
                 Some(pat_creds()),
+                &fabro_types::GitHubHost::default(),
                 |_access, _creds| async { Ok(static_token("scoped-token")) },
                 |slug, _token| async move {
                     if slug.repo() == "keystone" {
@@ -3296,6 +3325,7 @@ dockerfile = { path = "Dockerfile" }
                 &prepared,
                 &resolved,
                 Some(pat_creds()),
+                &fabro_types::GitHubHost::default(),
                 |_access, _creds| async { Ok(static_token("scoped-token")) },
                 |_slug, _token| async { Ok(()) },
             )
@@ -3324,6 +3354,7 @@ dockerfile = { path = "Dockerfile" }
                 &prepared,
                 &resolved,
                 Some(pat_creds()),
+                &fabro_types::GitHubHost::default(),
                 |_access, _creds| async { Ok(static_token("scoped-token")) },
                 |_slug, _token| async { Ok(()) },
             )
@@ -3354,6 +3385,7 @@ dockerfile = { path = "Dockerfile" }
                 &prepared,
                 &resolved,
                 None,
+                &fabro_types::GitHubHost::default(),
                 |_access, _creds| async { Ok(static_token("scoped-token")) },
                 |_slug, _token| async { Ok(()) },
             )

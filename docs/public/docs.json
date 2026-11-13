@@ -304,6 +304,13 @@
         "icon": "clock-rotate-left",
         "groups": [
           {
+            "group": "October 2026",
+            "icon": "clock-rotate-left",
+            "pages": [
+              "changelog/2026-10-25"
+            ]
+          },
+          {
             "group": "September 2026",
             "icon": "clock-rotate-left",
             "pages": [

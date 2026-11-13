@@ -142,8 +142,7 @@ fn legacy_target(
         tag,
         sha,
     })
-    .validate()
-    .map(|validated| validated.target)
+    .canonical()
     .map_err(|source| AutomationStoreError::LegacyTarget {
         path: path.to_path_buf(),
         source,

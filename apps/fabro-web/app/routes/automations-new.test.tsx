@@ -15,6 +15,7 @@ let currentRunStateLoading = false;
 let currentRunSettings: any = null;
 let currentEnvironments: any[] = [];
 let currentEnvironmentsError: unknown = null;
+let currentGithubWebUrl = "https://github.com";
 const queryCalls: Array<{ hook: string; id: string | undefined }> = [];
 const mountedRenderers: TestRenderer.ReactTestRenderer[] = [];
 let teardownReactEnv: (() => void) | undefined;
@@ -67,6 +68,11 @@ mock.module("../lib/queries", () => ({
       isLoading: false,
     };
   },
+  useServerSettings: () => ({
+    data:      { server: { integrations: { github: { web_url: currentGithubWebUrl } } } },
+    error:     null,
+    isLoading: false,
+  }),
   useRunState: (id: string | undefined) => {
     queryCalls.push({ hook: "useRunState", id });
     return {
@@ -277,6 +283,7 @@ beforeEach(() => {
   currentRunState = null;
   currentRunStateLoading = false;
   currentRunSettings = null;
+  currentGithubWebUrl = "https://github.com";
   currentEnvironments = [
     { id: "default", provider: "docker" },
     { id: "daytona-smoke", provider: "daytona" },
@@ -414,6 +421,21 @@ describe("AutomationsNew", () => {
     expect(fieldValue(renderer, "Exact commit SHA")).toBe(
       "0123456789abcdef0123456789abcdef01234567",
     );
+  });
+
+  test("run origin on the configured GitHub Enterprise host prefills the target repository", async () => {
+    currentGithubWebUrl = "https://ghe.example.com";
+    currentRun = makeRun({
+      repository: {
+        name:       "",
+        origin_url: "https://ghe.example.com/acme/widgets.git",
+        provider:   "github",
+      },
+    });
+
+    const { renderer } = await renderAutomationsNew("/automations/new?from_run=run_1");
+
+    expect(fieldValue(renderer, "Run target repository")).toBe("acme/widgets");
   });
 
   test("automationFormValuesFromRun kebab-cases the workflow name fallback", () => {

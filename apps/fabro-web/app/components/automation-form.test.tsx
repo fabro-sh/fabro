@@ -25,6 +25,31 @@ describe("automation workflow source form values", () => {
     expect(workflowSourceFromFormValues(values)).toBeUndefined();
   });
 
+  test("create-from-run reads the repository from origins on the configured GitHub host", () => {
+    const fromOrigin = (originUrl: string, githubWebUrl?: string) =>
+      automationFormValuesFromRun(
+        {
+          title: "Release",
+          workflow: { name: "Release", graph_name: "release", slug: "release" },
+          repository: { name: "", origin_url: originUrl },
+          sandbox: null,
+        } as any,
+        null,
+        null,
+        undefined,
+        githubWebUrl,
+      ).targetRepository;
+
+    expect(fromOrigin("https://github.com/acme/widgets.git")).toBe("acme/widgets");
+    expect(fromOrigin("git@github.com:acme/widgets.git")).toBe("acme/widgets");
+    expect(fromOrigin("https://ghe.example.com/acme/widgets.git")).toBe("");
+
+    const ghes = "https://ghe.example.com";
+    expect(fromOrigin("https://ghe.example.com/acme/widgets.git", ghes)).toBe("acme/widgets");
+    expect(fromOrigin("git@ghe.example.com:acme/widgets.git", ghes)).toBe("acme/widgets");
+    expect(fromOrigin("https://github.com/acme/widgets.git", ghes)).toBe("");
+  });
+
   test("branch, tag, and SHA selectors serialize with target precedence", () => {
     const base = {
       ...EMPTY_AUTOMATION_FORM,

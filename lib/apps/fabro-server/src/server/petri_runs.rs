@@ -474,6 +474,7 @@ pub(crate) async fn execute(state: Arc<AppState>, run_id: RunId) {
     // The in-process path serves the server's tests: a Git target is
     // fetched without a credential, and nothing is published.
     let source = RunSource::for_run(
+        &state.github_host,
         run_state.spec.target.as_ref(),
         &run_state.spec.settings.run,
         None,

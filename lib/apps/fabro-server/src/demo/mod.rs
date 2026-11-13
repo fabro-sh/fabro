@@ -1189,6 +1189,7 @@ mod runs {
             },
             automation: None,
             repository: Some(RepositoryRef::from_origin_and_source(
+                &fabro_types::GitHubHost::default(),
                 repo_origin_url,
                 source_directory.as_deref(),
             )),

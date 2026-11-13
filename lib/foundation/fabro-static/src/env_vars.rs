@@ -118,12 +118,15 @@ impl EnvVars {
     pub const ZAI_API_KEY: &'static str = "ZAI_API_KEY";
 
     // GitHub, OAuth, and Slack
+    pub const GH_ENTERPRISE_TOKEN: &'static str = "GH_ENTERPRISE_TOKEN";
+    pub const GH_HOST: &'static str = "GH_HOST";
     pub const GH_TOKEN: &'static str = "GH_TOKEN";
     pub const GITHUB_APP_CLIENT_SECRET: &'static str = "GITHUB_APP_CLIENT_SECRET";
     pub const GITHUB_APP_PRIVATE_KEY: &'static str = "GITHUB_APP_PRIVATE_KEY";
     pub const GITHUB_APP_WEBHOOK_SECRET: &'static str = "GITHUB_APP_WEBHOOK_SECRET";
     pub const GITHUB_BASE_URL: &'static str = "GITHUB_BASE_URL";
     pub const GITHUB_TOKEN: &'static str = "GITHUB_TOKEN";
+    pub const GITHUB_WEB_URL: &'static str = "GITHUB_WEB_URL";
     pub const OAUTH_CALLBACK_PATH: &'static str = "OAUTH_CALLBACK_PATH";
     pub const OAUTH_CLIENT_ID: &'static str = "OAUTH_CLIENT_ID";
     pub const OAUTH_ISSUER: &'static str = "OAUTH_ISSUER";
@@ -185,6 +188,8 @@ impl EnvVars {
     pub const RUST_BACKTRACE: &'static str = "RUST_BACKTRACE";
     pub const RUST_LOG: &'static str = "RUST_LOG";
     pub const SHELL: &'static str = "SHELL";
+    pub const SSL_CERT_DIR: &'static str = "SSL_CERT_DIR";
+    pub const SSL_CERT_FILE: &'static str = "SSL_CERT_FILE";
     pub const TERM: &'static str = "TERM";
     pub const TMPDIR: &'static str = "TMPDIR";
     pub const TWIN_OPENAI_BIND_ADDR: &'static str = "TWIN_OPENAI_BIND_ADDR";
@@ -279,12 +284,15 @@ mod tests {
             EnvVars::OPENROUTER_API_KEY,
             EnvVars::POOLSIDE_API_KEY,
             EnvVars::ZAI_API_KEY,
+            EnvVars::GH_ENTERPRISE_TOKEN,
+            EnvVars::GH_HOST,
             EnvVars::GH_TOKEN,
             EnvVars::GITHUB_APP_CLIENT_SECRET,
             EnvVars::GITHUB_APP_PRIVATE_KEY,
             EnvVars::GITHUB_APP_WEBHOOK_SECRET,
             EnvVars::GITHUB_BASE_URL,
             EnvVars::GITHUB_TOKEN,
+            EnvVars::GITHUB_WEB_URL,
             EnvVars::OAUTH_CALLBACK_PATH,
             EnvVars::OAUTH_CLIENT_ID,
             EnvVars::OAUTH_ISSUER,
@@ -339,6 +347,8 @@ mod tests {
             EnvVars::RUST_BACKTRACE,
             EnvVars::RUST_LOG,
             EnvVars::SHELL,
+            EnvVars::SSL_CERT_DIR,
+            EnvVars::SSL_CERT_FILE,
             EnvVars::TERM,
             EnvVars::TMPDIR,
             EnvVars::TWIN_OPENAI_BIND_ADDR,
