@@ -4,40 +4,45 @@
 mod support;
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use fabro_auth::VaultCredentialSource;
-use fabro_llm::test_support::test_catalog_with_provider_base_url;
+use fabro_llm::test_support;
 use fabro_petri::check::Launch;
 use fabro_petri::engine::{self, RunStatus};
 use fabro_petri::runtime::{self, RuntimeSpec};
 use fabro_test::{TwinScenario, TwinScenarios, TwinToolCall, twin_openai};
 use fabro_types::SecretType;
+use fabro_util::shell;
 use fabro_vault::Vault;
+use lithos_llm::Client;
 use lithos_llm::catalog::ProviderId;
 use lithos_llm::types::{ErrorKind, Request};
 use petri_store::MemoryRunStore;
 use serde_json::{Value, json};
+use tokio::fs;
+use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 
 const MODEL: &str = "gpt-5.4";
 
-fn client(base_url: &str, namespace: &str) -> lithos_llm::Client {
+fn client(base_url: &str, namespace: &str) -> Client {
     let mut vault = Vault::from_entries(HashMap::new());
     vault
         .set("OPENAI_API_KEY", namespace, SecretType::Token, None)
-        .unwrap();
+        .expect("the test key is stored in its detached vault");
     runtime::model_client(
-        test_catalog_with_provider_base_url("openai", base_url),
+        test_support::test_catalog_with_provider_base_url("openai", base_url),
         Arc::new(VaultCredentialSource::vault_only(Arc::new(RwLock::new(
             vault,
         )))),
         Some(fabro_test::test_http_client()),
         &[ProviderId::new("openai")],
     )
-    .unwrap()
-    .unwrap()
+    .expect("the production model client builds")
+    .expect("the test provider is eligible")
 }
 
 fn request() -> Request {
@@ -45,7 +50,7 @@ fn request() -> Request {
         .model(format!("openai/{MODEL}"))
         .user("Say done")
         .build()
-        .unwrap()
+        .expect("the test model request is valid")
 }
 
 #[tokio::test]
@@ -97,7 +102,7 @@ fn retry_events(records: &[Value]) -> Vec<&Value> {
         .collect()
 }
 
-async fn run_agent(client: lithos_llm::Client, root: &std::path::Path) -> (RunStatus, Vec<Value>) {
+async fn run_agent(client: Client, root: &Path) -> (RunStatus, Vec<Value>) {
     let runtime = RuntimeSpec {
         model_client: Some(client),
         ..RuntimeSpec::default()
@@ -129,7 +134,9 @@ async fn run_agent(client: lithos_llm::Client, root: &std::path::Path) -> (RunSt
         runtime,
         support::no_questions(Arc::new(support::Silent)),
     );
-    let result = engine::run(run).await.unwrap();
+    let result = engine::run(run)
+        .await
+        .expect("the run reaches a terminal state");
     (
         result.status,
         support::all_records(store.as_ref(), "model-retries").await,
@@ -146,7 +153,7 @@ async fn agent_retries_before_and_after_a_tool_without_repeating_its_effect() {
         .scenario(TwinScenario::responses(MODEL).error(520, "before tool"))
         .scenario(TwinScenario::responses(MODEL).tool_call(TwinToolCall::new(
             "shell",
-            json!({"command": format!("printf x >> '{}'", counter.display())}),
+            json!({"command": format!("printf x >> {}", shell::shell_quote(&counter.to_string_lossy()))}),
         )))
         .scenario(TwinScenario::responses(MODEL).error(500, "after tool"))
         .scenario(TwinScenario::responses(MODEL).text("done"))
@@ -156,7 +163,7 @@ async fn agent_retries_before_and_after_a_tool_without_repeating_its_effect() {
     let (status, records) = run_agent(client(&twin.base_url, &namespace), root.path()).await;
     assert_eq!(status, RunStatus::Success);
     assert_eq!(
-        std::fs::read_to_string(counter).ok().as_deref(),
+        fs::read_to_string(counter).await.ok().as_deref(),
         Some("x"),
         "{records:?}"
     );
@@ -176,7 +183,7 @@ async fn agent_retries_before_and_after_a_tool_without_repeating_its_effect() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn network_failure_is_retried_twice_then_reported_as_failure() {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let connections = Arc::new(AtomicUsize::new(0));
     let accepted = Arc::clone(&connections);
