@@ -17,11 +17,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use fabro_http::HttpClient;
+use fabro_llm::client;
 use fabro_workflow::services::FabroRunToolServices;
 use lithos_llm::Client;
 use lithos_llm::catalog::{Catalog, ProviderId};
 use lithos_llm::client::ClientBuildError;
 use lithos_llm::credentials::CredentialProvider;
+use lithos_llm::middleware::RetryMiddleware;
+use pebble_coding_agent::events::RetryEventObserver;
 use petri_attractor_steps::pebble::PebbleClient;
 use petri_attractor_steps::skills::FabroHome;
 use petri_frontend_fabro::Fabro;
@@ -140,7 +143,12 @@ pub fn model_client(
     let mut builder = Client::builder()
         .catalog(catalog)
         .credentials_arc(credentials)
-        .enabled_providers(eligible.iter().cloned());
+        .enabled_providers(eligible.iter().cloned())
+        // Retry only the failed model call, before output reaches the session.
+        // The observer records retries in that session's durable event stream.
+        .middleware(
+            RetryMiddleware::new(client::default_retry_policy()).observer(RetryEventObserver),
+        );
     if let Some(http) = http {
         builder = builder.http(http);
     }
