@@ -29,11 +29,12 @@ export default function SettingsIntegrations() {
   const integrations = integrationsQuery.data?.data;
   const github = integrations?.find((status) => status.provider === "github");
   const slack = integrations?.find((status) => status.provider === "slack");
+  const jira = integrations?.find((status) => status.provider === "jira");
 
   return (
     <div className="space-y-6">
       <SettingsPageIntro description={DESCRIPTION} />
-      {github && slack ? (
+      {github && slack && jira ? (
         <>
           <GithubPanel status={github} />
           <SlackPanel status={slack} />
@@ -44,12 +45,12 @@ export default function SettingsIntegrations() {
           <PanelSkeleton />
         </>
       )}
-      <ProjectManagementPanel />
+      {jira ? <ProjectManagementPanel jira={jira} /> : <PanelSkeleton />}
     </div>
   );
 }
 
-function ProjectManagementPanel() {
+function ProjectManagementPanel({ jira }: { jira: SystemIntegrationStatus }) {
   return (
     <Panel title="Project Management">
       <IntegrationRow
@@ -64,7 +65,7 @@ function ProjectManagementPanel() {
         name="Jira"
         help="Sync runs with Jira issues and projects."
       >
-        <span className="text-sm text-fg-muted">Coming Soon</span>
+        <IntegrationValue status={jira} detail={jiraDetail(jira)} />
       </IntegrationRow>
     </Panel>
   );
@@ -241,6 +242,15 @@ function slackDetail(status: SystemIntegrationStatus): string | undefined {
   const defaultChannel = status.metadata?.default_channel;
   if (defaultChannel) return `channel: ${defaultChannel}`;
   if (status.connection?.kind === "socket_mode") return "socket mode";
+  return undefined;
+}
+
+function jiraDetail(status: SystemIntegrationStatus): string | undefined {
+  const metadata = status.metadata ?? {};
+  if (metadata.last_error) return metadata.last_error;
+  const missing = missingCredentialsDetail(status);
+  if (missing) return missing;
+  if (metadata.site_url) return `site: ${metadata.site_url}`;
   return undefined;
 }
 

@@ -254,6 +254,50 @@ export const AutomationsApiAxiosParamCreator = function (configuration?: Configu
             };
         },
         /**
+         * Deletes the claim that stops an automation from running a Jira issue again, so the next poll can hand the issue to Fabro once more.
+         * @summary Release a Jira issue claim
+         * @param {string} id Unique automation identifier.
+         * @param {string} key Jira issue key.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        releaseAutomationJiraIssue: async (id: string, key: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('releaseAutomationJiraIssue', 'id', id)
+            // verify required parameter 'key' is not null or undefined
+            assertParamExists('releaseAutomationJiraIssue', 'key', key)
+            const localVarPath = `/api/v1/automations/{id}/jira-issues/{key}`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)))
+                .replace(`{${"key"}}`, encodeURIComponent(String(key)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Replaces an automation definition when `If-Match` matches the current automation revision.
          * @summary Replace automation
          * @param {string} id Unique automation identifier.
@@ -421,6 +465,20 @@ export const AutomationsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Deletes the claim that stops an automation from running a Jira issue again, so the next poll can hand the issue to Fabro once more.
+         * @summary Release a Jira issue claim
+         * @param {string} id Unique automation identifier.
+         * @param {string} key Jira issue key.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async releaseAutomationJiraIssue(id: string, key: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.releaseAutomationJiraIssue(id, key, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AutomationsApi.releaseAutomationJiraIssue']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Replaces an automation definition when `If-Match` matches the current automation revision.
          * @summary Replace automation
          * @param {string} id Unique automation identifier.
@@ -510,6 +568,17 @@ export const AutomationsApiFactory = function (configuration?: Configuration, ba
             return localVarFp.listAutomations(options).then((request) => request(axios, basePath));
         },
         /**
+         * Deletes the claim that stops an automation from running a Jira issue again, so the next poll can hand the issue to Fabro once more.
+         * @summary Release a Jira issue claim
+         * @param {string} id Unique automation identifier.
+         * @param {string} key Jira issue key.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        releaseAutomationJiraIssue(id: string, key: string, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.releaseAutomationJiraIssue(id, key, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Replaces an automation definition when `If-Match` matches the current automation revision.
          * @summary Replace automation
          * @param {string} id Unique automation identifier.
@@ -593,6 +662,18 @@ export class AutomationsApi extends BaseAPI {
      */
     public listAutomations(options?: RawAxiosRequestConfig) {
         return AutomationsApiFp(this.configuration).listAutomations(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Deletes the claim that stops an automation from running a Jira issue again, so the next poll can hand the issue to Fabro once more.
+     * @summary Release a Jira issue claim
+     * @param {string} id Unique automation identifier.
+     * @param {string} key Jira issue key.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public releaseAutomationJiraIssue(id: string, key: string, options?: RawAxiosRequestConfig) {
+        return AutomationsApiFp(this.configuration).releaseAutomationJiraIssue(id, key, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

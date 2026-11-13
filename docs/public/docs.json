@@ -103,6 +103,7 @@
               "integrations/modal",
               "integrations/fireworks",
               "integrations/slack",
+              "integrations/jira",
               "integrations/brave-search",
               "integrations/venice-search"
             ]
@@ -251,7 +252,8 @@
               "PUT /api/v1/automations/{id}",
               "DELETE /api/v1/automations/{id}",
               "GET /api/v1/automations/{id}/runs",
-              "POST /api/v1/automations/{id}/runs"
+              "POST /api/v1/automations/{id}/runs",
+              "DELETE /api/v1/automations/{id}/jira-issues/{key}"
             ]
           },
           {

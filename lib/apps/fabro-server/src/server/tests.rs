@@ -1524,6 +1524,102 @@ async fn github_webhook_accepts_valid_signature_with_wrong_bearer_token() {
 }
 
 #[tokio::test]
+async fn system_integrations_reports_jira_error_status_with_last_error() {
+    let source = r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.integrations.jira]
+site_url = "https://acme.atlassian.net"
+email = "bot@acme.com"
+"#;
+    let service = crate::server::jira::JiraService::new(fabro_jira::JiraClient::with_http(
+        "https://acme.atlassian.net".to_string(),
+        "bot@acme.com".to_string(),
+        "tok".to_string(),
+        fabro_http::test_http_client().unwrap(),
+    ));
+    service.record_write_back_error("boom");
+    let state = TestAppStateBuilder::new()
+        .runtime_settings(
+            server_settings_from_toml(source),
+            manifest_run_defaults_from_toml(source),
+        )
+        .vault_entries([("FABRO_JIRA_API_TOKEN", "tok")])
+        .jira_service(service)
+        .build();
+    let app = crate::test_support::build_test_router(state);
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/system/integrations"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response.into_body()).await;
+    let jira = body["data"]
+        .as_array()
+        .expect("integration response should include data")
+        .iter()
+        .find(|integration| integration["provider"] == "jira")
+        .expect("jira integration should be present");
+
+    assert_eq!(jira["status"], "error");
+    assert_eq!(jira["metadata"]["last_error"], "boom");
+}
+
+#[tokio::test]
+async fn system_integrations_reports_jira_restart_required_when_token_arrives_after_startup() {
+    let source = r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.integrations.jira]
+site_url = "https://acme.atlassian.net"
+email = "bot@acme.com"
+"#;
+    let state = TestAppStateBuilder::new()
+        .runtime_settings(
+            server_settings_from_toml(source),
+            manifest_run_defaults_from_toml(source),
+        )
+        .build();
+    state
+        .stores
+        .vault
+        .set("FABRO_JIRA_API_TOKEN", "tok", SecretType::Token, None)
+        .await
+        .unwrap();
+    let app = crate::test_support::build_test_router(state);
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/system/integrations"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response.into_body()).await;
+    let jira = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|integration| integration["provider"] == "jira")
+        .unwrap();
+
+    assert_eq!(jira["status"], "error");
+    assert_eq!(
+        jira["metadata"]["last_error"],
+        "server restart required to load Jira credentials"
+    );
+}
+
+#[tokio::test]
 async fn create_secret_stores_valid_oauth_entries() {
     let state = TestAppStateBuilder::new().build();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
@@ -2122,6 +2218,7 @@ fn slack_app_state_with_settings_and_secret_sources(
         worker_control_bus: None,
         worker_runtime: None,
         automation_materializer_override: None,
+        jira_service_override: None,
     })
     .expect("slack test app state should build")
 }
@@ -4691,6 +4788,8 @@ async fn fake_automation_materializer_injection_captures_input_and_returns_versi
             workflow: "demo".to_string(),
             run_id,
             temp_root: temp_root.clone(),
+            title: None,
+            goal: None,
         })
         .await
         .expect("fake materializer should succeed");
@@ -5110,6 +5209,7 @@ fn create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
         worker_control_bus: None,
         worker_runtime: None,
         automation_materializer_override: None,
+        jira_service_override: None,
     };
     build_app_state(config).expect("test app state should build")
 }
@@ -10906,6 +11006,7 @@ methods = ["dev-token"]
         worker_control_bus: None,
         worker_runtime: None,
         automation_materializer_override: None,
+        jira_service_override: None,
     }) else {
         panic!("build_app_state should require SESSION_SECRET")
     };
@@ -10964,6 +11065,7 @@ fn slack_service_respects_disabled_server_config_even_with_vault_tokens() {
         worker_control_bus: None,
         worker_runtime: None,
         automation_materializer_override: None,
+        jira_service_override: None,
     })
     .expect("slack disabled test app state should build");
 

@@ -14,6 +14,7 @@ use fabro_types::sum_usage;
 use fabro_vault::Vault;
 use tokio::time::timeout;
 
+use super::super::jira::{JiraCredentialResolution, resolve_jira_credentials};
 use super::super::{
     AggregateUsage, AggregateUsageTotals, ApiError, AppState, DfParams, FABRO_VERSION,
     GithubIntegrationStrategy, IntegrationConnectionState, IntegrationProvider, IntegrationStatus,
@@ -114,8 +115,9 @@ async fn get_system_integrations(
     };
     let github = github_integration_status(&settings.server.integrations.github, &vault);
     let slack = slack_integration_status(state.as_ref(), &vault);
+    let jira = jira_integration_status(state.as_ref(), &vault);
     let response = SystemIntegrationsResponse {
-        data: vec![github, slack],
+        data: vec![github, slack, jira],
     };
     (StatusCode::OK, Json(response)).into_response()
 }
@@ -252,6 +254,60 @@ fn slack_integration_status(state: &AppState, vault: &Vault) -> SystemIntegratio
         connection,
         metadata,
     }
+}
+
+fn jira_integration_status(state: &AppState, vault: &Vault) -> SystemIntegrationStatus {
+    let settings = &state.server_settings().server.integrations.jira;
+    let mut metadata = BTreeMap::new();
+    if let Some(site_url) = settings.site_url.as_ref() {
+        metadata.insert("site_url".to_string(), site_url.clone());
+    }
+    if let Some(email) = settings.email.as_ref() {
+        metadata.insert("email".to_string(), email.clone());
+    }
+
+    if !settings.enabled {
+        return integration_status(
+            IntegrationProvider::Jira,
+            false,
+            false,
+            IntegrationStatus::Disabled,
+            Vec::new(),
+            metadata,
+        );
+    }
+
+    if let JiraCredentialResolution::Missing { names } =
+        resolve_jira_credentials(settings, |name| vault.get(name).map(str::to_string))
+    {
+        return integration_status(
+            IntegrationProvider::Jira,
+            true,
+            false,
+            IntegrationStatus::MissingCredentials,
+            names,
+            metadata,
+        );
+    }
+
+    let last_error = match state.jira_service.as_ref() {
+        Some(service) => service.last_error(),
+        None => Some("server restart required to load Jira credentials".to_string()),
+    };
+    let status = if let Some(last_error) = last_error {
+        metadata.insert("last_error".to_string(), last_error);
+        IntegrationStatus::Error
+    } else {
+        IntegrationStatus::Configured
+    };
+    integration_status(
+        IntegrationProvider::Jira,
+        true,
+        true,
+        status,
+        Vec::new(),
+        metadata,
+    )
 }
 
 fn integration_status(

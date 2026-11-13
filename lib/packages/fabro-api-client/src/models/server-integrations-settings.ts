@@ -18,9 +18,13 @@
 import type { GithubIntegrationSettings } from './github-integration-settings';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { JiraIntegrationSettings } from './jira-integration-settings';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { SlackIntegrationSettings } from './slack-integration-settings';
 
 export interface ServerIntegrationsSettings {
     'github': GithubIntegrationSettings;
     'slack': SlackIntegrationSettings;
+    'jira': JiraIntegrationSettings;
 }

@@ -886,6 +886,18 @@ pub(crate) async fn get_system_integrations(
                     "metadata": {
                         "default_channel": "#fabro-demo"
                     }
+                },
+                {
+                    "provider": "jira",
+                    "enabled": true,
+                    "configured": true,
+                    "status": "configured",
+                    "missing_credentials": [],
+                    "connection": null,
+                    "metadata": {
+                        "site_url": "https://acme.atlassian.net",
+                        "email": "fabro@acme.com"
+                    }
                 }
             ]
         })),

@@ -2383,6 +2383,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabro-jira"
+version = "0.408.0-nightly.0"
+dependencies = [
+ "fabro-http",
+ "httpmock",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "fabro-llm"
 version = "0.415.0-nightly.0"
 dependencies = [
@@ -2629,6 +2641,7 @@ dependencies = [
  "fabro-http",
  "fabro-install",
  "fabro-interview",
+ "fabro-jira",
  "fabro-llm",
  "fabro-macros",
  "fabro-manifest",

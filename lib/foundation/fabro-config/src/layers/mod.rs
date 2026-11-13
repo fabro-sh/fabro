@@ -33,9 +33,9 @@ pub use run::{
     RunRunBranchLayer, RunScmLayer, ScmGitHubLayer, StringOrSplice,
 };
 pub use server::{
-    GithubIntegrationLayer, IntegrationWebhooksLayer, ObjectStoreLocalLayer, ObjectStoreS3Layer,
-    ServerApiLayer, ServerArtifactsLayer, ServerAuthGithubLayer, ServerAuthLayer,
-    ServerIntegrationsLayer, ServerLayer, ServerListenLayer, ServerLoggingLayer,
+    GithubIntegrationLayer, IntegrationWebhooksLayer, JiraIntegrationLayer, ObjectStoreLocalLayer,
+    ObjectStoreS3Layer, ServerApiLayer, ServerArtifactsLayer, ServerAuthGithubLayer,
+    ServerAuthLayer, ServerIntegrationsLayer, ServerLayer, ServerListenLayer, ServerLoggingLayer,
     ServerSandboxLayer, ServerSandboxProviderLayer, ServerSandboxProvidersLayer,
     ServerSchedulerLayer, ServerStorageLayer, ServerWebLayer, SlackIntegrationLayer,
 };

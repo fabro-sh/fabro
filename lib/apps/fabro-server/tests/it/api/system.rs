@@ -219,6 +219,123 @@ enabled = true
 }
 
 #[tokio::test]
+async fn system_integrations_reports_jira_disabled_without_config() {
+    let settings = settings_from_toml(
+        r"
+_version = 1
+",
+    );
+    let app = fabro_server::test_support::build_test_router(
+        fabro_server::test_support::TestAppStateBuilder::new()
+            .runtime_settings(settings.server_settings, settings.manifest_run_defaults)
+            .build(),
+    );
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(api("/system/integrations"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+
+    let body = response_json(response, StatusCode::OK, "GET /api/v1/system/integrations").await;
+    let rows = body["data"]
+        .as_array()
+        .expect("integration response should include data");
+    assert_eq!(rows.len(), 3);
+    let jira = rows
+        .iter()
+        .find(|integration| integration["provider"] == "jira")
+        .expect("jira integration should be present");
+
+    assert_eq!(jira["enabled"], false);
+    assert_eq!(jira["configured"], false);
+    assert_eq!(jira["status"], "disabled");
+    assert!(jira["connection"].is_null());
+}
+
+#[tokio::test]
+async fn system_integrations_reports_jira_missing_credentials() {
+    let settings = settings_from_toml(
+        r#"
+_version = 1
+
+[server.integrations.jira]
+site_url = "https://acme.atlassian.net"
+email = "bot@acme.com"
+"#,
+    );
+    let app = fabro_server::test_support::build_test_router(
+        fabro_server::test_support::TestAppStateBuilder::new()
+            .runtime_settings(settings.server_settings, settings.manifest_run_defaults)
+            .build(),
+    );
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(api("/system/integrations"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+
+    let body = response_json(response, StatusCode::OK, "GET /api/v1/system/integrations").await;
+    let jira = body["data"]
+        .as_array()
+        .expect("integration response should include data")
+        .iter()
+        .find(|integration| integration["provider"] == "jira")
+        .expect("jira integration should be present");
+
+    assert_eq!(jira["enabled"], true);
+    assert_eq!(jira["configured"], false);
+    assert_eq!(jira["status"], "missing_credentials");
+    assert_eq!(
+        jira["missing_credentials"],
+        serde_json::json!(["FABRO_JIRA_API_TOKEN"])
+    );
+    assert_eq!(jira["metadata"]["site_url"], "https://acme.atlassian.net");
+}
+
+#[tokio::test]
+async fn system_integrations_reports_jira_configured_with_token() {
+    let settings = settings_from_toml(
+        r#"
+_version = 1
+
+[server.integrations.jira]
+site_url = "https://acme.atlassian.net"
+email = "bot@acme.com"
+"#,
+    );
+    let app = fabro_server::test_support::build_test_router(
+        fabro_server::test_support::TestAppStateBuilder::new()
+            .runtime_settings(settings.server_settings, settings.manifest_run_defaults)
+            .vault_entries([("FABRO_JIRA_API_TOKEN", "tok")])
+            .build(),
+    );
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(api("/system/integrations"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+
+    let body = response_json(response, StatusCode::OK, "GET /api/v1/system/integrations").await;
+    let jira = body["data"]
+        .as_array()
+        .expect("integration response should include data")
+        .iter()
+        .find(|integration| integration["provider"] == "jira")
+        .expect("jira integration should be present");
+
+    assert_eq!(jira["status"], "configured");
+    assert_eq!(jira["configured"], true);
+    assert_eq!(jira["metadata"]["email"], "bot@acme.com");
+    assert!(jira["metadata"].get("last_error").is_none());
+}
+
+#[tokio::test]
 async fn get_system_integrations_reports_slack_disabled_even_when_tokens_exist() {
     let settings = settings_from_toml(
         r"

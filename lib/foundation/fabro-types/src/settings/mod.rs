@@ -44,11 +44,11 @@ pub use run::{
     RunModelControls, RunModelSettings, RunNamespace, RunScmSettings, ScmGitHubSettings, TlsMode,
 };
 pub use server::{
-    GithubIntegrationSettings, IntegrationWebhooksSettings, LogDestination, ObjectStoreSettings,
-    ServerApiSettings, ServerArtifactsSettings, ServerAuthGithubSettings, ServerAuthMethod,
-    ServerAuthSettings, ServerIntegrationsSettings, ServerListenSettings, ServerLoggingSettings,
-    ServerNamespace, ServerSchedulerSettings, ServerStorageSettings, ServerWebSettings,
-    SlackIntegrationSettings,
+    GithubIntegrationSettings, IntegrationWebhooksSettings, JiraIntegrationSettings,
+    LogDestination, ObjectStoreSettings, ServerApiSettings, ServerArtifactsSettings,
+    ServerAuthGithubSettings, ServerAuthMethod, ServerAuthSettings, ServerIntegrationsSettings,
+    ServerListenSettings, ServerLoggingSettings, ServerNamespace, ServerSchedulerSettings,
+    ServerStorageSettings, ServerWebSettings, SlackIntegrationSettings,
 };
 pub use size::{ParseSizeError, Size};
 pub use workflow::WorkflowNamespace;

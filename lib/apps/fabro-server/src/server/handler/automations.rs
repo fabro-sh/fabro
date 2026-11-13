@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use axum::http::HeaderMap;
+use axum::routing::delete;
 use axum_extra::extract::Query as ExtraQuery;
 use fabro_automation::{
     Automation, AutomationDraft, AutomationId, AutomationReplace, AutomationStoreError,
@@ -10,6 +11,7 @@ use fabro_store::{RunSummaryListQuery, RunSummaryVisibility};
 use fabro_types::{AutomationRef, RunId};
 use fabro_util::error as error_util;
 use serde::Serialize;
+use tracing::info;
 
 use super::super::{
     ApiError, AppState, IntoResponse, Json, PaginationParams, Path, RequiredUser, Response, Router,
@@ -40,6 +42,10 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route(
             "/automations/{id}/runs",
             get(list_automation_runs).post(create_automation_run),
+        )
+        .route(
+            "/automations/{id}/jira-issues/{key}",
+            delete(release_jira_issue),
         )
         .route(
             "/automations/{id}",
@@ -93,6 +99,44 @@ async fn list_automation_runs(
     runs::run_summary_page_response(&state, &query).await
 }
 
+async fn release_jira_issue(
+    _auth: RequiredUser,
+    State(state): State<Arc<AppState>>,
+    Path((id, key)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    let id = parse_path_id(id)?;
+    if !is_jira_issue_key(&key) {
+        return Err(ApiError::bad_request(format!(
+            "invalid Jira issue key: {key}"
+        )));
+    }
+    if state.automation_store().get(&id).await?.is_none() {
+        return Err(ApiError::not_found(format!("automation not found: {id}")));
+    }
+    if !state.jira_claims().release(&id, &key).await? {
+        return Err(ApiError::with_code(
+            StatusCode::NOT_FOUND,
+            format!("no Jira claim for {key} on automation {id}"),
+            "jira_issue_claim_not_found",
+        ));
+    }
+    info!(automation_id = %id, issue_key = %key, "Released Jira issue claim");
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// Matches `^[A-Z][A-Z0-9_]+-[0-9]+$`.
+fn is_jira_issue_key(key: &str) -> bool {
+    let Some((project, number)) = key.rsplit_once('-') else {
+        return false;
+    };
+    let mut chars = project.chars();
+    chars.next().is_some_and(|c| c.is_ascii_uppercase())
+        && project.len() >= 2
+        && chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        && !number.is_empty()
+        && number.chars().all(|c| c.is_ascii_digit())
+}
+
 async fn create_automation_run(
     RequiredRunToolActor(actor): RequiredRunToolActor,
     State(state): State<Arc<AppState>>,
@@ -144,6 +188,8 @@ async fn create_automation_run(
             workflow: automation.workflow.clone(),
             run_id,
             temp_root: state.automation_temp_root(),
+            title: None,
+            goal: None,
         })
         .await
     {

@@ -143,6 +143,22 @@ expression = "0 9 * * 1-5"
 
 The server fires each enabled schedule trigger at its next occurrence and creates and starts a run. Creating, editing, or deleting an automation takes effect immediately — no restart needed. If a fire fails (for example, because its environment is unavailable or workflow packaging fails), Fabro stores the failure on the automation as `last_error`, logs it, and waits for the next occurrence rather than retrying. The error is cleared after a later scheduled run is queued successfully.
 
+### Jira triggers
+
+A Jira trigger polls a Jira Cloud board with a JQL query and starts one run per new matching ticket. An automation can have one Jira trigger. `jql` is required. `in_progress_status` and `review_status` are optional Jira transition names, matched case-insensitively.
+
+```toml
+[[triggers]]
+type = "jira"
+id = "board"
+enabled = true
+jql = 'project = ABC AND status = "Ready for Fabro"'
+in_progress_status = "In Progress"
+review_status = "In Review"
+```
+
+The web form exposes this as the **Poll a Jira board** toggle. Poll and run-creation failures are stored as `last_error`. See [Jira](/integrations/jira) for setup, claims, and write-back.
+
 ## Web UI
 
 The `/automations` area lists automations with create, edit, delete, and Run actions. The create and edit forms require a Docker or Daytona environment. Migrated automations without an environment are shown as incomplete and cannot run until edited. Saves are revision-checked, so concurrent edits fail loudly instead of silently overwriting each other. The detail page shows the automation's configuration, its most recent schedule error, and its run history with status, time, and repo filters.
@@ -151,4 +167,4 @@ To bootstrap an automation from work you have already run, open a run's actions 
 
 ## API
 
-`/api/v1/automations` provides full CRUD: list, create, fetch, replace, and delete. `environment_id` is required in create and replace requests. Automation responses may return a null environment only for an incomplete migrated definition, and expose the latest scheduled-run failure through `last_error`. Responses carry an `ETag` revision; `PUT` and `DELETE` require a matching `If-Match` header. `GET /api/v1/automations/{id}/runs` lists the automation's runs newest-first with standard pagination.
+`/api/v1/automations` provides full CRUD: list, create, fetch, replace, and delete. `environment_id` is required in create and replace requests. Automation responses may return a null environment only for an incomplete migrated definition, and expose the latest scheduled-run failure through `last_error`. Responses carry an `ETag` revision; `PUT` and `DELETE` require a matching `If-Match` header. `GET /api/v1/automations/{id}/runs` lists the automation's runs newest-first with standard pagination. `DELETE /api/v1/automations/{id}/jira-issues/{key}` releases a Jira ticket's claim so the next poll can run it again (see [Jira](/integrations/jira#releasing-a-claim)).
