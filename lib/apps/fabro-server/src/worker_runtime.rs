@@ -12,7 +12,7 @@ use futures_util::future::BoxFuture;
 use tokio::io::AsyncRead;
 use tokio::process::Command;
 
-use crate::spawn_env::apply_worker_env;
+use crate::spawn_env::{self, SandboxConnectionEnv};
 
 #[async_trait]
 pub(crate) trait WorkerRuntime: Send + Sync {
@@ -52,6 +52,7 @@ pub(crate) struct WorkerLaunchSpec {
     /// The Fabro home the server resolved, so a Petri run's skills step
     /// reads the same home whatever the worker's environment says.
     pub(crate) fabro_home:             PathBuf,
+    pub(crate) sandbox_connection_env: SandboxConnectionEnv,
 }
 
 pub(crate) struct StartedWorker {
@@ -113,7 +114,8 @@ impl LocalWorkerRuntime {
             .stdout(worker_stdout)
             .stderr(Stdio::piped());
 
-        apply_worker_env(&mut cmd);
+        spawn_env::apply_worker_env(&mut cmd);
+        spec.sandbox_connection_env.apply(&mut cmd);
         if let Some(level) = spec.fabro_log.as_deref() {
             cmd.env(EnvVars::FABRO_LOG, level);
         }
