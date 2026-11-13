@@ -90,6 +90,11 @@ futures-util = "0.3"
 # sandbox-driver: the sandbox provider layer. Bundled Host, Docker, and
 # Daytona providers link in-process; third-party providers run as stdio
 # plugins through sandbox-driver-protocol.
+# Cargo.lock holds these at tag v2 (0a07380), the last sandbox-driver with the
+# old API, while its main becomes new-API-only. Do not `cargo update` them, and
+# keep `branch = "main"` so Petri's and Pebble's declarations stay the same
+# source. Lift the pin when Fabro, Petri, and Pebble move to the new API
+# together; see .github/workflows/internal-deps.yml.
 sandbox-driver = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
 sandbox-driver-protocol = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
 sandbox-driver-host = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
