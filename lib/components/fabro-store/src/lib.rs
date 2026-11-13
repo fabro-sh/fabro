@@ -5,6 +5,7 @@ mod blob_store;
 mod database;
 mod error;
 mod keyed_mutex;
+mod main_event_store;
 pub mod platform_records;
 mod run_session_event_store;
 mod run_session_record_store;
@@ -31,6 +32,7 @@ pub use fabro_types::{
     BlobHash, PendingInterviewRecord, Run, RunProjection, StageId, StageProjection,
 };
 pub use keyed_mutex::{KeyedMutex, KeyedMutexGuard};
+pub use main_event_store::{AppendMainEventOutcome, MainEventSourceKey, MainEventStore};
 pub use platform_records::{
     PlatformRecord, PlatformRecordHook, PlatformRecordKind, PlatformRecordStore, StagePosition,
     StoredPlatformRecord,
