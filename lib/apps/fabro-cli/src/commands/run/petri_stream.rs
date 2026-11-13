@@ -163,15 +163,23 @@ impl<'a> PetriItem<'a> {
         self.value().pointer(pointer)?.as_str()
     }
 
-    /// The condition the applied route matched, as written: the edge a
-    /// `route.applied` record names is a key into the subject node's
-    /// `meta.edges`, whose entry carries the edge's `condition` when it
-    /// has one.
-    pub(crate) fn matched_condition(self) -> Option<&'a str> {
+    /// Metadata for the exact edge named by `route.applied`, not another
+    /// edge to the same target or the stage's preferred-label signal.
+    fn selected_edge(self) -> Option<&'a Value> {
         let edge = self.body()?.get("edge")?.as_u64()?;
-        self.node()?
-            .pointer(&format!("/meta/edges/{edge}/condition"))?
+        self.node()?.pointer(&format!("/meta/edges/{edge}"))
+    }
+
+    pub(crate) fn selected_edge_label(self) -> Option<&'a str> {
+        self.selected_edge()?
+            .get("label")?
             .as_str()
+            .filter(|label| !label.is_empty())
+    }
+
+    /// The condition the applied route matched, as written.
+    pub(crate) fn matched_condition(self) -> Option<&'a str> {
+        self.selected_edge()?.get("condition")?.as_str()
     }
 }
 
@@ -418,6 +426,22 @@ pub(crate) fn format_pretty(
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
             let detail = if back { " (loop)" } else { "" };
+            let edge_label = view.selected_edge_label();
+            let arrow = if edge_label.is_some() && back {
+                "↺"
+            } else {
+                "→"
+            };
+            let route_detail = if let Some(label) = edge_label {
+                let transition = if transition == "continue" || transition.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {transition}")
+                };
+                format!("  [{}]{transition}", label.escape_debug())
+            } else {
+                format!(" {transition}{detail}")
+            };
             // The condition the edge matched, when it has one.
             let condition = view
                 .matched_condition()
@@ -425,12 +449,11 @@ pub(crate) fn format_pretty(
             // Petri records the route after the next visit started, so the
             // line names both ends of the edge.
             Some(format!(
-                "{ts}    {} {} {} {}{}{}",
+                "{ts}    {} {} {}{}{}",
                 styles.dim.apply_to(view.node_name().unwrap_or("?")),
-                styles.dim.apply_to("\u{2192}"),
+                styles.dim.apply_to(arrow),
                 target,
-                styles.dim.apply_to(&transition),
-                styles.dim.apply_to(detail),
+                styles.dim.apply_to(&route_detail),
                 styles.dim.apply_to(&condition),
             ))
         }

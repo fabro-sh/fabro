@@ -72,16 +72,11 @@ impl InfoDisplay {
             return;
         }
 
-        let detail = if let Some(condition) = condition {
-            format!("  [{condition}]")
-        } else if let Some(label) = label {
-            format!("  \"{label}\"")
-        } else {
-            String::new()
-        };
+        let detail = condition.map_or_else(String::new, |condition| format!("  [{condition}]"));
+        let label = label.map_or_else(String::new, |label| format!("  [{}]", label.escape_debug()));
         Self::insert_info_line(
             renderer,
-            &format!("\u{2192} {from_node} \u{2192} {to_node}{detail}"),
+            &format!("\u{2192} {from_node} → {to_node}{label}{detail}"),
         );
     }
 
@@ -90,14 +85,16 @@ impl InfoDisplay {
         renderer: &ProgressRenderer,
         from_node: &str,
         to_node: &str,
+        label: Option<&str>,
     ) {
         if !self.verbose {
             return;
         }
 
+        let label = label.map_or_else(String::new, |label| format!("  [{}]", label.escape_debug()));
         Self::insert_info_line(
             renderer,
-            &format!("\u{21ba} {from_node} \u{2192} {to_node}  (loop restart)"),
+            &format!("\u{21ba} {from_node} → {to_node}{label}  (loop restart)"),
         );
     }
 

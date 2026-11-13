@@ -32,6 +32,7 @@ cached_style!(style_tool_done, "      {wide_msg} {prefix:.dim}");
 cached_style!(style_subagent_info, "        {wide_msg}");
 cached_style!(style_branch_done, "        {wide_msg} {prefix:.dim}");
 cached_style!(style_static_dim, "    {wide_msg:.dim}");
+cached_style!(style_route, "        {wide_msg:.dim}");
 cached_style!(style_empty, " ");
 
 pub(super) fn green_check(styles: &Styles) -> String {

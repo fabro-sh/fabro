@@ -33,6 +33,7 @@ pub(super) struct ToolCallEntry {
 
 #[derive(Debug)]
 pub(super) struct ActiveStage {
+    route_key:                 Option<String>,
     pub(super) display_name:   String,
     pub(super) has_model:      bool,
     pub(super) spinner:        ProgressBar,
@@ -52,6 +53,9 @@ impl ActiveStage {
 }
 
 pub(super) struct StageDisplay {
+    /// Keep the completed visit's last visible line until its route arrives.
+    /// Keys include the execution and firing, so revisits cannot steal a route.
+    route_anchors:              HashMap<String, (ProgressBar, usize)>,
     verbose:                    bool,
     pub(super) active_stages:   HashMap<String, ActiveStage>,
     pub(super) stage_counts:    HashMap<String, (u64, u64)>,
@@ -63,6 +67,7 @@ pub(super) struct StageDisplay {
 impl StageDisplay {
     pub(super) fn new(verbose: bool) -> Self {
         Self {
+            route_anchors: HashMap::new(),
             verbose,
             active_stages: HashMap::new(),
             stage_counts: HashMap::new(),
@@ -73,6 +78,7 @@ impl StageDisplay {
     }
 
     pub(super) fn finish(&mut self) {
+        self.route_anchors.clear();
         for (_node_id, stage) in self.active_stages.drain() {
             if let Some(bar) = stage.compaction_bar {
                 bar.finish_and_clear();
@@ -97,6 +103,7 @@ impl StageDisplay {
         node_id: &str,
         name: &str,
         script: Option<&str>,
+        route_key: Option<String>,
     ) {
         self.stage_counts.insert(node_id.to_string(), (0, 0));
         let display_name = match script {
@@ -121,6 +128,7 @@ impl StageDisplay {
             bar.enable_steady_tick(Duration::from_millis(100));
         }
         self.active_stages.insert(node_id.to_string(), ActiveStage {
+            route_key,
             display_name,
             has_model: false,
             spinner: bar,
@@ -675,6 +683,12 @@ impl StageDisplay {
             return;
         };
 
+        let anchor = if self.verbose && stage.route_key.is_some() {
+            Some(stage.last_bar().clone())
+        } else {
+            None
+        };
+
         if let Some(bar) = stage.compaction_bar {
             bar.finish_and_clear();
         }
@@ -698,6 +712,37 @@ impl StageDisplay {
         } else {
             Self::print_plain_stage_completion(renderer, name, glyph, prefix);
         }
+        if let (Some(key), Some(anchor)) = (stage.route_key, anchor) {
+            self.route_anchors
+                .insert(key, (anchor, renderer.printed_lines()));
+        }
+    }
+
+    /// A TTY can insert beneath an earlier visit even after other stages start.
+    /// A plain transcript can only abbreviate when that visit is still the
+    /// preceding line; otherwise the caller prints a self-contained route.
+    pub(super) fn on_route(
+        &mut self,
+        renderer: &ProgressRenderer,
+        key: Option<&str>,
+        message: Option<&str>,
+    ) -> bool {
+        let Some((anchor, position)) = key.and_then(|key| self.route_anchors.remove(key)) else {
+            return false;
+        };
+        let Some(message) = message else {
+            return false;
+        };
+        if renderer.is_tty() {
+            let bar = renderer.insert_after(&anchor);
+            bar.set_style(styles::style_route());
+            bar.finish_with_message(message.to_string());
+        } else if renderer.printed_lines() == position {
+            renderer.print_line(8, message);
+        } else {
+            return false;
+        }
+        true
     }
 
     fn print_plain_stage_completion(
