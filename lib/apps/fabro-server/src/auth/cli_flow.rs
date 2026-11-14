@@ -870,9 +870,7 @@ fn login_allowed(state: &AppState, login: &str) -> bool {
         .server
         .auth
         .github
-        .allowed_usernames
-        .iter()
-        .any(|user| user == login)
+        .allows_login(login)
 }
 
 fn request_user_agent(headers: &HeaderMap) -> &str {
