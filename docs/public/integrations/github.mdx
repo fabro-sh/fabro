@@ -203,7 +203,7 @@ The web app uses the GitHub App's OAuth credentials to authenticate users:
 3. User authorizes the app on GitHub
 4. GitHub redirects back with an authorization code
 5. Fabro exchanges the code for an access token and fetches the user's profile and verified email
-6. Fabro checks the username against the `allowed_usernames` list in `settings.toml`
+6. Fabro checks the username against the `allowed_usernames` list in `settings.toml`, ignoring case as GitHub does
 
 Configure allowed users in `settings.toml`:
 

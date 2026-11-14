@@ -740,8 +740,7 @@ async fn callback_github(
         _ => Vec::new(),
     };
 
-    let allowed_usernames = settings.server.auth.github.allowed_usernames.clone();
-    if !allowed_usernames.iter().any(|user| user == &profile.login) {
+    if !settings.server.auth.github.allows_login(&profile.login) {
         warn!(login = %profile.login, "OAuth callback denied: username not in allowlist");
         return callback_error_redirect(
             stored_state.return_to.as_deref(),
@@ -1064,6 +1063,13 @@ methods = ["dev-token"]
     }
 
     fn github_settings(web_url: &str) -> fabro_types::ServerSettings {
+        github_settings_allowing(web_url, "octocat")
+    }
+
+    fn github_settings_allowing(
+        web_url: &str,
+        allowed_username: &str,
+    ) -> fabro_types::ServerSettings {
         ServerSettingsBuilder::from_toml(&format!(
             r#"
 _version = 1
@@ -1076,7 +1082,7 @@ url = "{web_url}"
 methods = ["github"]
 
 [server.auth.github]
-allowed_usernames = ["octocat"]
+allowed_usernames = ["{allowed_username}"]
 
 [server.integrations.github]
 client_id = "github-client-id"
@@ -1611,8 +1617,9 @@ client_id = "github-client-id"
         );
     }
 
-    #[tokio::test]
-    async fn callback_github_reads_client_secret_from_vault() {
+    /// Completes a GitHub OAuth callback against a fake GitHub that signs in
+    /// `login`, with `allowed_username` as the server's only allowed login.
+    async fn github_callback(login: &str, allowed_username: &str) -> axum::response::Response {
         let github = httpmock::MockServer::start_async().await;
         let token = github
             .mock_async(|when, then| {
@@ -1633,7 +1640,7 @@ client_id = "github-client-id"
                     .header("content-type", "application/json")
                     .json_body(json!({
                         "id": 12345,
-                        "login": "octocat",
+                        "login": login,
                         "name": "The Octocat",
                         "avatar_url": "https://github.example/avatar.png"
                     }));
@@ -1648,7 +1655,7 @@ client_id = "github-client-id"
             })
             .await;
         let state = crate::test_support::test_app_state_with_runtime_settings_and_session_key(
-            github_settings("https://fabro.example"),
+            github_settings_allowing("https://fabro.example", allowed_username),
             RunLayer::default(),
             Some("web-auth-test-key-material-0123456789"),
         );
@@ -1702,10 +1709,37 @@ client_id = "github-client-id"
             .await
             .unwrap();
 
-        assert_status!(response, StatusCode::SEE_OTHER).await;
         token.assert_async().await;
         user.assert_async().await;
         emails.assert_async().await;
+        response
+    }
+
+    fn location(response: &axum::response::Response) -> Option<&str> {
+        response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+    }
+
+    #[tokio::test]
+    async fn callback_github_reads_client_secret_from_vault() {
+        let response = github_callback("octocat", "octocat").await;
+        assert_status!(response, StatusCode::SEE_OTHER).await;
+    }
+
+    #[tokio::test]
+    async fn callback_github_matches_the_allowlist_ignoring_case() {
+        let response = github_callback("OctoCat", "octocat").await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_ne!(location(&response), Some("/login?error=unauthorized"));
+    }
+
+    #[tokio::test]
+    async fn callback_github_refuses_a_login_not_in_the_allowlist() {
+        let response = github_callback("hubot", "octocat").await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(location(&response), Some("/login?error=unauthorized"));
     }
 
     #[test]
