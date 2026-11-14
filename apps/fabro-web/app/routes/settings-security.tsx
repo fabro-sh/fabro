@@ -10,10 +10,6 @@ import {
   UsernameList,
 } from "../components/settings-panel";
 
-export function meta() {
-  return [{ title: "Security — Fabro" }];
-}
-
 const DESCRIPTION = (
   <>
     Authentication methods and permitted GitHub usernames. Edit via{" "}
@@ -21,6 +17,8 @@ const DESCRIPTION = (
     effect on the next server restart.
   </>
 );
+
+export const handle = { title: "Security" };
 
 export default function SettingsSecurity() {
   const settingsQuery = useServerSettings();

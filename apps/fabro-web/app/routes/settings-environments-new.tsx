@@ -20,9 +20,7 @@ import {
 } from "../components/ui";
 import { useToast } from "../components/toast";
 
-export function meta() {
-  return [{ title: "New environment — Fabro" }];
-}
+export const handle = { title: "New environment" };
 
 export default function SettingsEnvironmentsNew() {
   return (

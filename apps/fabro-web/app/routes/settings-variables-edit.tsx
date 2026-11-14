@@ -15,9 +15,7 @@ import {
 import { useToast } from "../components/toast";
 import { useVariable } from "../lib/queries";
 
-export function meta() {
-  return [{ title: "Edit variable — Fabro" }];
-}
+export const handle = { title: "Edit variable" };
 
 export default function SettingsVariablesEdit() {
   const { name } = useParams<{ name: string }>();

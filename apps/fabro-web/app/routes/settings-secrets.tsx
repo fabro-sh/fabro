@@ -17,12 +17,10 @@ import { COMPACT_SECONDARY_BUTTON_CLASS, ConfirmDialog } from "../components/ui"
 import { useToast } from "../components/toast";
 import { formatAbsoluteTs, formatRelativeTime } from "../lib/format";
 
-export function meta() {
-  return [{ title: "Secrets — Fabro" }];
-}
-
 const DESCRIPTION =
   "Secrets are values stored on this Fabro server and made available to workflow runs. Values are write-only — they can be replaced or deleted, but never read back through the UI.";
+
+export const handle = { title: "Secrets" };
 
 export default function SettingsSecrets() {
   const query = useSecrets();

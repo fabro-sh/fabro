@@ -33,9 +33,7 @@ const NEW_BUTTON_CLASS =
 const DESCRIPTION =
   "MCP servers are server-managed tool providers stored on this Fabro server. Workflows can enable a stored server by name without embedding connection details in each run.";
 
-export function meta() {
-  return [{ title: "MCP servers — Fabro" }];
-}
+export const handle = { title: "MCP servers" };
 
 export default function SettingsMcps() {
   const query = useMcpServers();

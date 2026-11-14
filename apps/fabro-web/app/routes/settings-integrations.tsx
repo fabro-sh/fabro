@@ -13,16 +13,14 @@ import {
   Toggle,
 } from "../components/settings-panel";
 
-export function meta() {
-  return [{ title: "Integrations — Fabro" }];
-}
-
 const DESCRIPTION = (
   <>
     External services connected to this server, computed from runtime
     configuration, vault credentials, and live connection state.
   </>
 );
+
+export const handle = { title: "Integrations" };
 
 export default function SettingsIntegrations() {
   const integrationsQuery = useSystemIntegrations();

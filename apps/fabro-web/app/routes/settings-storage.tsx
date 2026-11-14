@@ -13,10 +13,6 @@ import {
   SettingsPageIntro,
 } from "../components/settings-panel";
 
-export function meta() {
-  return [{ title: "Storage — Fabro" }];
-}
-
 const DESCRIPTION = (
   <>
     Filesystem and object store locations for run state, the embedded database,
@@ -25,6 +21,8 @@ const DESCRIPTION = (
     effect on the next server restart.
   </>
 );
+
+export const handle = { title: "Storage" };
 
 export default function SettingsStorage() {
   const settingsQuery = useServerSettings();

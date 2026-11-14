@@ -23,9 +23,7 @@ import { upsertMcpServerInList } from "../lib/mcp-server-cache";
 import { queryKeys } from "../lib/query-keys";
 import { useMcpServer } from "../lib/queries";
 
-export function meta() {
-  return [{ title: "Edit MCP server — Fabro" }];
-}
+export const handle = { title: "Edit MCP server" };
 
 export default function SettingsMcpsEdit() {
   const { id } = useParams<{ id: string }>();

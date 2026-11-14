@@ -68,7 +68,7 @@ import {
   runHasSandbox,
 } from "./run-detail/tabs-shell";
 
-export const handle = { hideHeader: true };
+export const handle = { title: "Run", hideHeader: true };
 
 const RUN_TIMING_REFRESH_INTERVAL_MS = 30_000;
 
@@ -89,11 +89,6 @@ export function resolveDockClearance(
     return `${measurement.height}px`;
   }
   return hasPendingQuestions ? "18rem" : "5rem";
-}
-
-export function meta({ data }: any) {
-  const run = data?.run;
-  return [{ title: run ? `${run.title} — Fabro` : "Run — Fabro" }];
 }
 
 export default function RunDetail({ params }: { params: { id: string } }) {

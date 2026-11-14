@@ -2,9 +2,7 @@ import { Fragment } from "react";
 import { Link } from "react-router";
 import { navSections } from "./settings";
 
-export function meta() {
-  return [{ title: "Settings — Fabro" }];
-}
+export const handle = { title: "Settings" };
 
 export default function SettingsIndex() {
   return (
