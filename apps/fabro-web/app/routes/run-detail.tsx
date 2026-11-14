@@ -19,6 +19,8 @@ import { useToast } from "../components/toast";
 import {
   ConfirmDialog,
 } from "../components/ui";
+import { usePageTitle } from "../lib/page-title";
+import { currentStage, runTabTitle } from "../lib/run-tab";
 import { mutateRunListCaches } from "../lib/board-cache";
 import { useDemoMode } from "../lib/demo-mode";
 import { useTickingNow } from "../lib/time";
@@ -97,6 +99,13 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const runStateQuery = useRunState(params.id);
   const summary = runQuery.data;
   const run = summary ? buildRunDetailRun(summary) : null;
+  usePageTitle(
+    runTabTitle({
+      project: summary?.repository && run ? run.repo : null,
+      title: run?.title ?? null,
+      stage: currentStage(runStateQuery.data?.stages ?? {}),
+    }),
+  );
   const statusKind = runQuery.data?.lifecycle.status.kind;
   const isBlocked = statusKind === "blocked";
   const questionsQuery = useRunQuestions(params.id, isBlocked);

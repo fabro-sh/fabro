@@ -5,7 +5,7 @@ import {
   type RunProjection,
 } from "@qltysh/fabro-api-client";
 
-import { formatStageLabel } from "../../lib/stage-sidebar";
+import { formatStageKey } from "../../lib/stage-sidebar";
 
 /** Lines of a failed command's output shown on the page. */
 const OUTPUT_LINES = 12;
@@ -67,7 +67,7 @@ export function buildRunFailureView(
       ? requestAdvice(request, message, name(request.provider))
       : stepAdvice(message, failure.reason, category, output));
   return {
-    stage: stageLabel(stage),
+    stage: formatStageKey(stage),
     ...advice,
     message,
     provider: request?.provider ?? null,
@@ -79,7 +79,7 @@ export function buildRunFailureView(
 function deadRunView(state: FailureState, lifecycleError: string | null): RunFailureView {
   const message = lifecycleError?.trim() || "The run ended without recording a reason.";
   return {
-    stage: stageLabel(stoppedAt(state.stages)),
+    stage: formatStageKey(stoppedAt(state.stages)),
     headline: lifecycleError?.trim() ? firstSentence(message) : "The run's worker stopped before the run finished",
     nextStep: `Open the failed step's logs for details. To run it again, ${RETRY}.`,
     message,
@@ -243,14 +243,6 @@ function stoppedAt(stages: FailureState["stages"]): string | null {
     if (!wentOn && (!stop || step.at > stop.at)) stop = step;
   }
   return stop?.key ?? null;
-}
-
-/** A stage key (`node@visit`) as the Stages sidebar labels it. */
-function stageLabel(key: string | null): string | null {
-  if (!key) return null;
-  const at = key.lastIndexOf("@");
-  if (at <= 0) return key;
-  return formatStageLabel({ name: key.slice(0, at), visit: Number.parseInt(key.slice(at + 1), 10) || 1 });
 }
 
 function outputTail(tail: ExecOutputTail | null | undefined): string | null {
