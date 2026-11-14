@@ -31,18 +31,20 @@ export function useRunFavicon(status: string | undefined): void {
     const ring = theme.getPropertyValue("--color-page").trim();
     if (!fill || !ring) return undefined;
 
-    const links = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="icon"]'));
-    const previous = links.map((link) => ({ link, href: link.getAttribute("href"), type: link.type }));
+    // Only the SVG icon: a browser that can't draw SVG favicons keeps the
+    // plain .ico rather than losing its icon.
+    const links = Array.from(
+      document.querySelectorAll<HTMLLinkElement>('link[rel="icon"][type="image/svg+xml"]'),
+    );
+    if (links.length === 0) return undefined;
+    const previous = links.map((link) => ({ link, href: link.getAttribute("href") }));
     let cancelled = false;
 
     loadLogo()
       .then((svg) => {
         if (cancelled) return;
         const href = `data:image/svg+xml,${encodeURIComponent(faviconWithDot(svg, { fill, ring }))}`;
-        for (const link of links) {
-          link.type = "image/svg+xml";
-          link.href = href;
-        }
+        for (const link of links) link.href = href;
       })
       .catch(() => {
         // The plain icon stays; the title still names the run.
@@ -50,10 +52,9 @@ export function useRunFavicon(status: string | undefined): void {
 
     return () => {
       cancelled = true;
-      for (const { link, href, type } of previous) {
+      for (const { link, href } of previous) {
         if (href === null) link.removeAttribute("href");
         else link.setAttribute("href", href);
-        link.type = type;
       }
     };
   }, [status]);
