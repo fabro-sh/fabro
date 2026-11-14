@@ -78,6 +78,8 @@ export function setupContentForSearch(search: string) {
   };
 }
 
+export const handle = { title: "Setup" };
+
 export default function Setup() {
   const { search } = useLocation();
   const content = setupContentForSearch(search);

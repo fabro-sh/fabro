@@ -15,10 +15,6 @@ import {
 } from "../components/ui";
 import { useToast } from "../components/toast";
 
-export function meta() {
-  return [{ title: "New secret — Fabro" }];
-}
-
 // The create form only offers Token and File. OAuth secrets are written by
 // provider sign-in flows, never typed by hand.
 function isFormType(
@@ -26,6 +22,8 @@ function isFormType(
 ): value is typeof SecretType.TOKEN | typeof SecretType.FILE {
   return value === SecretType.TOKEN || value === SecretType.FILE;
 }
+
+export const handle = { title: "New secret" };
 
 export default function SettingsSecretsNew() {
   return (

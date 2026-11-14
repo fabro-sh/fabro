@@ -14,11 +14,7 @@ import {
 import { Fragment } from "react";
 import { Link, Outlet, useLocation, useMatches } from "react-router";
 
-export function meta({}: any) {
-  return [{ title: "Settings — Fabro" }];
-}
-
-export const handle = { hideHeader: true };
+export const handle = { title: "Settings", hideHeader: true };
 
 export type NavItem = {
   name: string;

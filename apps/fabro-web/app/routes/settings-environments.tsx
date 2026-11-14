@@ -31,12 +31,10 @@ const MENU_ITEM_CLASS =
 const MENU_ITEM_DANGER_CLASS =
   "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-coral transition-colors data-focus:bg-coral/10 data-focus:text-coral data-focus:outline-hidden disabled:cursor-not-allowed disabled:opacity-60";
 
-export function meta() {
-  return [{ title: "Environments — Fabro" }];
-}
-
 const DESCRIPTION =
   "Environments are server-managed runtime definitions — provider, image, resources, network, and lifecycle — that workflow runs select by id. They are operator policy stored on this Fabro server.";
+
+export const handle = { title: "Environments" };
 
 export default function SettingsEnvironments() {
   const query = useEnvironments();

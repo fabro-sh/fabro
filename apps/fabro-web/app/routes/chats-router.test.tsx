@@ -26,6 +26,7 @@ describe("chats route module exports", () => {
 
   test("chats-layout declares the AppShell handle (children inherit via useMatches)", () => {
     expect(ChatsLayoutModule.handle).toEqual({
+      title: "Chats",
       hideHeader: true,
       fullHeight: true,
       wide: true,

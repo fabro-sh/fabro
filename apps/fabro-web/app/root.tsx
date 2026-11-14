@@ -1,7 +1,13 @@
 import { isRouteErrorResponse, Outlet, useRouteError } from "react-router";
 
+import { PageTitleProvider } from "./lib/page-title";
+
 export default function Root() {
-  return <Outlet />;
+  return (
+    <PageTitleProvider>
+      <Outlet />
+    </PageTitleProvider>
+  );
 }
 
 export function ErrorBoundary() {

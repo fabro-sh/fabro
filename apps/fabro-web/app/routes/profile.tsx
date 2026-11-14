@@ -1,11 +1,7 @@
 import { ComputerDesktopIcon, UserCircleIcon } from "@heroicons/react/24/outline";
 import { Link, Outlet, useLocation } from "react-router";
 
-export function meta({}: any) {
-  return [{ title: "Profile — Fabro" }];
-}
-
-export const handle = { hideHeader: true };
+export const handle = { title: "Profile", hideHeader: true };
 
 type NavItem = {
   name: string;

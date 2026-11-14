@@ -5,9 +5,7 @@ import { ArrowUpIcon } from "@heroicons/react/24/solid";
 import { useChatsActions } from "../lib/chats-store";
 import ComposerChips from "../components/chats/composer-chips";
 
-export function meta() {
-  return [{ title: "New chat — Fabro" }];
-}
+export const handle = { title: "New chat" };
 
 export default function ChatsNew() {
   const navigate = useNavigate();
