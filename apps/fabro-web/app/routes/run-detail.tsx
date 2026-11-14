@@ -19,6 +19,7 @@ import { useToast } from "../components/toast";
 import {
   ConfirmDialog,
 } from "../components/ui";
+import { useRunFavicon } from "../hooks/use-run-favicon";
 import { usePageTitle } from "../lib/page-title";
 import { currentStage, runTabTitle } from "../lib/run-tab";
 import { mutateRunListCaches } from "../lib/board-cache";
@@ -107,6 +108,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
     }),
   );
   const statusKind = runQuery.data?.lifecycle.status.kind;
+  useRunFavicon(statusKind);
   const isBlocked = statusKind === "blocked";
   const questionsQuery = useRunQuestions(params.id, isBlocked);
   const pendingQuestions = questionsQuery.data ?? [];
