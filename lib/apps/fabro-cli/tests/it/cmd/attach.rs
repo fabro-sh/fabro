@@ -1670,6 +1670,11 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "provider": "host",
               "instance": "host-g[ID]",
               "working_directory": "[RUN_DIR]/petri/scopes/invocation-0-scope-0/work",
+              "reference": {
+                "provider": "host",
+                "namespace": "host:[MACHINE]",
+                "id": "host-g[ID]"
+              },
               "duration_ms": "[DURATION_MS]"
             }
           }

@@ -1,4 +1,6 @@
-use sandbox_driver::SandboxStatus;
+// TODO(parity): sandbox-driver's legacy status, which carries the fields
+// the sandbox page shows that the new `Status` lacks (parity plan A10).
+use sandbox_driver::legacy::SandboxStatus;
 use serde::{Deserialize, Serialize};
 
 use crate::RunSandboxInstance;
@@ -16,7 +18,7 @@ mod tests {
     use std::time::SystemTime;
 
     use chrono::DateTime;
-    use sandbox_driver::{SandboxId, SandboxState};
+    use sandbox_driver::legacy::{SandboxId, SandboxState};
     use serde_json::json;
 
     use super::*;

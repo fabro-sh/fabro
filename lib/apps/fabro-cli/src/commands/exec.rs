@@ -22,6 +22,7 @@ use fabro_llm::gateway::{GatewayAdapter, GatewayError, GatewayTransport};
 use fabro_llm::lithos_catalog::{Catalog, CatalogProvider};
 use fabro_llm::middleware::{Call, Middleware, Next, Output};
 use fabro_llm::{Client, ClientOptions, Error as LlmError, ErrorKind};
+use fabro_petri::providers::{self, SandboxProviderConfig};
 use fabro_redact::SecretRedactor;
 use fabro_static::EnvVars;
 use fabro_types::settings::cli::OutputFormat as SettingsOutputFormat;
@@ -39,8 +40,7 @@ use pebble_coding_agent::sandbox_driver::SandboxEnvironment;
 use pebble_coding_agent::subagents::SubagentOptions;
 use pebble_coding_agent::tools::{PermissionLevelPolicy, PermissionMiddleware};
 use pebble_coding_agent::{CodingAgent, CodingAgentOptions, MemoryDiscovery, SkillDiscovery};
-use sandbox_driver::{SandboxProvider as _, SandboxSource, SandboxSpec, WaitOptions};
-use sandbox_driver_host::HostProvider;
+use sandbox_driver::{SandboxSpec, Sandboxes, Source, WorkspaceOwnership};
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
 
@@ -433,7 +433,7 @@ async fn run_session(
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     // The provider stays alive beside the sandbox: the session's processes
     // are its process groups.
-    let (_provider, sandbox) = host_sandbox(cwd)
+    let (sandboxes, sandbox) = host_sandbox(cwd)
         .await
         .context("failed to create the local sandbox")?;
 
@@ -471,7 +471,13 @@ async fn run_session(
         .web_fetch_summarizer(summarizer_model(&catalog, &provider_id, &model))
         .mcp_servers(pebble_servers(&mcp_servers))
         .subagents(SubagentOptions::enabled());
-    if let Some(routes) = sandbox.port_routes() {
+    let ports = sandboxes
+        .provider("host")?
+        .describe()
+        .await
+        .context("failed to describe the local sandbox provider")?
+        .ports;
+    if let Some(routes) = sandbox.port_routes(&ports) {
         builder = builder.port_routes(routes);
     }
     if let Some(search) = web_search::search_provider(&cli_search_secrets()) {
@@ -519,30 +525,31 @@ async fn run_session(
 }
 
 /// The host directory `working_directory` as the sandbox the session runs
-/// in, over the sandbox driver's Host provider: designated in place, never
-/// removed, brought to `Running` with its Bash verified. The provider is
-/// returned beside the sandbox because the session's processes are the
-/// provider's process groups; it must outlive the session.
+/// in, over the sandbox driver's built-in Host provider: designated in
+/// place, never removed. The catalog is returned beside the sandbox because
+/// the session's processes are its Host provider's process groups; it must
+/// outlive the session.
 async fn host_sandbox(
     working_directory: PathBuf,
-) -> AnyResult<(HostProvider, Arc<SandboxEnvironment>)> {
-    let provider = HostProvider::new();
-    let handle = provider
-        .create(
-            &SandboxSpec::new(SandboxSource::HostDirectory)
-                .working_directory(working_directory.display().to_string()),
-            None,
-        )
+) -> AnyResult<(Sandboxes, Arc<SandboxEnvironment>)> {
+    let sandboxes = providers::open_catalog(&SandboxProviderConfig::default())
+        .context("failed to open the local sandbox provider")?;
+    let mut spec = SandboxSpec::new(Source::HostDirectory);
+    spec.working_directory = Some(working_directory.display().to_string());
+    spec.workspace_ownership = Some(WorkspaceOwnership::Designated);
+    let handle = sandboxes
+        .builder("host")
+        .await
+        .context("failed to open the local sandbox provider")?
+        .spec(spec)
+        .create()
         .await
         .with_context(|| format!("failed to designate {}", working_directory.display()))?;
-    sandbox_driver::activate(handle.as_ref(), &WaitOptions::default())
-        .await
-        .context("failed to start the local sandbox")?;
-    let working_directory = handle.working_directory().to_string();
-    let sandbox = SandboxEnvironment::attach(handle, working_directory)
+    let working_directory = handle.working_directory().display().to_string();
+    let sandbox = SandboxEnvironment::attach(Arc::from(handle), working_directory)
         .await
         .context("failed to read the local sandbox's platform")?;
-    Ok((provider, Arc::new(sandbox)))
+    Ok((sandboxes, Arc::new(sandbox)))
 }
 
 #[cfg(test)]

@@ -24,6 +24,23 @@
 //! same variables Fabro forwards to its worker (`DOCKER_HOST` and
 //! its TLS companions), so the server and the run's containers meet on one
 //! daemon.
+//!
+//! Ask Fabro reaches a run's sandbox through sandbox-driver's new API
+//! ([`open_run_sandbox`]), the handle Pebble's adapter takes.
+//!
+//! TODO(parity): everything else here is sandbox-driver's legacy API, kept
+//! so no tab loses a feature while Petri's runs move to the new one. Each
+//! piece moves when the new API carries it (parity plan,
+//! https://ampcode.com/artifacts/plans/parity-plan-fabro-and-petri-on-the-new-sandbox-driver-api-87b2e18c-6e40-4c01-af60-ce1905c3bd11):
+//! - Host: Petri's built-in Host keeps no registry in the run directory, so a
+//!   run's host sandbox is now always designated again by path, without the
+//!   `petri.run` check a registry record gave (H1, decision 3).
+//! - The terminal's pty (H2, D2, Y6); SSH, the copy command and VNC (Y5, W);
+//!   listening ports (B1); preview URLs (`Ports::expose`); `activate` (status
+//!   plus start); health with Daytona's permission lists (A11); inventory by
+//!   label key (A8); the legacy status (A10).
+//! - Third-party plugins: the protocol 2 `PluginSupervisor`, until protocol 3
+//!   carries endpoints and one-shot containers (W).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -32,8 +49,8 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use fabro_config::Storage;
-use fabro_petri::providers;
 pub(crate) use fabro_petri::providers::DaytonaCredentials;
+use fabro_petri::providers::{self, SandboxProviderConfig};
 use fabro_types::settings::run::RunEnvironmentSettings;
 use fabro_types::settings::server::{
     SandboxPluginSettings, ServerSandboxProviderSettings, ServerSandboxProvidersSettings,
@@ -43,7 +60,8 @@ use fabro_types::{
     SandboxProviderKind, SandboxProviderLookupError,
 };
 use futures_util::future::join_all;
-use sandbox_driver::{
+use sandbox_driver::legacy;
+use sandbox_driver::legacy::{
     Error as DriverError, HealthStatus, OwnedProvider, Ownership, ProviderHealth, ProviderKind,
     Sandbox, SandboxFilter, SandboxId, SandboxProvider, SandboxSource, SandboxSpec, SandboxState,
     WaitOptions,
@@ -126,13 +144,13 @@ pub(crate) enum ConnectError {
     InvalidKind {
         kind:   SandboxProviderKind,
         #[source]
-        source: sandbox_driver::InvalidIdError,
+        source: legacy::InvalidIdError,
     },
     #[error("failed to connect sandbox provider `{kind}`")]
     Driver {
         kind:   SandboxProviderKind,
         #[source]
-        source: sandbox_driver::Error,
+        source: legacy::Error,
     },
 }
 
@@ -387,14 +405,93 @@ async fn attach_host_run_sandbox(
         })
 }
 
+/// Opens a run's sandbox through sandbox-driver's new API, brought to
+/// `Running`, for Pebble's adapter (Ask Fabro): the handle Pebble's
+/// `SandboxEnvironment` takes.
+///
+/// Docker and Daytona sandboxes are attached by the record's id on Fabro's
+/// catalog entry for the kind, and refused unless they carry the run's
+/// `petri.run` label. A host sandbox is the record's working directory,
+/// designated again: the built-in Host provider serves its owning process
+/// only, so the server cannot attach the worker's sandbox.
+///
+/// TODO(parity): designating the directory skips the `petri.run` check a
+/// shared registry gave (parity plan H1, decision 3), and third-party
+/// plugin kinds are not reachable here until protocol 3 carries them (W).
+pub(crate) async fn open_run_sandbox(
+    config: &SandboxProviderConfig,
+    record: &RunSandboxInstance,
+    run_id: RunId,
+) -> anyhow::Result<Arc<dyn sandbox_driver::Sandbox>> {
+    let kind = &record.provider;
+    let sandboxes =
+        providers::open_catalog(config).context("Failed to open the sandbox catalog")?;
+    let working_directory = &record.runtime.working_directory;
+    let entry = match kind.bundled() {
+        Some(BundledProvider::Local) => {
+            let mut spec = sandbox_driver::SandboxSpec::new(sandbox_driver::Source::HostDirectory);
+            spec.working_directory = Some(working_directory.clone());
+            spec.workspace_ownership = Some(sandbox_driver::WorkspaceOwnership::Designated);
+            let handle = sandboxes
+                .builder("host")
+                .await?
+                .spec(spec)
+                .create()
+                .await
+                .with_context(|| {
+                    format!("Failed to reconnect {kind} sandbox at {working_directory}")
+                })?;
+            return Ok(Arc::from(handle));
+        }
+        Some(BundledProvider::Docker) => "docker",
+        Some(BundledProvider::Daytona) => "daytona",
+        None => anyhow::bail!(
+            "sandbox provider `{kind}` is not reachable through sandbox-driver's new API yet"
+        ),
+    };
+    let provider = sandboxes.provider(entry)?;
+    let namespace = provider
+        .describe()
+        .await
+        .with_context(|| format!("Failed to connect to the {kind} provider"))?
+        .namespace
+        .id;
+    let reference = sandbox_driver::SandboxRef {
+        provider: sandbox_driver::ProviderName::try_new(entry)?,
+        namespace,
+        id: SandboxId::try_new(&record.runtime.id)
+            .with_context(|| format!("Invalid {kind} sandbox id"))?,
+    };
+    let handle: Arc<dyn sandbox_driver::Sandbox> = Arc::from(
+        sandboxes
+            .attach(&reference)
+            .await
+            .with_context(|| format!("Failed to reconnect {kind} sandbox '{}'", reference.id))?,
+    );
+    let status = handle.status().await?;
+    if status.labels.get(PETRI_RUN_LABEL).map(String::as_str) != Some(run_id.to_string().as_str()) {
+        anyhow::bail!(
+            "{kind} sandbox '{}' does not belong to run {run_id}",
+            reference.id
+        );
+    }
+    if status.state != sandbox_driver::SandboxState::Running {
+        handle
+            .start()
+            .await
+            .with_context(|| format!("Failed to start {kind} sandbox"))?;
+    }
+    Ok(handle)
+}
+
 /// Brings a sandbox back into use, idempotently: a running sandbox is left
 /// alone; a stopped or paused one is started and its Bash verified.
-pub(crate) async fn activate(sandbox: &dyn Sandbox) -> sandbox_driver::Result<()> {
+pub(crate) async fn activate(sandbox: &dyn Sandbox) -> legacy::Result<()> {
     let status = sandbox.describe().await?;
     if status.state == SandboxState::Running {
         return Ok(());
     }
-    sandbox_driver::activate(sandbox, &WaitOptions::default()).await
+    legacy::activate(sandbox, &WaitOptions::default()).await
 }
 
 /// Attaches to a run's sandbox and brings it to `Running`, for every
@@ -809,8 +906,8 @@ pub(crate) mod test_support {
 
     use std::sync::Arc;
 
-    use sandbox_driver::{SandboxProvider, SandboxState};
-    use sandbox_driver_testing::{ScriptedProvider, ScriptedSandbox};
+    use sandbox_driver::legacy::{SandboxProvider, SandboxState};
+    use sandbox_driver_testing::legacy::{ScriptedProvider, ScriptedSandbox};
 
     use super::PETRI_RUN_LABEL;
 
@@ -843,8 +940,8 @@ pub(crate) mod test_support {
 mod tests {
     use fabro_types::RunSandboxRuntime;
     use fabro_types::settings::server::SandboxPluginSettings;
-    use sandbox_driver::SandboxProvider as _;
-    use sandbox_driver_testing::ScriptedSandbox;
+    use sandbox_driver::legacy::SandboxProvider as _;
+    use sandbox_driver_testing::legacy::ScriptedSandbox;
 
     use super::test_support::{petri_scripted_sandbox, scripted_provider};
     use super::*;
@@ -1105,7 +1202,7 @@ mod tests {
             .join("work");
         let mut spec = SandboxSpec::new(SandboxSource::HostDirectory)
             .working_directory(workspace.display().to_string());
-        spec.workspace_ownership = Some(sandbox_driver::WorkspaceOwnership::Managed);
+        spec.workspace_ownership = Some(legacy::WorkspaceOwnership::Managed);
         spec.labels
             .insert(PETRI_RUN_LABEL.to_owned(), run_id.to_string());
         let created = worker
@@ -1135,7 +1232,7 @@ mod tests {
         );
         assert_eq!(
             status.workspace_ownership,
-            Some(sandbox_driver::WorkspaceOwnership::Managed)
+            Some(legacy::WorkspaceOwnership::Managed)
         );
 
         // A directory the registry records for another run is refused, as
@@ -1151,7 +1248,7 @@ mod tests {
                 .display()
                 .to_string(),
         );
-        foreign_spec.workspace_ownership = Some(sandbox_driver::WorkspaceOwnership::Managed);
+        foreign_spec.workspace_ownership = Some(legacy::WorkspaceOwnership::Managed);
         foreign_spec
             .labels
             .insert(PETRI_RUN_LABEL.to_owned(), other_run.to_string());
@@ -1202,7 +1299,7 @@ mod tests {
         let status = designated.describe().await.expect("describe");
         assert_eq!(
             status.workspace_ownership,
-            Some(sandbox_driver::WorkspaceOwnership::Designated)
+            Some(legacy::WorkspaceOwnership::Designated)
         );
         assert!(status.labels.is_empty());
 

@@ -85,7 +85,7 @@ mod tests {
     use fabro_types::settings::server::{
         SandboxPluginSettings, ServerSandboxProviderSettings, ServerSandboxProvidersSettings,
     };
-    use sandbox_driver::SandboxProvider;
+    use sandbox_driver::legacy::SandboxProvider;
     use serde_json::{Value, json};
     use tower::ServiceExt;
 

@@ -1,12 +1,12 @@
 //! A run's sandboxes deleted through Petri's lease ledger.
 //!
-//! Petri records every sandbox a run creates as a lease: the provider, the
-//! provider's id for the resource, and the fingerprint of the backend it
-//! lives on. When Fabro deletes a run, its sandboxes go the way `petri
-//! sandbox prune` deletes them, over the store the run's records live in,
-//! rather than through a provider call of Fabro's own: Petri opens the run
+//! Petri records every sandbox a run creates as a lease: the provider
+//! entry, the provider's id for the resource, and the namespace of the
+//! backend it lives on. When Fabro deletes a run, its sandboxes go the way
+//! `petri sandbox prune` deletes them, over the store the run's records live
+//! in, rather than through a provider call of Fabro's own: Petri opens the run
 //! for writing, so a live worker that still holds the lease refuses the
-//! delete; it checks each lease's fingerprint against the provider it
+//! delete; it checks each lease's namespace against the provider it
 //! connects, so a changed daemon or account is a problem to report, never
 //! a delete on another backend; it writes the delete intent before the
 //! provider call and the tombstone after, beside the run's other records;
@@ -15,9 +15,9 @@
 //!
 //! The runtime a prune runs on is the run's as [`engine`]
 //! assembles it, reduced to what a prune reads: the store, the run key, the
-//! run directory (where Petri's host registry and action-host markers are)
-//! and the sandbox backend. No step registry, frontend or model client
-//! takes part.
+//! run directory (where Petri's action-host markers and host workspaces
+//! are), the sandbox backend, and Fabro's sandbox catalog. No step registry,
+//! frontend or model client takes part.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -37,8 +37,8 @@ pub struct PruneRequest {
     pub sandbox:  SandboxProviderConfig,
     /// The Fabro run id, which is Petri's run key.
     pub run_id:   String,
-    /// Where the run's worker ran Petri: its host registry and action-host
-    /// markers are under it, and so is a host workspace.
+    /// Where the run's worker ran Petri: its action-host markers are under
+    /// it, and so is a host workspace.
     pub run_dir:  PathBuf,
     /// The run's durable record.
     pub store:    Arc<dyn RunStore>,

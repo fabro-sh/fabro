@@ -2,7 +2,7 @@ use fabro_types::{
     RunSandbox, RunSandboxInstance, RunSandboxPlan, RunSandboxRuntime, SandboxDetails,
     SandboxProviderKind,
 };
-use sandbox_driver::{SandboxId, SandboxState, SandboxStatus};
+use sandbox_driver::legacy::{SandboxId, SandboxState, SandboxStatus};
 use serde_json::json;
 
 #[test]

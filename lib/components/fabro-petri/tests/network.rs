@@ -16,7 +16,7 @@ use fabro_petri::runtime::RuntimeSpec;
 use fabro_types::settings::run::{EnvironmentNetworkMode, EnvironmentNetworkSettings};
 use fabro_types::{RunId, SandboxProviderKind};
 use petri_store::MemoryRunStore;
-use sandbox_driver::{NetworkPolicy, SandboxFilter, SandboxState, SnapshotFilter};
+use sandbox_driver::legacy::{NetworkPolicy, SandboxFilter, SandboxState, SnapshotFilter};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::process::Command;

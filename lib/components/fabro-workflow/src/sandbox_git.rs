@@ -9,23 +9,28 @@
 //! Every operation takes the driver handle of the run's sandbox and the
 //! directory the run's repository is checked out in, as the run record
 //! carries it.
+//!
+//! TODO(parity): the git facet is sandbox-driver's legacy API. The new API
+//! has no git group, so these read helpers move onto exec when the library
+//! ports its derived git with the same hardening (parity plan B4).
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use fabro_redact::SecretRedactor;
-use pebble_coding_agent::sandbox_driver::display_for_log;
-use sandbox_driver::{
+use pebble_coding_agent::sandbox_driver::{CommandFailure, display_for_log};
+use sandbox_driver::legacy::{
     Git as _, GitChange, GitDiffEntry, GitDiffOptions, GitFacet, GitFailureKind, GitRevisionRange,
     Sandbox,
 };
+use sandbox_driver::{Termination, legacy};
 
 #[derive(Debug, thiserror::Error)]
 #[error("{message}")]
 pub struct GitCommandError {
     pub message: String,
     #[source]
-    pub source:  sandbox_driver::Error,
+    pub source:  legacy::Error,
 }
 
 /// Rename detection threshold for the diffs the Run Files endpoint and the
@@ -154,16 +159,74 @@ fn diff_facet(sandbox: &dyn Sandbox) -> std::result::Result<GitFacet<'_>, DiffEr
     })
 }
 
+/// [`display_for_log`] for a legacy driver error, with the failed command's
+/// redacted output tails. Pebble's renderer reads a command's output only
+/// from its own `CommandFailure`, so a legacy exec or git failure's output
+/// reaches it as one, the cause of the legacy error.
+///
+/// TODO(parity): goes with the legacy git facet (parity plan B4).
+pub fn display_legacy_for_log(error: &legacy::Error) -> String {
+    let output = match error {
+        legacy::Error::Exec(failure) => Some(failure),
+        legacy::Error::Git(failure) => failure.output(),
+        _ => None,
+    };
+    let Some(output) = output else {
+        return display_for_log(error, &SecretRedactor);
+    };
+    let failure = CommandFailure {
+        label:       output.label().to_owned(),
+        termination: match output.termination() {
+            legacy::Termination::Exited => Termination::Exited,
+            legacy::Termination::TimedOut => Termination::TimedOut,
+            legacy::Termination::Cancelled => Termination::Terminated,
+            legacy::Termination::Killed => Termination::Killed,
+            _ => Termination::Lost,
+        },
+        exit_code:   output.exit_code(),
+        stdout:      output.stdout().to_vec(),
+        stderr:      output.stderr().to_vec(),
+        duration:    output.duration().unwrap_or_default(),
+    };
+    display_for_log(
+        &WithOutput {
+            message: error.to_string(),
+            failure,
+        },
+        &SecretRedactor,
+    )
+}
+
+/// A legacy error whose cause is its command's output, for
+/// [`display_legacy_for_log`].
+#[derive(Debug)]
+struct WithOutput {
+    message: String,
+    failure: CommandFailure,
+}
+
+impl std::fmt::Display for WithOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for WithOutput {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.failure)
+    }
+}
+
 /// What a driver failure means for the Run Files endpoint: an unknown
 /// revision or missing object is permanent (the handler falls through to
 /// the stored patch), and so is output the driver could not read, since a
 /// retry reads the same object; a timeout, a transport failure, or anything
 /// else is transient and surfaces as a 503 for the client to retry.
-fn diff_error(error: &sandbox_driver::Error) -> DiffError {
-    let message = display_for_log(error, &SecretRedactor);
+fn diff_error(error: &legacy::Error) -> DiffError {
+    let message = display_legacy_for_log(error);
     match error {
-        sandbox_driver::Error::Io { .. } => DiffError::Permanent { message },
-        sandbox_driver::Error::Git(failure) => {
+        legacy::Error::Io { .. } => DiffError::Permanent { message },
+        legacy::Error::Git(failure) => {
             let stderr = failure
                 .output()
                 .map(|output| String::from_utf8_lossy(output.stderr()).into_owned())
@@ -390,7 +453,7 @@ mod tests {
 
     use std::sync::Arc;
 
-    use sandbox_driver::{SandboxProvider as _, SandboxSource, SandboxSpec};
+    use sandbox_driver::legacy::{SandboxProvider as _, SandboxSource, SandboxSpec};
     use sandbox_driver_host::HostProvider;
 
     use super::*;

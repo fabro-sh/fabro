@@ -33,7 +33,12 @@ use fabro_workflow::Error as WorkflowError;
 use fabro_workflow::workflow_bundle::{BundledWorkflow, ParsedWorkflowConfig, WorkflowBundle};
 use futures_util::stream::{self, StreamExt};
 use lithos_llm::catalog::ProviderId;
-use sandbox_driver::{
+// TODO(parity): `retry_git` and its failure types are legacy, with no
+// new-API home yet: they stay a library utility or move into Fabro before
+// the legacy module goes (parity plan B4). Provider health keeps Daytona's
+// permission lists, which the new `Health` lacks (A11).
+use sandbox_driver::legacy;
+use sandbox_driver::legacy::{
     GitBackoff, GitCredentials, GitFailure, GitFailureKind, GitRetryPolicy, HealthStatus,
     ProviderHealth,
 };
@@ -1251,10 +1256,10 @@ where
 // ── Fabro's retry budget for git operations against GitHub ─────────────────
 //
 // The driver owns the retry loop and the decision
-// (`sandbox_driver::retry_git`): a remote that cannot be reached is retried,
-// a rejected credential is retried only while the token is fresh enough to
-// still be replicating to GitHub's git endpoints, a static credential fails
-// fast, and a command whose outcome is unknown is never replayed. Fabro
+// (`sandbox_driver::legacy::retry_git`): a remote that cannot be reached is
+// retried, a rejected credential is retried only while the token is fresh
+// enough to still be replicating to GitHub's git endpoints, a static credential
+// fails fast, and a command whose outcome is unknown is never replayed. Fabro
 // keeps what is policy: how many attempts the host-side repository probe
 // gets, how it paces them, and when the credential it runs with was minted.
 //
@@ -1295,8 +1300,8 @@ fn credential_age(snapshot: Option<&TokenSnapshot>) -> Option<GitCredentials> {
 /// The driver's failure for a rendered git message, so git that ran
 /// outside a sandbox (the host-side repository probe) is classified the
 /// same way as git the driver ran.
-fn classified_git_failure(operation: &str, message: &str) -> sandbox_driver::Error {
-    sandbox_driver::Error::Git(GitFailure::classified(
+fn classified_git_failure(operation: &str, message: &str) -> legacy::Error {
+    legacy::Error::Git(GitFailure::classified(
         operation,
         GitFailureKind::from_message(message),
         None,
@@ -1321,7 +1326,7 @@ where
     // The operation's own message is kept beside the classified failure the
     // driver decides on, so the caller reads the message it knows.
     let last_message = Mutex::new(None);
-    let result = sandbox_driver::retry_git(
+    let result = legacy::retry_git(
         policy,
         credentials.as_ref(),
         operation,

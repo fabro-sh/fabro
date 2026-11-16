@@ -145,22 +145,15 @@ async fn a_finished_runs_host_workspace_is_deleted_once_and_a_held_run_is_refuse
         .read(&petri::LogId::Resources)
         .await
         .expect("the resources read");
-    let legacy_fingerprint = format!(
-        "host:{}",
-        run_dir
-            .join("host-registry")
-            .canonicalize()
-            .expect("canonical registry")
-            .display()
-    );
+    // The allocation names the built-in Host entry of Fabro's catalog.
     let allocating = resources
         .iter()
-        .find(|record| {
-            record.record["body"]["state"] == "allocating"
-                && record.record["body"]["fingerprint"].is_string()
-        })
+        .find(|record| record.record["body"]["state"] == "allocating")
         .expect("the allocation is recorded");
-    assert_eq!(allocating.record["body"]["fingerprint"], legacy_fingerprint);
+    assert_eq!(
+        allocating.record["body"]["provider"], "host",
+        "{allocating:?}"
+    );
     drop(logs);
 
     let request = || PruneRequest {
