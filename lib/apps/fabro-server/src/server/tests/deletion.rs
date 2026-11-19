@@ -1,6 +1,7 @@
 //! Cleanup failures leave completed workflow results intact. These tests run
-//! real Host scopes and temporarily obstruct the provider registry to exercise
-//! Petri's prune error path without Docker or process-wide environment changes.
+//! real Host scopes and temporarily make the run's Host workspace undeletable
+//! to exercise Petri's prune error path without Docker or process-wide
+//! environment changes.
 
 use fabro_petri::petri::RunKey;
 use fabro_types::RunProjection;
@@ -129,19 +130,33 @@ async fn completed_deletion_run(script: &str, cancel: bool) -> DeletionRun {
     }
 }
 
-fn obstruct_host_registry(run: &DeletionRun) -> (PathBuf, PathBuf) {
-    let petri_dir = Storage::new(run.state.server_storage_dir())
-        .run_scratch(&run.id)
-        .root()
-        .join("petri");
-    let registry = petri_dir.join("host-registry");
-    let saved = petri_dir.join("saved-host-registry");
+/// Obstructs the run's Host workspace: Petri's prune removes a Host lease's
+/// designated workspace itself, so a file where it expects the directory is
+/// the provider failure. The workspace is kept aside, intact, for a later
+/// retry; returns its path and where it was kept.
+fn obstruct_host_workspace(workspace: &Path) -> (PathBuf, PathBuf) {
+    let saved = workspace.with_file_name("saved-work");
     // Fault injection belongs in this server unit test: all workflow state was
-    // created through the API, and only the temporary provider filesystem is
-    // obstructed. The managed workspace remains available for a later retry.
-    std::fs::rename(&registry, &saved).unwrap();
-    std::fs::write(&registry, "provider unavailable").unwrap();
-    (registry, saved)
+    // created through the API, and only the temporary workspace is moved.
+    std::fs::rename(workspace, &saved).unwrap();
+    std::fs::write(workspace, "provider unavailable").unwrap();
+    (workspace.to_path_buf(), saved)
+}
+
+async fn host_workspace(run: &DeletionRun) -> PathBuf {
+    let projection = run_records::require_projection(&run.state, run.id)
+        .await
+        .unwrap();
+    PathBuf::from(
+        &projection
+            .sandbox
+            .as_ref()
+            .unwrap()
+            .instance()
+            .unwrap()
+            .runtime
+            .working_directory,
+    )
 }
 
 async fn deletion_response(app: &Router, id: RunId, force: bool) -> Response {
@@ -220,24 +235,15 @@ async fn failed_cleanup_preserves_completed_results_across_retries_and_restart()
             .await
             .unwrap();
         assert_eq!(before.status, expected);
-        let workspace = PathBuf::from(
-            &before
-                .sandbox
-                .as_ref()
-                .unwrap()
-                .instance()
-                .unwrap()
-                .runtime
-                .working_directory,
-        );
-        let (registry, saved) = obstruct_host_registry(&run);
+        let workspace = host_workspace(&run).await;
+        let (obstructed, saved) = obstruct_host_workspace(&workspace);
         for _ in 0..2 {
             let response = deletion_response(&run.app, run.id, false).await;
             let error = response_json!(response, StatusCode::CONFLICT).await;
             let detail = error["errors"][0]["detail"].as_str().unwrap();
             assert!(detail.contains("Failed to delete the run's sandboxes"));
             assert!(detail.contains("use force=true or --force"));
-            assert!(workspace.is_dir());
+            assert!(saved.is_dir());
             assert_completed_result(&run.app, run.id, &before).await;
         }
         run.state.shutdown.cancel();
@@ -256,8 +262,8 @@ async fn failed_cleanup_preserves_completed_results_across_retries_and_restart()
         let response = deletion_response(&app, run.id, false).await;
         assert_status!(response, StatusCode::CONFLICT).await;
         assert_completed_result(&app, run.id, &before).await;
-        std::fs::remove_file(&registry).unwrap();
-        std::fs::rename(saved, registry).unwrap();
+        std::fs::remove_file(&obstructed).unwrap();
+        std::fs::rename(saved, &obstructed).unwrap();
         let response = deletion_response(&app, run.id, false).await;
         assert_status!(response, StatusCode::NO_CONTENT).await;
         assert!(!workspace.exists());
@@ -278,7 +284,7 @@ async fn failed_cleanup_preserves_completed_results_across_retries_and_restart()
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn only_explicit_force_bypasses_cleanup_failure_for_a_removing_run() {
     let run = completed_deletion_run("echo completed", false).await;
-    obstruct_host_registry(&run);
+    obstruct_host_workspace(&host_workspace(&run).await);
     // Exercise the existing Removing path independently: it must not make an
     // ordinary delete bypass a provider failure. No historical repair is done.
     run_records::lifecycle(

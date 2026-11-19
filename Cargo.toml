@@ -87,39 +87,42 @@ twin-openai = { git = "https://github.com/lithoscomputer/twins", branch = "main"
 twin-github = { path = "test/twin/github" }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
-# sandbox-driver: the sandbox provider layer. Bundled Host, Docker, and
-# Daytona providers link in-process; third-party providers run as stdio
-# plugins through sandbox-driver-protocol.
-# Cargo.lock holds these at tag v2 (0a07380), the last sandbox-driver with the
-# old API, while its main becomes new-API-only. Do not `cargo update` them, and
-# keep `branch = "main"` so Petri's and Pebble's declarations stay the same
-# source. Lift the pin when Fabro, Petri, and Pebble move to the new API
-# together; see .github/workflows/internal-deps.yml.
-sandbox-driver = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
-sandbox-driver-protocol = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
-sandbox-driver-host = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
-sandbox-driver-docker = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
-sandbox-driver-docker-config = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
-sandbox-driver-daytona = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
-sandbox-driver-daytona-config = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
-sandbox-driver-testing = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
+# sandbox-driver: the sandbox provider layer. Host, Docker and Daytona are
+# built-in providers that run in-process; third-party providers run as stdio
+# plugins through sandbox-driver-protocol. Name the same branch as Petri's
+# and Pebble's declarations so they resolve to one source: the graph must
+# hold exactly one sandbox-driver (see .github/workflows/internal-deps.yml).
+# TODO(parity B1): back to `branch = "main"` once sandbox-driver#96
+# (`parity-captured-exec`: captured exec and `ExecSpec::shell`, which
+# Pebble's port builds on) merges; Petri and Pebble name it too until then.
+sandbox-driver = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "parity-captured-exec" }
+sandbox-driver-protocol = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "parity-captured-exec" }
+sandbox-driver-host = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "parity-captured-exec" }
+sandbox-driver-docker = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "parity-captured-exec" }
+sandbox-driver-docker-config = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "parity-captured-exec" }
+sandbox-driver-daytona = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "parity-captured-exec" }
+sandbox-driver-daytona-config = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "parity-captured-exec" }
+sandbox-driver-testing = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "parity-captured-exec" }
+# pebble: tracks Pebble's `sandbox-driver-new-api` branch
+# (lithoscomputer/pebble#45) until it merges.
 # pebble: the coding agent loop fabro runs its agent stages, Ask Fabro
 # sessions, hook evaluators, and `fabro exec` on. The `Environment` over a
 # sandbox-driver handle is pebble's `sandbox_driver` module (the
 # `sandbox-driver` feature).
-pebble-agent = { git = "https://github.com/lithoscomputer/pebble", branch = "main" }
-pebble-coding-agent = { git = "https://github.com/lithoscomputer/pebble", branch = "main", features = ["mcp", "search-providers", "sandbox-driver"] }
-pebble-cli-core = { git = "https://github.com/lithoscomputer/pebble", branch = "main" }
-# petri: the workflow engine Fabro runs its workflows on. Only `fabro-petri`
+pebble-agent = { git = "https://github.com/lithoscomputer/pebble", branch = "sandbox-driver-new-api" }
+pebble-coding-agent = { git = "https://github.com/lithoscomputer/pebble", branch = "sandbox-driver-new-api", features = ["mcp", "search-providers", "sandbox-driver"] }
+pebble-cli-core = { git = "https://github.com/lithoscomputer/pebble", branch = "sandbox-driver-new-api" }
+# petri: the workflow engine Fabro runs its workflows on. Tracks Petri's
+# `sandbox-contract-cutover` branch (lithoscomputer/petri#150) until it merges. Only `fabro-petri`
 # and `fabro-dot` (the DOT parser alone) may depend on these packages; the
 # keys carry the `petri_` prefix so the crate names say where they come from.
-petri_runtime = { git = "https://github.com/lithoscomputer/petri.git", branch = "main", package = "petri-runtime" }
-petri_execution = { git = "https://github.com/lithoscomputer/petri.git", branch = "main", package = "petri-execution" }
-petri_store = { git = "https://github.com/lithoscomputer/petri.git", branch = "main", package = "petri-store" }
-petri_attractor_steps = { git = "https://github.com/lithoscomputer/petri.git", branch = "main", package = "petri-attractor-steps" }
-petri_frontend_attractor = { git = "https://github.com/lithoscomputer/petri.git", branch = "main", package = "petri-frontend-attractor" }
-petri_frontend_fabro = { git = "https://github.com/lithoscomputer/petri.git", branch = "main", package = "petri-frontend-fabro" }
-petri_testkit = { git = "https://github.com/lithoscomputer/petri.git", branch = "main", package = "petri-testkit" }
+petri_runtime = { git = "https://github.com/lithoscomputer/petri.git", branch = "sandbox-contract-cutover", package = "petri-runtime" }
+petri_execution = { git = "https://github.com/lithoscomputer/petri.git", branch = "sandbox-contract-cutover", package = "petri-execution" }
+petri_store = { git = "https://github.com/lithoscomputer/petri.git", branch = "sandbox-contract-cutover", package = "petri-store" }
+petri_attractor_steps = { git = "https://github.com/lithoscomputer/petri.git", branch = "sandbox-contract-cutover", package = "petri-attractor-steps" }
+petri_frontend_attractor = { git = "https://github.com/lithoscomputer/petri.git", branch = "sandbox-contract-cutover", package = "petri-frontend-attractor" }
+petri_frontend_fabro = { git = "https://github.com/lithoscomputer/petri.git", branch = "sandbox-contract-cutover", package = "petri-frontend-fabro" }
+petri_testkit = { git = "https://github.com/lithoscomputer/petri.git", branch = "sandbox-contract-cutover", package = "petri-testkit" }
 sentry = { version = "0.35", default-features = false, features = ["backtrace", "contexts", "ureq", "rustls"] }
 fork = "0.2"
 exec = "0.3"

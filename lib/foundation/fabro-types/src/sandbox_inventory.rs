@@ -1,4 +1,6 @@
-use sandbox_driver::SandboxStatus;
+// TODO(parity): sandbox-driver's legacy status, which carries the fields
+// the sandbox page shows that the new `Status` lacks (parity plan A10).
+use sandbox_driver::legacy::SandboxStatus;
 use serde::{Deserialize, Serialize};
 
 use crate::SandboxProviderKind;

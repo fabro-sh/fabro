@@ -34,18 +34,18 @@ use fabro_api::types::{
     RunFilesMeta, RunFilesMetaDegradedReason, RunFilesMetaScope, RunFilesMetaSource,
     RunFilesMetaToSha,
 };
-use fabro_redact::SecretRedactor;
 use fabro_types::RunId;
 use fabro_util::shell;
 use fabro_workflow::sandbox_git::{
-    DiffError, DiffNumstat, RawDiffEntry, SubmoduleChange, SymlinkChange, list_changed_files_raw,
-    list_diff_numstat, stream_blob_metadata, stream_blobs,
+    self, DiffError, DiffNumstat, RawDiffEntry, SubmoduleChange, SymlinkChange,
+    list_changed_files_raw, list_diff_numstat, stream_blob_metadata, stream_blobs,
 };
 use futures_util::FutureExt;
-use pebble_coding_agent::sandbox_driver::{SandboxExec, display_for_log};
-use sandbox_driver::{
-    Git as _, GitCommit, GitDiffOptions, GitFacet, GitLogOptions, GitRevisionRange, Sandbox,
-    Termination,
+// TODO(parity): the legacy git facet; the new API has no git (parity plan B4).
+use sandbox_driver::legacy;
+use sandbox_driver::legacy::{
+    ExecResult, ExecSpec, Git as _, GitCommit, GitDiffOptions, GitFacet, GitLogOptions,
+    GitRevisionRange, Sandbox, Termination,
 };
 use serde::Deserialize;
 use tokio::sync::{Mutex, watch};
@@ -100,9 +100,20 @@ impl SandboxCheckout {
         })
     }
 
-    /// Fabro's exec policy over the sandbox, in the checkout.
-    fn exec(&self) -> SandboxExec<'_> {
-        SandboxExec::new(self.handle.exec()).with_working_dir(self.working_directory.clone())
+    /// Runs a Bash command in the checkout and captures its output.
+    ///
+    /// TODO(parity): the legacy exec facet, beside the legacy git facet
+    /// above; the checkout moves to the new API's captured exec with git
+    /// (parity plan B1, B4).
+    async fn run_shell(&self, command: &str, timeout: Duration) -> legacy::Result<ExecResult> {
+        self.handle
+            .exec()
+            .run(
+                &ExecSpec::bash(command)
+                    .timeout(timeout)
+                    .working_dir(self.working_directory.clone()),
+            )
+            .await
     }
 }
 
@@ -804,16 +815,16 @@ async fn materialize_working_tree_sandbox_path(
 
 /// A driver git failure as the endpoint's transient 503, so the client
 /// retries; a command that timed out says so.
-fn sandbox_git_error(op: &str, error: &sandbox_driver::Error) -> ApiError {
+fn sandbox_git_error(op: &str, error: &legacy::Error) -> ApiError {
     let timed_out = matches!(
         error,
-        sandbox_driver::Error::Git(failure)
+        legacy::Error::Git(failure)
             if failure.output().is_some_and(|output| output.termination() == Termination::TimedOut)
     );
     if timed_out {
         return transient_503(op, "command timed out");
     }
-    transient_503(op, &display_for_log(error, &SecretRedactor))
+    transient_503(op, &sandbox_git::display_legacy_for_log(error))
 }
 
 /// The degraded response from the run's final patch, resolved through
@@ -1278,19 +1289,15 @@ async fn resolve_ref_sha_and_time(
 ) -> std::result::Result<(String, Option<chrono::DateTime<chrono::Utc>>), ApiError> {
     let ref_q = shell::shell_quote(git_ref);
     let res = sandbox
-        .exec()
-        .run(
+        .run_shell(
             &format!("git -c core.hooksPath=/dev/null show -s --format=%H\\ %cI {ref_q}"),
-            Some(SANDBOX_GIT_TIMEOUT),
-            None,
-            None,
-            None,
+            SANDBOX_GIT_TIMEOUT,
         )
         .await
         .map_err(|err| {
             ApiError::new(
                 StatusCode::SERVICE_UNAVAILABLE,
-                display_for_log(&err, &SecretRedactor),
+                sandbox_git::display_legacy_for_log(&err),
             )
         })?;
     if !res.success() {
@@ -1765,12 +1772,83 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use fabro_types::RunId;
-    use pebble_coding_agent::sandbox_driver::test_support::{MockSandbox, exec_result};
-    use sandbox_driver::ExecResult;
+    use sandbox_driver_testing::legacy::ScriptedSandbox;
     use tokio::time::{Duration, sleep};
 
     use super::*;
     use crate::test_support::{test_app_state, test_concluded_run_projection};
+
+    /// A scripted legacy sandbox the Run Files endpoints hold, answering
+    /// every command with `exec_result` unless `exec_error` fails it. The
+    /// endpoints read git through the legacy facet, so their double is the
+    /// driver's legacy one, not Pebble's new-API mock.
+    struct MockSandbox {
+        exec_error:  Option<String>,
+        working_dir: &'static str,
+        built:       OnceLock<Arc<ScriptedSandbox>>,
+    }
+
+    impl Default for MockSandbox {
+        fn default() -> Self {
+            Self {
+                exec_error:  None,
+                working_dir: "/work",
+                built:       OnceLock::new(),
+            }
+        }
+    }
+
+    impl MockSandbox {
+        fn driver(&self) -> Arc<ScriptedSandbox> {
+            Arc::clone(self.built.get_or_init(|| {
+                let driver =
+                    ScriptedSandbox::with_id_and_working_dir("mock-sandbox", self.working_dir);
+                let exec = driver.scripted_exec();
+                match &self.exec_error {
+                    Some(message) => exec.fail_by_default(message.clone()),
+                    None => exec.set_default(exec_result(
+                        "mock output",
+                        "",
+                        Some(0),
+                        Termination::Exited,
+                        10,
+                    )),
+                };
+                Arc::new(driver)
+            }))
+        }
+
+        fn handle(&self) -> Arc<dyn Sandbox> {
+            self.driver()
+        }
+
+        /// Answers commands by their Bash source ahead of the queue: `Some`
+        /// decides the result, `None` falls through.
+        fn respond_with(
+            &self,
+            responder: impl Fn(&str) -> Option<ExecResult> + Send + Sync + 'static,
+        ) -> &Self {
+            self.driver().scripted_exec().respond_with(move |spec| {
+                let command = spec.args.last().map(String::as_str).unwrap_or_default();
+                responder(command)
+            });
+            self
+        }
+    }
+
+    fn exec_result(
+        stdout: &str,
+        stderr: &str,
+        exit_code: Option<i32>,
+        termination: Termination,
+        duration_ms: u64,
+    ) -> ExecResult {
+        let mut result =
+            ExecResult::new(termination, exit_code, Duration::from_millis(duration_ms));
+        result.stdout = stdout.as_bytes().to_vec();
+        result.stderr = stderr.as_bytes().to_vec();
+        result
+    }
 
     /// The mock as the Run Files endpoints hold a sandbox.
     fn checkout(mock: &MockSandbox) -> SandboxCheckout {

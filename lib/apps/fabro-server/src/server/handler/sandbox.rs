@@ -10,7 +10,12 @@ use fabro_types::{RunSandboxInstance, SandboxProviderKind};
 use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 use pebble_coding_agent::sandbox_driver::{display_for_log, resolve_path};
-use sandbox_driver::{FileKind, ListeningPort, PtyOptions, PtySize, Sandbox, Services as _};
+// TODO(parity): the legacy pty and listening-ports facets. The new API's
+// exec with `tty` is refused by every built-in provider, and it has no
+// listening-ports call (parity plan H2, D2, Y6 and B1).
+use sandbox_driver::legacy::{
+    FileKind, ListeningPort, PtyOptions, PtySize, Sandbox, Services as _,
+};
 
 use super::super::{
     ApiError, AppState, Bytes, HeaderMap, IntoResponse, Json, NamedTempFile, Path,

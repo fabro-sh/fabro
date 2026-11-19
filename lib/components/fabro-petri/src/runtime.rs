@@ -1,8 +1,8 @@
 //! The Petri runtime Fabro runs its workflows on, assembled the same way at
 //! create time (for `Runtime::check`) and at execution.
 //!
-//! Built-in sandbox factories are installed for every runtime and connect
-//! only when a scope is acquired.
+//! Every runtime places its scopes on Fabro's sandbox catalog, whose
+//! entries connect only when a scope is acquired.
 //!
 //! The pieces are Petri's own: [`Runtime::standard`] with the Fabro frontend
 //! carrying the server's settings layer, the Attractor step kinds (the real
@@ -39,7 +39,7 @@ use crate::stage_credentials::StageCredentials;
 pub struct RuntimeSpec {
     /// Run-specific GitHub credentials applied to processes at execution.
     pub stage_credentials: Option<StageCredentials>,
-    /// Explicit provider configuration. Factories connect only at acquire.
+    /// Explicit provider configuration. Entries connect only at acquire.
     pub sandbox:           SandboxProviderConfig,
     /// The operator's settings layer, as `~/.fabro/settings.toml` text: the
     /// lowest of the three layers the Fabro frontend reads (`[run.model]`

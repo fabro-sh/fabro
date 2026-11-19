@@ -99,7 +99,8 @@ pub mod types {
         ToolActivity as AgentSessionToolActivity,
     };
     /// A sandbox's status on the API is the sandbox driver's own type.
-    pub use sandbox_driver::{
+    // TODO(parity): the legacy status types; see `build.rs`.
+    pub use sandbox_driver::legacy::{
         NetworkPolicy as SandboxNetworkPolicy, Resources as SandboxResources, SandboxId,
         SandboxKind, SandboxState, SandboxStatus, WorkspaceOwnership as SandboxWorkspaceOwnership,
     };

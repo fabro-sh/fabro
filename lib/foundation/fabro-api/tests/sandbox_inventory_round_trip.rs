@@ -11,7 +11,7 @@ use fabro_types::{
     SandboxInfo, SandboxListMeta, SandboxListResponse, SandboxProviderKind,
     SandboxProviderLookupError,
 };
-use sandbox_driver::{NetworkPolicy, Resources, SandboxId, SandboxState, SandboxStatus};
+use sandbox_driver::legacy::{NetworkPolicy, Resources, SandboxId, SandboxState, SandboxStatus};
 use serde_json::json;
 
 #[test]

@@ -88,7 +88,7 @@ use crate::controls::RunControls;
 use crate::hooks::{FabroHooks, HooksSpec};
 use crate::runtime::RuntimeSpec;
 use crate::secrets::SharedSecrets;
-use crate::{git_identity, projection};
+use crate::{git_identity, projection, providers};
 
 /// How the run is entered: fresh, from the admitted graphs, or continued
 /// from its records.
@@ -174,6 +174,8 @@ pub enum RunError {
     UnsupportedProvider { provider: SandboxProviderKind },
     #[error("the Daytona CPU allocation must be a non-negative integer: {cpu}")]
     InvalidCpu { cpu: i32 },
+    #[error("the run's sandbox options cannot be placed: {0}")]
+    SandboxCatalog(String),
     #[error("the run's record could not be opened")]
     Open(#[source] petri_store::StoreError),
     #[error("the run's record could not be read")]
@@ -272,9 +274,14 @@ pub async fn run(mut request: RunRequest) -> Result<RunOutcome, RunError> {
     // A normal resume requires its original sandbox to survive.
     options.sandbox.lost_sandbox = LostSandbox::Refuse;
     let resumed = matches!(request.execution, Execution::Resume(_));
+    // The run's scopes go on Fabro's catalog for the run's own options: its
+    // network policy and Daytona resources shape the environments.
+    let catalog = providers::sandbox_catalog(&request.runtime.sandbox, &options.sandbox)
+        .map_err(RunError::SandboxCatalog)?;
     let mut runtime = request
         .runtime
         .runtime(true)
+        .sandbox_catalog(catalog)
         .store(Arc::clone(&request.store))
         .options(options);
     if let Some(secrets) = request.secrets {

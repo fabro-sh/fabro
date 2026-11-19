@@ -9,7 +9,7 @@ use fabro_api::types::{
     SandboxStatus as ApiSandboxStatus, SandboxWorkspaceOwnership as ApiSandboxWorkspaceOwnership,
 };
 use fabro_types::{RunSandboxInstance, RunSandboxRuntime, SandboxDetails, SandboxProviderKind};
-use sandbox_driver::{
+use sandbox_driver::legacy::{
     NetworkPolicy, Resources, SandboxId, SandboxKind, SandboxState, SandboxStatus,
     WorkspaceOwnership,
 };

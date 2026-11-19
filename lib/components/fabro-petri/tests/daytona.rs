@@ -128,6 +128,17 @@ async fn provider_server() -> MockServer {
                 }));
         })
         .await;
+    // sandbox-driver's Daytona provider names each runner snapshot after
+    // its source and resources, finds it by listing, and builds it when no
+    // listed snapshot has that name.
+    server
+        .mock_async(|when, then| {
+            when.method(GET).path("/snapshots");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(json!({"items": [], "total": 0, "page": 1, "totalPages": 0}));
+        })
+        .await;
     server
         .mock_async(|when, then| {
             when.method(GET).path("/sandbox");
@@ -197,14 +208,15 @@ async fn daytona_create_requests_enforce_block_and_preserve_allow_all() {
                 when.method(GET).path_matches(r"^/snapshots/[^/]+$");
                 then.status(200)
                     .header("content-type", "application/json")
-                    .json_body(json!({
-                        "id": "runner", "name": "runner", "general": false,
-                        "state": "active", "sandboxClass": "container",
-                        "cpu": 2, "gpu": 0, "mem": 4, "disk": 3,
-                        "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
-                        "size": null, "entrypoint": null, "errorReason": null,
-                        "lastUsedAt": null, "sourceSandboxId": null
-                    }));
+                    .json_body(active_runner_snapshot());
+            })
+            .await;
+        server
+            .mock_async(|when, then| {
+                when.method(POST).path("/snapshots");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(active_runner_snapshot());
             })
             .await;
         let create = server
@@ -234,4 +246,15 @@ async fn daytona_create_requests_enforce_block_and_preserve_allow_all() {
         assert_eq!(create.calls_async().await, 1, "{mode}: {outcome:?}");
         assert_eq!(outcome.status, RunStatus::Failed);
     }
+}
+
+fn active_runner_snapshot() -> serde_json::Value {
+    json!({
+        "id": "runner", "name": "runner", "general": false,
+        "state": "active", "sandboxClass": "container",
+        "cpu": 2, "gpu": 0, "mem": 4, "disk": 3,
+        "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+        "size": null, "entrypoint": null, "errorReason": null,
+        "lastUsedAt": null, "sourceSandboxId": null
+    })
 }
