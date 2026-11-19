@@ -130,11 +130,9 @@ jobs:
       # sandbox-driver. A Petri or Pebble that names sandbox-driver
       # differently (another branch, a tag, a pinned rev) would add a second
       # copy to the lock instead of moving the one source Fabro names.
-      # TODO(parity B1): SANDBOX_DRIVER_BRANCH goes back to main with
-      # Cargo.toml once sandbox-driver#96 merges.
       - name: Check that sandbox-driver has one source
         env:
-          SANDBOX_DRIVER_BRANCH: parity-captured-exec
+          SANDBOX_DRIVER_BRANCH: main
         run: |
           set -euo pipefail
           sources="$(grep -o 'git+https://github.com/lithoscomputer/sandbox-driver[^"]*' Cargo.lock | sort -u)"

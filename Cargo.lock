@@ -5093,7 +5093,7 @@ checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 [[package]]
 name = "pebble-agent"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/pebble?branch=sandbox-driver-new-api#a366a6f3fa16e245b9e03963cd68f66a827a2f40"
+source = "git+https://github.com/lithoscomputer/pebble?branch=sandbox-driver-new-api#fecbdbf0a2f112e6a902b6885d16ba3b4e29e5b0"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -5110,7 +5110,7 @@ dependencies = [
 [[package]]
 name = "pebble-cli-core"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/pebble?branch=sandbox-driver-new-api#a366a6f3fa16e245b9e03963cd68f66a827a2f40"
+source = "git+https://github.com/lithoscomputer/pebble?branch=sandbox-driver-new-api#fecbdbf0a2f112e6a902b6885d16ba3b4e29e5b0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5139,7 +5139,7 @@ dependencies = [
 [[package]]
 name = "pebble-coding-agent"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/pebble?branch=sandbox-driver-new-api#a366a6f3fa16e245b9e03963cd68f66a827a2f40"
+source = "git+https://github.com/lithoscomputer/pebble?branch=sandbox-driver-new-api#fecbdbf0a2f112e6a902b6885d16ba3b4e29e5b0"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -5180,7 +5180,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 [[package]]
 name = "petri-attractor-steps"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#af92cf31d93e13166a6e80e9af169c44b9b08d86"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#f9643e39d71e02ff14fac696a1f157a3a57f42e5"
 dependencies = [
  "async-trait",
  "globset",
@@ -5211,7 +5211,7 @@ dependencies = [
 [[package]]
 name = "petri-driver"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#af92cf31d93e13166a6e80e9af169c44b9b08d86"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#f9643e39d71e02ff14fac696a1f157a3a57f42e5"
 dependencies = [
  "async-trait",
  "getrandom 0.3.4",
@@ -5231,7 +5231,7 @@ dependencies = [
 [[package]]
 name = "petri-engine"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#af92cf31d93e13166a6e80e9af169c44b9b08d86"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#f9643e39d71e02ff14fac696a1f157a3a57f42e5"
 dependencies = [
  "petri-ir",
  "serde",
@@ -5243,7 +5243,7 @@ dependencies = [
 [[package]]
 name = "petri-execution"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#af92cf31d93e13166a6e80e9af169c44b9b08d86"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#f9643e39d71e02ff14fac696a1f157a3a57f42e5"
 dependencies = [
  "async-trait",
  "petri-driver",
@@ -5267,7 +5267,7 @@ dependencies = [
 [[package]]
 name = "petri-executor"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#af92cf31d93e13166a6e80e9af169c44b9b08d86"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#f9643e39d71e02ff14fac696a1f157a3a57f42e5"
 dependencies = [
  "async-trait",
  "libc",
@@ -5282,7 +5282,7 @@ dependencies = [
 [[package]]
 name = "petri-executor-sandbox"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#af92cf31d93e13166a6e80e9af169c44b9b08d86"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#f9643e39d71e02ff14fac696a1f157a3a57f42e5"
 dependencies = [
  "async-trait",
  "petri-executor",
@@ -5306,7 +5306,7 @@ dependencies = [
 [[package]]
 name = "petri-frontend"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#af92cf31d93e13166a6e80e9af169c44b9b08d86"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#f9643e39d71e02ff14fac696a1f157a3a57f42e5"
 dependencies = [
  "marked-yaml",
  "petri-ir",
@@ -5320,7 +5320,7 @@ dependencies = [
 [[package]]
 name = "petri-frontend-attractor"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#af92cf31d93e13166a6e80e9af169c44b9b08d86"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#f9643e39d71e02ff14fac696a1f157a3a57f42e5"
 dependencies = [
  "minijinja",
  "petri-frontend",
@@ -5337,7 +5337,7 @@ dependencies = [
 [[package]]
 name = "petri-frontend-fabro"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#af92cf31d93e13166a6e80e9af169c44b9b08d86"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#f9643e39d71e02ff14fac696a1f157a3a57f42e5"
 dependencies = [
  "petri-frontend",
  "petri-frontend-attractor",
@@ -5352,7 +5352,7 @@ dependencies = [
 [[package]]
 name = "petri-frontend-native"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#af92cf31d93e13166a6e80e9af169c44b9b08d86"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#f9643e39d71e02ff14fac696a1f157a3a57f42e5"
 dependencies = [
  "petri-frontend",
  "petri-ir",
@@ -5363,7 +5363,7 @@ dependencies = [
 [[package]]
 name = "petri-ir"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#af92cf31d93e13166a6e80e9af169c44b9b08d86"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#f9643e39d71e02ff14fac696a1f157a3a57f42e5"
 dependencies = [
  "regex",
  "serde",
@@ -5376,7 +5376,7 @@ dependencies = [
 [[package]]
 name = "petri-runtime"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#af92cf31d93e13166a6e80e9af169c44b9b08d86"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#f9643e39d71e02ff14fac696a1f157a3a57f42e5"
 dependencies = [
  "async-trait",
  "petri-driver",
@@ -5397,7 +5397,7 @@ dependencies = [
 [[package]]
 name = "petri-steps"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#af92cf31d93e13166a6e80e9af169c44b9b08d86"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#f9643e39d71e02ff14fac696a1f157a3a57f42e5"
 dependencies = [
  "async-trait",
  "petri-executor",
@@ -5413,7 +5413,7 @@ dependencies = [
 [[package]]
 name = "petri-store"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#af92cf31d93e13166a6e80e9af169c44b9b08d86"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#f9643e39d71e02ff14fac696a1f157a3a57f42e5"
 dependencies = [
  "async-trait",
  "getrandom 0.3.4",
@@ -5428,7 +5428,7 @@ dependencies = [
 [[package]]
 name = "petri-testkit"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#af92cf31d93e13166a6e80e9af169c44b9b08d86"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=sandbox-contract-cutover#f9643e39d71e02ff14fac696a1f157a3a57f42e5"
 dependencies = [
  "async-trait",
  "petri-driver",
@@ -6319,7 +6319,7 @@ dependencies = [
 [[package]]
 name = "sandbox-driver"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/sandbox-driver?branch=parity-captured-exec#e5d416eb479f4d19554e69589a461074c77fb530"
+source = "git+https://github.com/lithoscomputer/sandbox-driver?branch=main#3369f3791aae5ad359dfbb8cbd1e9ef727ee9a65"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -6339,7 +6339,7 @@ dependencies = [
 [[package]]
 name = "sandbox-driver-daytona"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/sandbox-driver?branch=parity-captured-exec#e5d416eb479f4d19554e69589a461074c77fb530"
+source = "git+https://github.com/lithoscomputer/sandbox-driver?branch=main#3369f3791aae5ad359dfbb8cbd1e9ef727ee9a65"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6367,7 +6367,7 @@ dependencies = [
 [[package]]
 name = "sandbox-driver-daytona-config"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/sandbox-driver?branch=parity-captured-exec#e5d416eb479f4d19554e69589a461074c77fb530"
+source = "git+https://github.com/lithoscomputer/sandbox-driver?branch=main#3369f3791aae5ad359dfbb8cbd1e9ef727ee9a65"
 dependencies = [
  "sandbox-driver-docker-config",
  "serde",
@@ -6377,7 +6377,7 @@ dependencies = [
 [[package]]
 name = "sandbox-driver-docker"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/sandbox-driver?branch=parity-captured-exec#e5d416eb479f4d19554e69589a461074c77fb530"
+source = "git+https://github.com/lithoscomputer/sandbox-driver?branch=main#3369f3791aae5ad359dfbb8cbd1e9ef727ee9a65"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6398,7 +6398,7 @@ dependencies = [
 [[package]]
 name = "sandbox-driver-docker-config"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/sandbox-driver?branch=parity-captured-exec#e5d416eb479f4d19554e69589a461074c77fb530"
+source = "git+https://github.com/lithoscomputer/sandbox-driver?branch=main#3369f3791aae5ad359dfbb8cbd1e9ef727ee9a65"
 dependencies = [
  "serde",
  "serde_json",
@@ -6407,7 +6407,7 @@ dependencies = [
 [[package]]
 name = "sandbox-driver-host"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/sandbox-driver?branch=parity-captured-exec#e5d416eb479f4d19554e69589a461074c77fb530"
+source = "git+https://github.com/lithoscomputer/sandbox-driver?branch=main#3369f3791aae5ad359dfbb8cbd1e9ef727ee9a65"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6425,7 +6425,7 @@ dependencies = [
 [[package]]
 name = "sandbox-driver-protocol"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/sandbox-driver?branch=parity-captured-exec#e5d416eb479f4d19554e69589a461074c77fb530"
+source = "git+https://github.com/lithoscomputer/sandbox-driver?branch=main#3369f3791aae5ad359dfbb8cbd1e9ef727ee9a65"
 dependencies = [
  "async-trait",
  "base64",
@@ -6443,7 +6443,7 @@ dependencies = [
 [[package]]
 name = "sandbox-driver-testing"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/sandbox-driver?branch=parity-captured-exec#e5d416eb479f4d19554e69589a461074c77fb530"
+source = "git+https://github.com/lithoscomputer/sandbox-driver?branch=main#3369f3791aae5ad359dfbb8cbd1e9ef727ee9a65"
 dependencies = [
  "async-trait",
  "sandbox-driver",
