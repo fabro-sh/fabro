@@ -31,7 +31,7 @@
 //! TODO(parity): everything else here is sandbox-driver's legacy API, kept
 //! so no tab loses a feature while Petri's runs move to the new one. Each
 //! piece moves when the new API carries it (parity plan,
-//! https://ampcode.com/artifacts/plans/parity-plan-fabro-and-petri-on-the-new-sandbox-driver-api-87b2e18c-6e40-4c01-af60-ce1905c3bd11):
+//! <https://ampcode.com/artifacts/plans/parity-plan-fabro-and-petri-on-the-new-sandbox-driver-api-87b2e18c-6e40-4c01-af60-ce1905c3bd11>):
 //! - Host: Petri's built-in Host keeps no registry in the run directory, so a
 //!   run's host sandbox is now always designated again by path, without the
 //!   `petri.run` check a registry record gave (H1, decision 3).
