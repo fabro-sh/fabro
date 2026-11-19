@@ -3789,7 +3789,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -4303,7 +4303,7 @@ checksum = "6373607a59f0be73a39b6fe456b8192fcc3585f602af20751600e974dd455e77"
 [[package]]
 name = "lithos-llm"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/lithos-llm?branch=main#decb8f9cfc930700f882b407b545b708de63a96e"
+source = "git+https://github.com/lithoscomputer/lithos-llm?branch=main#2e3d3b3ff7f72b121263651f3622e38ee34f47e4"
 dependencies = [
  "async-trait",
  "aws-config",
