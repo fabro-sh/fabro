@@ -16,7 +16,17 @@ pub fn collect_from(package_dir: &Path) -> BuildGitMetadata {
 
     if let Some(head_ref) = git_output(package_dir, ["symbolic-ref", "-q", "HEAD"]) {
         if let Some(ref_path) = git_output(package_dir, ["rev-parse", "--git-path", &head_ref]) {
-            rerun_paths.push(PathBuf::from(ref_path));
+            // Cargo treats a missing rerun-if-changed path as always stale, and a
+            // packed ref has no loose file. Watch the nearest existing directory
+            // instead: the branch's next commit writes its loose ref there.
+            let ref_path = PathBuf::from(ref_path);
+            let watched = ref_path
+                .ancestors()
+                .filter(|path| !path.as_os_str().is_empty())
+                .find(|path| package_dir.join(path).exists())
+                .unwrap_or(&ref_path)
+                .to_path_buf();
+            rerun_paths.push(watched);
         }
     }
 
