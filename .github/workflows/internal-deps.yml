@@ -1,6 +1,6 @@
 name: Internal dependencies
 
-# Every internal Git dependency names `branch = "main"`, and Cargo.lock picks
+# Unfrozen internal Git dependencies name `branch = "main"`; Cargo.lock picks
 # the commit CI builds and Fabro ships. Each night this job moves the lock to
 # the current main of each eligible internal library with `cargo update -p`,
 # then runs the Linux test suite from rust.yml, so drift is noticed without
@@ -56,10 +56,11 @@ jobs:
       # for the job summary, the pull request, and the tracking issue.
       #
       # sandbox-driver is excluded from updates to main: its main is becoming
-      # new-API-only, so Cargo.lock holds it at tag v2 (SANDBOX_DRIVER_PIN),
+      # new-API-only, so Cargo.toml pins tag v2 by revision (SANDBOX_DRIVER_PIN),
       # the last commit with the old API that Fabro, Petri, and Pebble use.
       # Lift the pin once all three are ported to the new API and switch
-      # together: add sandbox-driver back here and remove the explicit
+      # together: restore branch = "main" in all three manifests, add
+      # sandbox-driver back here and remove the explicit
       # re-pin, SANDBOX_DRIVER_PIN, and the pin check.
       - name: Update internal dependencies
         id: update
@@ -74,9 +75,9 @@ jobs:
           done
           {
             cargo update "${args[@]}"
-            # Updating Petri or Pebble can move their shared sandbox-driver
-            # source transitively, even though it is not in INTERNAL_CRATES.
-            # Restore the approved revision before summarizing or testing.
+            # Retain the explicit re-pin as a safeguard alongside the
+            # manifest revision. The guard below must still reject a
+            # transitive dependency that introduces a different source.
             cargo update -p sandbox-driver --precise "$SANDBOX_DRIVER_PIN"
           } 2>&1 | tee "$RUNNER_TEMP/cargo-update.log"
 
