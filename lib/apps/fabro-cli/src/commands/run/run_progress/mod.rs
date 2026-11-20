@@ -112,9 +112,15 @@ impl ProgressUI {
                 node_id,
                 name,
                 script,
+                route_key,
             } => {
-                self.stage
-                    .on_stage_started(renderer, &node_id, &name, script.as_deref());
+                self.stage.on_stage_started(
+                    renderer,
+                    &node_id,
+                    &name,
+                    script.as_deref(),
+                    route_key,
+                );
             }
             ProgressEvent::StageCompleted {
                 node_id,
@@ -305,11 +311,24 @@ impl ProgressUI {
                 );
             }
             ProgressEvent::EdgeSelected {
+                route_key,
                 from_node,
                 to_node,
                 label,
                 condition,
             } => {
+                let message = label.as_ref().map(|label| {
+                    let detail = condition
+                        .as_ref()
+                        .map_or_else(String::new, |value| format!("  [{value}]"));
+                    format!("└─ {}{detail}", label.escape_debug())
+                });
+                if self
+                    .stage
+                    .on_route(renderer, route_key.as_deref(), message.as_deref())
+                {
+                    return;
+                }
                 self.info.on_edge_selected(
                     renderer,
                     &from_node,
@@ -318,8 +337,23 @@ impl ProgressUI {
                     condition.as_deref(),
                 );
             }
-            ProgressEvent::LoopRestart { from_node, to_node } => {
-                self.info.on_loop_restart(renderer, &from_node, &to_node);
+            ProgressEvent::LoopRestart {
+                route_key,
+                from_node,
+                to_node,
+                label,
+            } => {
+                let message = label
+                    .as_ref()
+                    .map(|label| format!("↺ {}", label.escape_debug()));
+                if self
+                    .stage
+                    .on_route(renderer, route_key.as_deref(), message.as_deref())
+                {
+                    return;
+                }
+                self.info
+                    .on_loop_restart(renderer, &from_node, &to_node, label.as_deref());
             }
             ProgressEvent::RunNotice {
                 level,

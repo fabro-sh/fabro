@@ -41,6 +41,18 @@ pub(super) fn progress_events(
                     node_id,
                     name: label,
                     script: None,
+                    route_key: view
+                        .node()
+                        .and_then(|node| node.pointer("/meta/edges"))
+                        .and_then(Value::as_object)
+                        .filter(|edges| {
+                            edges.values().any(|edge| {
+                                edge.get("label")
+                                    .and_then(Value::as_str)
+                                    .is_some_and(|label| !label.is_empty())
+                            })
+                        })
+                        .and_then(|_| view.stage_key()),
                 }]
             } else if view.node_kind() == Some("parallel.branch") {
                 vec![ProgressEvent::ParallelBranchStarted { branch: node_id }]
@@ -154,14 +166,17 @@ pub(super) fn progress_events(
                 .unwrap_or(false);
             if back {
                 vec![ProgressEvent::LoopRestart {
+                    route_key: view.stage_key(),
                     from_node: node_id,
                     to_node:   to_node.to_string(),
+                    label:     view.selected_edge_label().map(str::to_owned),
                 }]
             } else {
                 vec![ProgressEvent::EdgeSelected {
+                    route_key: view.stage_key(),
                     from_node: node_id,
                     to_node:   to_node.to_string(),
-                    label:     None,
+                    label:     view.selected_edge_label().map(str::to_owned),
                     condition: derived
                         .get("transition")
                         .and_then(Value::as_str)

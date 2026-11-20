@@ -4,6 +4,7 @@
               terminal progress lines"
 )]
 
+use std::cell::Cell;
 use std::io::Write;
 use std::sync::Mutex;
 
@@ -18,26 +19,29 @@ enum RendererInner {
 }
 
 pub(super) struct ProgressRenderer {
-    inner:  RendererInner,
-    styles: Styles,
+    inner:         RendererInner,
+    styles:        Styles,
+    printed_lines: Cell<usize>,
 }
 
 impl ProgressRenderer {
     pub(super) fn new_tty() -> Self {
         Self {
-            inner:  RendererInner::Tty {
+            inner:         RendererInner::Tty {
                 multi: MultiProgress::new(),
             },
-            styles: Styles::new(console::colors_enabled_stderr()),
+            styles:        Styles::new(console::colors_enabled_stderr()),
+            printed_lines: Cell::new(0),
         }
     }
 
     pub(super) fn new_plain(out: Box<dyn Write + Send>, colors: bool) -> Self {
         Self {
-            inner:  RendererInner::Plain {
+            inner:         RendererInner::Plain {
                 out: Mutex::new(out),
             },
-            styles: Styles::new(colors),
+            styles:        Styles::new(colors),
+            printed_lines: Cell::new(0),
         }
     }
 
@@ -59,6 +63,22 @@ impl ProgressRenderer {
         if let RendererInner::Plain { out } = &self.inner {
             let mut out = out.lock().expect("plain renderer lock poisoned");
             let _ = writeln!(out, "{}{message}", " ".repeat(indent));
+            self.printed_lines.set(self.printed_lines.get() + 1);
+        }
+    }
+
+    pub(super) fn printed_lines(&self) -> usize {
+        self.printed_lines.get()
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_draw_target(target: ProgressDrawTarget) -> Self {
+        Self {
+            inner:         RendererInner::Tty {
+                multi: MultiProgress::with_draw_target(target),
+            },
+            styles:        Styles::new(false),
+            printed_lines: Cell::new(0),
         }
     }
 
