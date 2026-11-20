@@ -378,11 +378,23 @@ memory = "8GB"
 | `resources.cpu` / `memory` / `disk` | Best-effort resource hints. Unsupported provider fields warn and continue. |
 | `network.mode` | `allow_all`, `block`, or `cidr_allow_list`. Local cannot enforce blocked/CIDR networking; Docker cannot enforce CIDR allow-lists. |
 | `network.allow` | CIDRs for `cidr_allow_list`; entries are validated as CIDRs. |
-| `lifecycle.preserve` | Keep the created sandbox after the run finishes. |
-| `lifecycle.stop_on_terminal` | Stop the sandbox when the run reaches a terminal state. |
+| `lifecycle.preserve` | Skip sandbox pruning when deleting the run. Defaults to `false`; does not keep a workload running. |
+| `lifecycle.stop_on_terminal` | Request sandbox stop during terminal cleanup after worker failure. Defaults to `true`; independent of `preserve`. |
 | `lifecycle.auto_stop` | Daytona auto-stop duration, such as `"30m"`. Defaults to `"120m"`; `"0s"` disables auto-stop. |
 | `labels` | Provider labels. Merge by key across layers. |
 | `env` | Environment variables passed to command and agent execution. Merge by key across layers. |
+
+Fabro retains run workspaces after normal scope release; completion does not
+request sandbox deletion. `preserve` controls later run deletion, while
+`stop_on_terminal` controls the supervisor's cleanup after a failed worker exits
+and the run settles terminal. Normal scope release remains the workflow engine's
+responsibility. Local process cleanup remains the Host provider's responsibility;
+neither setting makes a local workload survive its owning process.
+
+The resolved environment and lifecycle values are saved when the run is created.
+Editing or deleting the catalog environment does not change those saved values.
+The current configuration and API location remains `run.environment.lifecycle`;
+`run.lifecycle` is not yet an accepted input.
 
 When `provider = "local"`, Fabro works in a clone of the target folder's
 committed `HEAD`, not in the folder itself, so uncommitted changes are not

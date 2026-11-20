@@ -34,7 +34,7 @@ use anyhow::Context as _;
 use fabro_config::Storage;
 use fabro_petri::providers;
 pub(crate) use fabro_petri::providers::DaytonaCredentials;
-use fabro_types::settings::run::RunEnvironmentSettings;
+use fabro_types::settings::run::RunLifecyclePolicy;
 use fabro_types::settings::server::{
     SandboxPluginSettings, ServerSandboxProviderSettings, ServerSandboxProvidersSettings,
 };
@@ -277,15 +277,14 @@ async fn attach_run_sandbox_on(
 /// Local process cleanup belongs to the Host provider's worker guardian.
 pub(crate) async fn stop_run_sandboxes(
     access: &ProviderAccess,
-    environment: &RunEnvironmentSettings,
+    provider: &SandboxProviderKind,
+    policy: RunLifecyclePolicy,
     run_id: RunId,
 ) -> anyhow::Result<()> {
-    if !environment.lifecycle.stop_on_terminal
-        || environment.provider.bundled() == Some(BundledProvider::Local)
-    {
+    if !policy.stop_on_terminal || provider.bundled() == Some(BundledProvider::Local) {
         return Ok(());
     }
-    let provider = connect_provider(&environment.provider, access).await?;
+    let provider = connect_provider(provider, access).await?;
     stop_run_sandboxes_on(provider, run_id).await
 }
 
@@ -951,17 +950,30 @@ mod tests {
         // This plugin cannot connect: skipping the policy must happen first.
         let provider = kind("unreachable-cleanup");
         let access = unreachable_plugin_access(provider.as_str());
-        let mut environment = RunEnvironmentSettings {
-            provider,
-            ..RunEnvironmentSettings::default()
-        };
-        environment.lifecycle.stop_on_terminal = false;
-        stop_run_sandboxes(&access, &environment, RunId::new())
+        for preserve in [false, true] {
+            stop_run_sandboxes(
+                &access,
+                &provider,
+                RunLifecyclePolicy {
+                    preserve,
+                    stop_on_terminal: false,
+                },
+                RunId::new(),
+            )
             .await
             .unwrap();
-        stop_run_sandboxes(&access, &RunEnvironmentSettings::default(), RunId::new())
+            stop_run_sandboxes(
+                &access,
+                &SandboxProviderKind::LOCAL,
+                RunLifecyclePolicy {
+                    preserve,
+                    stop_on_terminal: true,
+                },
+                RunId::new(),
+            )
             .await
             .unwrap();
+        }
     }
 
     #[tokio::test]

@@ -3,6 +3,42 @@ use std::ffi::OsString;
 use fabro_static::EnvVars;
 use tokio::process::Command;
 
+/// Connection inputs already resolved by the server. These must reach the
+/// worker from the same lookup used for server-side access, not be sampled
+/// again from the ambient process when the child is spawned. Credentials
+/// are deliberately absent: Daytona's key comes from the worker's vault.
+const SANDBOX_CONNECTION_ENV: &[&str] = &[
+    EnvVars::PETRI_SANDBOX_DOCKER_HOST_ADDRESS,
+    EnvVars::DAYTONA_API_URL,
+    EnvVars::DAYTONA_ORGANIZATION_ID,
+];
+
+pub(crate) struct SandboxConnectionEnv(Vec<(&'static str, Option<String>)>);
+
+impl SandboxConnectionEnv {
+    pub(crate) fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Self {
+        Self(
+            SANDBOX_CONNECTION_ENV
+                .iter()
+                .map(|&name| (name, lookup(name)))
+                .collect(),
+        )
+    }
+
+    pub(crate) fn apply(&self, cmd: &mut Command) {
+        for (name, value) in &self.0 {
+            match value {
+                Some(value) => {
+                    cmd.env(name, value);
+                }
+                None => {
+                    cmd.env_remove(name);
+                }
+            }
+        }
+    }
+}
+
 const WORKER_ENV_ALLOWLIST: &[&str] = &[
     EnvVars::PATH,
     EnvVars::HOME,
@@ -52,7 +88,6 @@ const WORKER_ENV_ALLOWLIST: &[&str] = &[
     EnvVars::AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE,
     // Petri's sandbox settings the worker's in-process providers read. No
     // plugin settings cross: the worker never launches a provider plugin.
-    EnvVars::PETRI_SANDBOX_DOCKER_HOST_ADDRESS,
     EnvVars::PETRI_SANDBOX_ACTION_HOST_IMAGE,
     // The Docker daemon selection: the worker's Docker provider reads these
     // from its own process, so the worker's sandboxes go to the daemon the
@@ -64,10 +99,6 @@ const WORKER_ENV_ALLOWLIST: &[&str] = &[
     EnvVars::DOCKER_API_VERSION,
     EnvVars::DOCKER_CONFIG,
     EnvVars::DOCKER_CONTEXT,
-    // Daytona's non-secret selection. The worker reads the API key from
-    // the vault and supplies it explicitly to the in-process provider.
-    EnvVars::DAYTONA_API_URL,
-    EnvVars::DAYTONA_ORGANIZATION_ID,
     // A test's checkpoint gates: the worker's hooks hold at a named point
     // until the test releases them, so a crash can be placed there.
     EnvVars::FABRO_TEST_CHECKPOINT_GATES,
@@ -110,7 +141,37 @@ mod tests {
     use std::ffi::OsString;
     use std::path::Path;
 
-    use super::{RENDER_GRAPH_ENV_ALLOWLIST, WORKER_ENV_ALLOWLIST, apply_allowlist};
+    use super::{
+        RENDER_GRAPH_ENV_ALLOWLIST, SandboxConnectionEnv, WORKER_ENV_ALLOWLIST, apply_allowlist,
+    };
+
+    #[tokio::test]
+    async fn explicit_connection_snapshot_replaces_selectors_without_forwarding_credentials() {
+        let snapshot = SandboxConnectionEnv::from_lookup(|name| match name {
+            "DAYTONA_API_URL" => Some("https://admitted.example/api".to_string()),
+            "PETRI_SANDBOX_DOCKER_HOST_ADDRESS" => Some("server.internal".to_string()),
+            "DAYTONA_API_KEY" => panic!("connection configuration must not read credentials"),
+            _ => None,
+        });
+        let mut cmd = env_command();
+        cmd.env_clear();
+        cmd.env("DAYTONA_API_URL", "https://changed.example/api");
+        cmd.env("DAYTONA_ORGANIZATION_ID", "wrong-organization");
+        snapshot.apply(&mut cmd);
+        assert_eq!(
+            env_output(cmd).await,
+            HashMap::from([
+                (
+                    "DAYTONA_API_URL".to_string(),
+                    "https://admitted.example/api".to_string()
+                ),
+                (
+                    "PETRI_SANDBOX_DOCKER_HOST_ADDRESS".to_string(),
+                    "server.internal".to_string()
+                ),
+            ])
+        );
+    }
 
     fn env_command() -> tokio::process::Command {
         assert!(Path::new("/usr/bin/env").exists());
@@ -264,16 +325,10 @@ mod tests {
             actual.get("DOCKER_CONTEXT").map(String::as_str),
             Some("build")
         );
-        // Daytona's non-secret selectors cross; its key is the vault's,
-        // never the server's environment.
-        assert_eq!(
-            actual.get("DAYTONA_API_URL").map(String::as_str),
-            Some("https://daytona.internal/api")
-        );
-        assert_eq!(
-            actual.get("DAYTONA_ORGANIZATION_ID").map(String::as_str),
-            Some("org-1")
-        );
+        // Connection selectors require the explicit server snapshot. The
+        // credential still comes from the worker's vault.
+        assert!(!actual.contains_key("DAYTONA_API_URL"));
+        assert!(!actual.contains_key("DAYTONA_ORGANIZATION_ID"));
         // The URL alias and placement target never reached the Daytona
         // plugin, so they stay out and plugin-era leases keep their
         // fingerprint.
