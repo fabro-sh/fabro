@@ -1,58 +1,55 @@
 use std::any::{TypeId, type_name};
-use std::time::SystemTime;
 
-use chrono::DateTime;
+use chrono::{DateTime, Utc};
 use fabro_api::types::{
-    SandboxDetails as ApiSandboxDetails, SandboxId as ApiSandboxId, SandboxKind as ApiSandboxKind,
+    SandboxDetails as ApiSandboxDetails, SandboxKind as ApiSandboxKind,
     SandboxNetworkPolicy as ApiSandboxNetworkPolicy, SandboxProviderKind as ApiSandboxProvider,
     SandboxResources as ApiSandboxResources, SandboxState as ApiSandboxState,
     SandboxStatus as ApiSandboxStatus, SandboxWorkspaceOwnership as ApiSandboxWorkspaceOwnership,
 };
-use fabro_types::{RunSandboxInstance, RunSandboxRuntime, SandboxDetails, SandboxProviderKind};
-use sandbox_driver::legacy::{
-    NetworkPolicy, Resources, SandboxId, SandboxKind, SandboxState, SandboxStatus,
-    WorkspaceOwnership,
+use fabro_types::{
+    RunSandboxInstance, RunSandboxRuntime, SandboxDetails, SandboxKind, SandboxNetworkPolicy,
+    SandboxProviderKind, SandboxResources, SandboxState, SandboxStatus, SandboxWorkspaceOwnership,
 };
 use serde_json::json;
 
 #[test]
-fn sandbox_details_reuses_the_domain_and_driver_types() {
+fn sandbox_details_reuses_the_domain_types() {
     assert_same_type::<ApiSandboxDetails, SandboxDetails>();
     assert_same_type::<ApiSandboxProvider, SandboxProviderKind>();
     assert_same_type::<ApiSandboxStatus, SandboxStatus>();
-    assert_same_type::<ApiSandboxId, SandboxId>();
     assert_same_type::<ApiSandboxState, SandboxState>();
-    assert_same_type::<ApiSandboxResources, Resources>();
-    assert_same_type::<ApiSandboxNetworkPolicy, NetworkPolicy>();
+    assert_same_type::<ApiSandboxResources, SandboxResources>();
+    assert_same_type::<ApiSandboxNetworkPolicy, SandboxNetworkPolicy>();
     assert_same_type::<ApiSandboxKind, SandboxKind>();
-    assert_same_type::<ApiSandboxWorkspaceOwnership, WorkspaceOwnership>();
+    assert_same_type::<ApiSandboxWorkspaceOwnership, SandboxWorkspaceOwnership>();
 }
 
 #[test]
 fn sandbox_details_json_matches_openapi_shape() {
-    let mut status = SandboxStatus::new(
-        SandboxId::try_new("container-abc123").unwrap(),
-        SandboxState::Running,
-    );
+    let mut status = SandboxStatus::new("container-abc123", SandboxState::Running);
     status.name = Some("fabro-run-abc".to_string());
     status.provider_state = "running".to_string();
-    let mut resources = Resources::default();
-    resources.cpu_cores = Some(2);
-    resources.memory_mb = Some(4096);
-    status.resources = Some(resources);
+    status.resources = Some(SandboxResources {
+        cpu_cores: Some(2),
+        memory_mb: Some(4096),
+        ..SandboxResources::default()
+    });
     status.sandbox_kind = Some(SandboxKind::Container);
     status.labels.insert("run".to_string(), "abc".to_string());
     status.image = Some("ghcr.io/fabro/sandbox:latest".to_string());
-    status.network = Some(NetworkPolicy::CidrAllowList {
+    status.network = Some(SandboxNetworkPolicy::CidrAllowList {
         cidrs: vec!["10.0.0.0/8".to_string()],
     });
     status.web_url = Some(
         "https://app.daytona.io/dashboard/sandboxes?sandboxId=ad65029a-2d01-421e-8936-49451653fcd9"
             .to_string(),
     );
-    status.created_at = Some(SystemTime::from(
-        DateTime::parse_from_rfc3339("2026-05-09T12:00:00Z").unwrap(),
-    ));
+    status.created_at = Some(
+        DateTime::parse_from_rfc3339("2026-05-09T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc),
+    );
     let details = SandboxDetails {
         sandbox: RunSandboxInstance {
             provider:          SandboxProviderKind::DOCKER,
@@ -139,7 +136,7 @@ fn sandbox_details_deserializes_a_status_with_only_its_required_fields() {
     assert_eq!(details.status.state, SandboxState::Running);
     assert_eq!(
         details.status.workspace_ownership,
-        Some(WorkspaceOwnership::Designated)
+        Some(SandboxWorkspaceOwnership::Designated)
     );
     assert!(details.status.resources.is_none());
     assert!(details.status.network.is_none());

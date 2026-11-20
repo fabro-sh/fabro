@@ -254,7 +254,8 @@ async fn mock_daytona_current_key<'a>(
                     "permissions": permissions,
                     "lastUsedAt": null,
                     "expiresAt": null,
-                    "userId": "user_123"
+                    "userId": "user_123",
+                    "organizationId": "org_123"
                 }));
         })
         .await
@@ -1609,10 +1610,12 @@ async fn create_secret_rejects_under_scoped_daytona_api_key_and_leaves_vault_unc
     let response = app.oneshot(req).await.unwrap();
     let body = response_json!(response, StatusCode::UNPROCESSABLE_ENTITY).await;
 
+    // TODO(parity): sandbox-driver's health keeps the missing scopes only in
+    // its message, so the response can no longer offer its own remediation.
     assert_eq!(
         body["errors"][0]["detail"],
-        "Daytona API key is missing required scopes: write:snapshots, write:sandboxes. \
-         Regenerate the key with all snapshot and sandbox scopes."
+        "daytona credential validation failed: Daytona did not accept the credential: \
+         API key \"delete-only\" is missing required scopes: write:snapshots, write:sandboxes"
     );
     assert_eq!(
         state
@@ -1625,7 +1628,8 @@ async fn create_secret_rejects_under_scoped_daytona_api_key_and_leaves_vault_unc
         Some("existing".to_string())
     );
     auth.assert_async().await;
-    current_key.assert_async().await;
+    // Once to open the provider (its organization), once for its health.
+    current_key.assert_calls_async(2).await;
 }
 
 #[tokio::test]
@@ -1681,24 +1685,19 @@ enabled = false
         .expect("cloud sandbox check should be present");
 
     assert_eq!(cloud_sandbox.status, CheckStatus::Error);
-    assert_eq!(
-        cloud_sandbox.summary,
-        "Daytona API key is missing required scopes"
-    );
-    assert_eq!(
-        cloud_sandbox.details[0].text,
-        "missing: write:snapshots, write:sandboxes"
-    );
-    assert_eq!(
-        cloud_sandbox.remediation.as_deref(),
-        Some(
-            "Regenerate the Daytona API key with scopes: write:snapshots, \
-             delete:snapshots, write:sandboxes, delete:sandboxes, then \
-             `fabro secret set DAYTONA_API_KEY`."
-        )
+    // TODO(parity): sandbox-driver's health names the missing scopes only in
+    // its message, so doctor reports a rejected key that carries them.
+    assert_eq!(cloud_sandbox.summary, "Daytona credential rejected");
+    assert!(
+        cloud_sandbox.details[0]
+            .text
+            .contains("missing required scopes: write:snapshots, write:sandboxes"),
+        "{}",
+        cloud_sandbox.details[0].text
     );
     auth.assert_async().await;
-    current_key.assert_async().await;
+    // Once to open the provider (its organization), once for its health.
+    current_key.assert_calls_async(2).await;
 }
 
 #[tokio::test]

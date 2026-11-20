@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
-use std::num::NonZeroU64;
+use std::io::Cursor;
+use std::num::{NonZeroU16, NonZeroU64};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,26 +11,32 @@ use fabro_types::{RunSandboxInstance, SandboxProviderKind};
 use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 use pebble_coding_agent::sandbox_driver::{display_for_log, resolve_path};
-// TODO(parity): the legacy pty and listening-ports facets. The new API's
-// exec with `tty` is refused by every built-in provider, and it has no
-// listening-ports call (parity plan H2, D2, Y6 and B1).
-use sandbox_driver::legacy::{
-    FileKind, ListeningPort, PtyOptions, PtySize, Sandbox, Services as _,
+use sandbox_driver::{
+    Error as DriverError, ExecControls, ExecSpec, Expose, FileKind, OutputSink, PortSupport,
+    Sandbox, TerminalSize,
 };
+use tokio::io::{self as tokio_io, AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::sync::{mpsc, watch};
+use tokio_util::sync::CancellationToken;
 
 use super::super::{
-    ApiError, AppState, Bytes, HeaderMap, IntoResponse, Json, NamedTempFile, Path,
-    PreviewUrlRequest, PreviewUrlResponse, Query, RequiredUser, Response, Router, RunId,
-    SandboxDetails, SandboxFileEntry, SandboxFileListResponse, SandboxService,
-    SandboxServiceListResponse, SshAccessRequest, SshAccessResponse, State, StatusCode,
-    VncPreviewResponse, fs, get, octet_stream_response, parse_run_id_path, post,
-    reject_if_archived,
+    ApiError, AppState, Bytes, HeaderMap, IntoResponse, Json, Path, PreviewUrlRequest,
+    PreviewUrlResponse, Query, RequiredUser, Response, Router, RunId, SandboxDetails,
+    SandboxFileEntry, SandboxFileListResponse, SandboxService, SandboxServiceListResponse,
+    SshAccessRequest, SshAccessResponse, State, StatusCode, VncPreviewResponse, get,
+    octet_stream_response, parse_run_id_path, post, reject_if_archived,
 };
-use crate::sandbox_access::{self, ProviderAccess};
+use crate::sandbox_access::{self, ProviderAccess, RunSandbox};
+use crate::sandbox_ports::{self, ListeningPort};
 
 const MAX_TERMINAL_CONTROL_BYTES: usize = 4096;
 const DEFAULT_VNC_NO_VNC_PORT: u16 = 6080;
 const DEFAULT_VNC_TTL_SECS: i32 = 3600;
+/// The terminal's size until the browser sends its own.
+const DEFAULT_TERMINAL_SIZE: TerminalSize = TerminalSize {
+    rows:    NonZeroU16::new(24).unwrap(),
+    columns: NonZeroU16::new(80).unwrap(),
+};
 /// Header a Daytona unsigned preview needs; surfaced as the response token.
 const PREVIEW_TOKEN_HEADER: &str = "x-daytona-preview-token";
 const LIST_SANDBOX_SERVICES_FAILURE_LABEL: &str = "sandbox service discovery";
@@ -51,10 +58,11 @@ trait VncSandbox {
 impl VncSandbox for Arc<dyn Sandbox> {
     fn vnc_viewer_url(&self) -> BoxFuture<'_, anyhow::Result<String>> {
         async move {
-            let vnc = self.vnc().ok_or_else(|| {
+            let endpoints = self.endpoints().ok_or_else(|| {
                 anyhow::anyhow!("Sandbox provider does not support VNC previews.")
             })?;
-            vnc.vnc_connection()
+            endpoints
+                .vnc()
                 .await
                 .map(|connection| connection.url)
                 .context("Failed to open a VNC preview")
@@ -99,7 +107,7 @@ async fn retrieve_run_sandbox(
     // state the sandbox is: a stopped sandbox is described, not started.
     let details = async {
         let sandbox = sandbox_access::attach_run_sandbox(&access, &record, id).await?;
-        let status = sandbox.describe().await.with_context(|| {
+        let status = sandbox.status().await.with_context(|| {
             format!(
                 "Failed to describe {} sandbox '{}'",
                 record.provider, record.runtime.id
@@ -131,7 +139,7 @@ struct SandboxFileParams {
 
 #[derive(Debug, PartialEq, Eq)]
 enum TerminalClientMessage {
-    Resize(PtySize),
+    Resize(TerminalSize),
     Close,
 }
 
@@ -147,11 +155,14 @@ fn parse_terminal_control_message(text: &str) -> Result<TerminalClientMessage, &
         return Err("Terminal control message is too large.");
     }
     match serde_json::from_str::<TerminalClientControl>(text) {
-        Ok(TerminalClientControl::Resize { cols, rows }) if cols > 0 && rows > 0 => {
-            Ok(TerminalClientMessage::Resize(PtySize { cols, rows }))
-        }
-        Ok(TerminalClientControl::Resize { .. }) => {
-            Err("Terminal resize dimensions must be greater than zero.")
+        Ok(TerminalClientControl::Resize { cols, rows }) => {
+            match (NonZeroU16::new(cols), NonZeroU16::new(rows)) {
+                (Some(columns), Some(rows)) => Ok(TerminalClientMessage::Resize(TerminalSize {
+                    rows,
+                    columns,
+                })),
+                _ => Err("Terminal resize dimensions must be greater than zero."),
+            }
         }
         Ok(TerminalClientControl::Close) => Ok(TerminalClientMessage::Close),
         Err(_) => Err("Invalid terminal control message."),
@@ -233,24 +244,17 @@ async fn terminal_websocket(mut socket: WebSocket, state: Arc<AppState>, id: Run
             return;
         }
     };
-    // An interactive shell in the run's working directory over the
-    // driver's Pty facet, on the sandbox brought back to running. The
-    // session is the driver's own; it is closed below.
-    let session = async {
-        let sandbox = sandbox_access::attach_running_run_sandbox(&access, &record, id).await?;
-        let pty = sandbox
-            .pty()
-            .ok_or_else(|| anyhow::anyhow!("Sandbox provider does not support terminals."))?;
-        let mut options = PtyOptions::default();
-        options.size = PtySize::default();
-        options.working_dir = Some(record.runtime.working_directory.clone());
-        pty.open(&options)
-            .await
-            .context("Failed to open sandbox terminal")
-    }
-    .await;
-    let session = match session {
-        Ok(session) => session,
+    // An interactive login shell in the run's working directory, over the
+    // driver's exec with a terminal, on the sandbox brought back to running.
+    // Input, resizes and output travel through the exec's controls; ending
+    // the session terminates the shell.
+    //
+    // TODO(parity): every sandbox-driver built-in provider (Host, Docker and
+    // Daytona) refuses `ExecSpec.tty`, so the terminal opens only on a
+    // provider that supports it; elsewhere the browser gets the provider's
+    // refusal as the terminal's error.
+    let sandbox = match sandbox_access::attach_running_run_sandbox(&access, &record, id).await {
+        Ok(sandbox) => sandbox.sandbox,
         Err(err) => {
             let _ = socket
                 .send(terminal_server_text("error", Some(&format!("{err:#}"))))
@@ -258,13 +262,41 @@ async fn terminal_websocket(mut socket: WebSocket, state: Arc<AppState>, id: Run
             return;
         }
     };
+    let (mut input, stdin) = tokio_io::duplex(64 * 1024);
+    let (output_tx, mut output) = mpsc::channel::<Vec<u8>>(64);
+    let sink: OutputSink = Arc::new(move |_stream, bytes| {
+        let output_tx = output_tx.clone();
+        Box::pin(async move {
+            // A closed browser ends the session; the shell's output has
+            // nowhere to go.
+            let _ = output_tx.send(bytes).await;
+            Ok::<(), DriverError>(())
+        })
+    });
+    let (resize, resized) = watch::channel(DEFAULT_TERMINAL_SIZE);
+    let term = CancellationToken::new();
+    let mut spec = ExecSpec::argv(["bash", "-l"]);
+    spec.tty = true;
+    spec.working_directory = Some(record.runtime.working_directory.clone());
+    let controls = ExecControls {
+        stdin: Some(Box::pin(stdin)),
+        sink: Some(sink),
+        term: Some(term.clone()),
+        resize: Some(resized),
+        ..ExecControls::default()
+    };
+    let shell = {
+        let sandbox = Arc::clone(&sandbox);
+        tokio::spawn(async move { sandbox.exec(spec, controls).await })
+    };
+    let mut shell = std::pin::pin!(shell);
 
     if socket
         .send(terminal_server_text("ready", None))
         .await
         .is_err()
     {
-        let _ = session.close().await;
+        term.cancel();
         return;
     }
 
@@ -276,22 +308,14 @@ async fn terminal_websocket(mut socket: WebSocket, state: Arc<AppState>, id: Run
                 };
                 match message {
                     Ok(WsMessage::Binary(bytes)) => {
-                        if let Err(err) = session.write_input(&bytes).await {
-                            let _ = socket
-                                .send(terminal_server_text("error", Some(&display_for_log(&err, &SecretRedactor))))
-                                .await;
+                        if input.write_all(&bytes).await.is_err() {
                             break;
                         }
                     }
                     Ok(WsMessage::Text(text)) => {
                         match parse_terminal_control_message(text.as_str()) {
                             Ok(TerminalClientMessage::Resize(size)) => {
-                                if let Err(err) = session.resize(size).await {
-                                    let _ = socket
-                                        .send(terminal_server_text("error", Some(&display_for_log(&err, &SecretRedactor))))
-                                        .await;
-                                    break;
-                                }
+                                let _ = resize.send(size);
                             }
                             Ok(TerminalClientMessage::Close) => {
                                 let _ = socket.send(terminal_server_text("closed", None)).await;
@@ -310,29 +334,32 @@ async fn terminal_websocket(mut socket: WebSocket, state: Arc<AppState>, id: Run
                     }
                 }
             }
-            output = session.read_output() => {
-                match output {
-                    Ok(Some(bytes)) => {
-                        if socket.send(WsMessage::Binary(bytes.into())).await.is_err() {
-                            break;
-                        }
-                    }
-                    Ok(None) => {
-                        let _ = socket.send(terminal_server_text("closed", None)).await;
-                        break;
-                    }
-                    Err(err) => {
-                        let _ = socket
-                            .send(terminal_server_text("error", Some(&display_for_log(&err, &SecretRedactor))))
-                            .await;
-                        break;
-                    }
+            Some(bytes) = output.recv() => {
+                if socket.send(WsMessage::Binary(bytes.into())).await.is_err() {
+                    break;
                 }
+            }
+            ended = &mut shell => {
+                // Output the shell wrote before it ended goes first.
+                while let Ok(bytes) = output.try_recv() {
+                    let _ = socket.send(WsMessage::Binary(bytes.into())).await;
+                }
+                let message = match ended {
+                    Ok(Ok(_)) => terminal_server_text("closed", None),
+                    Ok(Err(err)) => {
+                        let err = anyhow::Error::new(err).context("Failed to open sandbox terminal");
+                        terminal_server_text("error", Some(&format!("{err:#}")))
+                    }
+                    Err(err) => terminal_server_text("error", Some(&err.to_string())),
+                };
+                let _ = socket.send(message).await;
+                return;
             }
         }
     }
-    if let Err(err) = session.close().await {
-        tracing::warn!(error = %display_for_log(&err, &SecretRedactor), run_id = %id, "failed to close run terminal session");
+    term.cancel();
+    if let Ok(Err(err)) = shell.await {
+        tracing::warn!(error = %display_for_log(&err, &SecretRedactor), run_id = %id, "run terminal session ended with an error");
     }
 }
 
@@ -368,36 +395,25 @@ async fn generate_preview_url(
         Ok(sandbox) => sandbox,
         Err(response) => return response,
     };
-    let Some(previews) = sandbox.preview_urls() else {
-        return ApiError::new(
-            StatusCode::CONFLICT,
-            "Sandbox provider does not support preview URLs.",
-        )
-        .into_response();
+    let Some(port) = NonZeroU16::new(port) else {
+        return ApiError::bad_request("Port must be greater than zero.").into_response();
     };
-
-    let response = if request.signed {
-        match previews
-            .signed_preview_url(port, Duration::from_secs(request.expires_in_secs.get()))
-            .await
-        {
-            Ok(preview) => PreviewUrlResponse {
-                token: None,
-                url:   preview.url,
-            },
-            Err(err) => {
-                return ApiError::new(StatusCode::CONFLICT, err.to_string()).into_response();
-            }
-        }
-    } else {
-        match previews.preview_url(port).await {
-            Ok(preview) => PreviewUrlResponse {
-                token: preview.headers.get(PREVIEW_TOKEN_HEADER).cloned(),
-                url:   preview.url,
-            },
-            Err(err) => {
-                return ApiError::new(StatusCode::CONFLICT, err.to_string()).into_response();
-            }
+    // A port the provider cannot expose is refused by the provider.
+    let options = Expose {
+        signed: request.signed,
+        ttl_ms: request
+            .signed
+            .then(|| request.expires_in_secs.get().saturating_mul(1000)),
+    };
+    let response = match sandbox.sandbox.ports().expose(port, options).await {
+        Ok(exposure) => PreviewUrlResponse {
+            token: (!request.signed)
+                .then(|| exposure.headers.get(PREVIEW_TOKEN_HEADER).cloned())
+                .flatten(),
+            url:   exposure.url,
+        },
+        Err(err) => {
+            return ApiError::new(StatusCode::CONFLICT, err.to_string()).into_response();
         }
     };
 
@@ -419,31 +435,35 @@ async fn create_ssh_access(
         Err(response) => return response,
     };
 
-    if record.provider == SandboxProviderKind::LOCAL {
-        return ApiError::new(
-            StatusCode::CONFLICT,
-            "Sandbox provider does not support access commands.",
-        )
-        .into_response();
-    }
     let sandbox = match reconnect_run_sandbox_instance(&state, &id, &record).await {
         Ok(sandbox) => sandbox,
         Err(response) => return response,
     };
     // Providers with a leased SSH gateway honor the requested lifetime;
-    // providers with a fixed local command return it as is.
-    let result = match (sandbox.ssh(), sandbox.shell_command()) {
-        (Some(ssh), _) => ssh
-            .ssh_access(Some(Duration::from_secs_f64(request.ttl_minutes * 60.0)))
-            .await
-            .map(|access| Some(access.command))
-            .context("Failed to create SSH access"),
-        (None, Some(shell)) => shell
-            .shell_command()
-            .await
-            .map(Some)
-            .context("Failed to build sandbox shell command"),
-        (None, None) => Ok(None),
+    // providers with a fixed local command return it as is. A provider
+    // without endpoints has no access command at all.
+    //
+    // TODO(parity): of sandbox-driver's built-in providers only Docker
+    // offers endpoints; its Daytona provider has no SSH gateway and Host has
+    // no access command, and protocol 3 plugins cannot offer endpoints at
+    // all. On those, SSH access is refused.
+    let result = match sandbox.sandbox.endpoints() {
+        Some(endpoints) => {
+            let ttl_ms = Duration::from_secs_f64(request.ttl_minutes * 60.0).as_millis();
+            match endpoints
+                .ssh(u64::try_from(ttl_ms).unwrap_or(u64::MAX))
+                .await
+            {
+                Ok(access) => Ok(Some(access.command)),
+                Err(DriverError::Unsupported { .. }) => endpoints
+                    .shell_command()
+                    .await
+                    .map(Some)
+                    .context("Failed to build sandbox shell command"),
+                Err(err) => Err(anyhow::Error::new(err).context("Failed to create SSH access")),
+            }
+        }
+        None => Ok(None),
     };
     match result {
         Ok(Some(command)) => {
@@ -471,18 +491,20 @@ async fn create_sandbox_vnc_preview(
         Ok(record) => record,
         Err(response) => return response,
     };
-    if record.provider != SandboxProviderKind::DAYTONA {
+    let sandbox = match reconnect_run_sandbox_instance(&state, &id, &record).await {
+        Ok(sandbox) => sandbox,
+        Err(response) => return response,
+    };
+    // TODO(parity): sandbox-driver's Daytona provider offers no endpoints,
+    // so it has no VNC preview, and protocol 3 plugins cannot offer one.
+    if sandbox.sandbox.endpoints().is_none() {
         return ApiError::new(
             StatusCode::NOT_IMPLEMENTED,
             "Sandbox provider does not support VNC previews.",
         )
         .into_response();
     }
-    let sandbox = match reconnect_run_sandbox_instance(&state, &id, &record).await {
-        Ok(sandbox) => sandbox,
-        Err(response) => return response,
-    };
-    match build_vnc_preview_response(&record.provider, &sandbox).await {
+    match build_vnc_preview_response(&record.provider, &sandbox.sandbox).await {
         Ok(response) => (StatusCode::CREATED, Json(response)).into_response(),
         Err(response) => response,
     }
@@ -555,14 +577,16 @@ async fn list_sandbox_files(
         Ok(sandbox) => sandbox,
         Err(response) => return response,
     };
-    // To `depth` (the immediate children by default), sorted by path, with
-    // sizes for files only.
+    // To `depth` (1, the immediate children, by default), sorted by path,
+    // with sizes for files only and names relative to the listed directory.
+    // sandbox-driver counts the immediate children as depth 0 and names each
+    // entry by its path in the workload.
     let path = resolve_path(&params.path, &record.runtime.working_directory);
-    match sandbox
-        .fs()
-        .list_dir(&path, params.depth.unwrap_or(1))
-        .await
-    {
+    let depth = u32::try_from(params.depth.unwrap_or(1))
+        .unwrap_or(u32::MAX)
+        .saturating_sub(1);
+    let prefix = format!("{}/", path.trim_end_matches('/'));
+    match sandbox.sandbox.files().list(&path, depth).await {
         Ok(mut entries) => {
             entries.sort_by(|left, right| left.path.cmp(&right.path));
             Json(SandboxFileListResponse {
@@ -572,9 +596,11 @@ async fn list_sandbox_files(
                         is_dir: entry.kind == FileKind::Directory,
                         size:   (entry.kind == FileKind::File)
                             .then_some(entry.size)
-                            .flatten()
                             .map(u64::cast_signed),
-                        name:   entry.path,
+                        name:   entry
+                            .path
+                            .strip_prefix(&prefix)
+                            .map_or_else(|| entry.path.clone(), str::to_owned),
                     })
                     .collect(),
             })
@@ -601,44 +627,34 @@ async fn list_sandbox_services(
         Ok(record) => record,
         Err(response) => return response,
     };
-    let provider = record.provider.clone();
     let sandbox = match reconnect_run_sandbox_instance(&state, &id, &record).await {
         Ok(sandbox) => sandbox,
         Err(response) => return response,
     };
-    let Some(services) = sandbox.services() else {
-        return ApiError::new(
-            StatusCode::NOT_IMPLEMENTED,
-            format!("sandbox provider `{provider}` does not support background services"),
-        )
-        .into_response();
-    };
-    let ports = match services.listening_ports().await {
+    let ports = match sandbox_ports::listening_ports(sandbox.sandbox.as_ref()).await {
         Ok(ports) => ports,
         Err(err) => {
             return ApiError::new(
                 StatusCode::CONFLICT,
-                format!("{LIST_SANDBOX_SERVICES_FAILURE_LABEL} failed: {err}"),
+                format!("{LIST_SANDBOX_SERVICES_FAILURE_LABEL} failed: {err:#}"),
             )
             .into_response();
         }
     };
     Json(SandboxServiceListResponse {
-        data: services_from_ports(ports, &provider),
+        data: services_from_ports(ports, &sandbox.descriptor.ports),
     })
     .into_response()
 }
 
-/// The driver's listeners grouped by port, previewable ports first.
-fn services_from_ports(
-    ports: Vec<ListeningPort>,
-    provider: &SandboxProviderKind,
-) -> Vec<SandboxService> {
+/// The sandbox's listeners grouped by port, previewable ports first: those
+/// the provider's descriptor says it can expose.
+fn services_from_ports(ports: Vec<ListeningPort>, exposable: &PortSupport) -> Vec<SandboxService> {
     let mut services = BTreeMap::<u16, SandboxService>::new();
     for listener in ports {
         push_service(
             &mut services,
-            provider,
+            exposable,
             listener.port,
             listener.address,
             listener.process,
@@ -655,7 +671,7 @@ fn sorted_services(services: BTreeMap<u16, SandboxService>) -> Vec<SandboxServic
 
 fn push_service(
     services: &mut BTreeMap<u16, SandboxService>,
-    provider: &SandboxProviderKind,
+    exposable: &PortSupport,
     port: u16,
     address: String,
     process: Option<String>,
@@ -664,7 +680,7 @@ fn push_service(
         port,
         addresses: Vec::new(),
         processes: Vec::new(),
-        preview_supported: preview_supported(provider, port),
+        preview_supported: preview_supported(exposable, port),
     });
     push_unique(&mut service.addresses, address);
     if let Some(process) = process {
@@ -672,8 +688,14 @@ fn push_service(
     }
 }
 
-fn preview_supported(provider: &SandboxProviderKind, port: u16) -> bool {
-    *provider == SandboxProviderKind::DAYTONA && (3000..=9999).contains(&port)
+fn preview_supported(exposable: &PortSupport, port: u16) -> bool {
+    match exposable {
+        PortSupport::Any => port != 0,
+        PortSupport::Selected(ports) => {
+            NonZeroU16::new(port).is_some_and(|port| ports.contains(&port))
+        }
+        PortSupport::None => false,
+    }
 }
 
 fn push_unique(values: &mut Vec<String>, value: String) {
@@ -696,23 +718,20 @@ async fn get_sandbox_file(
         Ok(sandbox) => sandbox,
         Err(response) => return response,
     };
-    let temp = match NamedTempFile::new() {
-        Ok(temp) => temp,
+    let path = resolve_path(&params.path, &record.runtime.working_directory);
+    let mut stream = match sandbox.sandbox.files().get(&path, None).await {
+        Ok(stream) => stream,
         Err(err) => {
-            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response();
+            return ApiError::new(
+                StatusCode::NOT_FOUND,
+                display_for_log(&err, &SecretRedactor),
+            )
+            .into_response();
         }
     };
-    let path = resolve_path(&params.path, &record.runtime.working_directory);
-    if let Err(err) = sandbox.fs().download(&path, temp.path()).await {
-        return ApiError::new(
-            StatusCode::NOT_FOUND,
-            display_for_log(&err, &SecretRedactor),
-        )
-        .into_response();
-    }
-    match fs::read(temp.path()).await {
-        Ok(bytes) => octet_stream_response(bytes.into()),
+    let mut bytes = Vec::new();
+    match stream.read_to_end(&mut bytes).await {
+        Ok(_) => octet_stream_response(bytes.into()),
         Err(err) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
@@ -737,18 +756,13 @@ async fn put_sandbox_file(
         Ok(sandbox) => sandbox,
         Err(response) => return response,
     };
-    let temp = match NamedTempFile::new() {
-        Ok(temp) => temp,
-        Err(err) => {
-            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response();
-        }
-    };
-    if let Err(err) = fs::write(temp.path(), &body).await {
-        return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
-    }
     let path = resolve_path(&params.path, &record.runtime.working_directory);
-    match sandbox.fs().upload(temp.path(), &path).await {
+    match sandbox
+        .sandbox
+        .files()
+        .put(&path, Box::pin(Cursor::new(body.to_vec())))
+        .await
+    {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(err) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -762,7 +776,7 @@ async fn put_sandbox_file(
 async fn reconnect_run_sandbox(
     state: &Arc<AppState>,
     run_id: &RunId,
-) -> Result<(RunSandboxInstance, Arc<dyn Sandbox>), Response> {
+) -> Result<(RunSandboxInstance, RunSandbox), Response> {
     let record = load_run_sandbox_instance(state, run_id).await?;
     let sandbox = reconnect_run_sandbox_instance(state, run_id, &record).await?;
     Ok((record, sandbox))
@@ -773,7 +787,7 @@ async fn reconnect_run_sandbox_instance(
     state: &Arc<AppState>,
     run_id: &RunId,
     record: &RunSandboxInstance,
-) -> Result<Arc<dyn Sandbox>, Response> {
+) -> Result<RunSandbox, Response> {
     let access = load_provider_access(state).await?;
     sandbox_access::attach_running_run_sandbox(&access, record, *run_id)
         .await
@@ -817,9 +831,9 @@ mod tests {
     fn terminal_control_accepts_resize_and_close() {
         assert_eq!(
             parse_terminal_control_message(r#"{"type":"resize","cols":120,"rows":32}"#),
-            Ok(TerminalClientMessage::Resize(PtySize {
-                cols: 120,
-                rows: 32,
+            Ok(TerminalClientMessage::Resize(TerminalSize {
+                rows:    NonZeroU16::new(32).unwrap(),
+                columns: NonZeroU16::new(120).unwrap(),
             }))
         );
         assert_eq!(
@@ -911,7 +925,12 @@ mod tests {
                 node_v6,
                 ListeningPort::new(5173, "0.0.0.0:5173"),
             ],
-            &SandboxProviderKind::DAYTONA,
+            &PortSupport::Selected(
+                [3000, 5173]
+                    .into_iter()
+                    .filter_map(NonZeroU16::new)
+                    .collect(),
+            ),
         );
 
         assert_eq!(services, vec![
@@ -937,12 +956,14 @@ mod tests {
     }
 
     #[test]
-    fn preview_support_is_daytona_only_for_documented_range() {
-        assert!(!preview_supported(&SandboxProviderKind::DAYTONA, 2500));
-        assert!(preview_supported(&SandboxProviderKind::DAYTONA, 3000));
-        assert!(preview_supported(&SandboxProviderKind::DAYTONA, 9999));
-        assert!(!preview_supported(&SandboxProviderKind::DAYTONA, 10000));
-        assert!(!preview_supported(&SandboxProviderKind::DOCKER, 3000));
+    fn preview_support_follows_the_providers_exposable_ports() {
+        let selected =
+            PortSupport::Selected([3000].into_iter().filter_map(NonZeroU16::new).collect());
+        assert!(preview_supported(&selected, 3000));
+        assert!(!preview_supported(&selected, 3001));
+        assert!(preview_supported(&PortSupport::Any, 10000));
+        assert!(!preview_supported(&PortSupport::Any, 0));
+        assert!(!preview_supported(&PortSupport::None, 3000));
     }
 
     struct FakeVncSandbox {

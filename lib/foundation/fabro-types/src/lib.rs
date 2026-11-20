@@ -44,6 +44,7 @@ pub mod sandbox_details;
 pub mod sandbox_inventory;
 pub mod sandbox_provider;
 pub mod sandbox_services;
+pub mod sandbox_status;
 pub mod secret;
 pub mod session;
 pub mod session_event;
@@ -172,6 +173,10 @@ pub use sandbox_provider::{
     BundledProvider, InvalidSandboxProviderKind, SandboxProviderKind, WorkspacePolicy,
 };
 pub use sandbox_services::{SandboxService, SandboxServiceListResponse};
+pub use sandbox_status::{
+    SandboxKind, SandboxNetworkPolicy, SandboxResources, SandboxState, SandboxStatus,
+    SandboxWorkspaceOwnership,
+};
 pub use secret::{OAuthConfig, OAuthCredential, OAuthTokens, SecretMetadata, SecretType};
 pub use session::{
     RunSessionMetadata, SessionDetail, SessionId, SessionStatus, SessionSummary, SessionTurn,

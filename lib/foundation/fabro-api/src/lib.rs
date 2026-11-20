@@ -71,6 +71,11 @@ pub mod types {
         Variable, VariableListResponse, WorkflowPath, WorkflowSettings, WorkflowVersion,
         WorkflowVersionId,
     };
+    /// A sandbox's status on the API is Fabro's projection of the driver's.
+    pub use fabro_types::{
+        SandboxKind, SandboxNetworkPolicy, SandboxResources, SandboxState, SandboxStatus,
+        SandboxWorkspaceOwnership,
+    };
     pub use lithos_llm::catalog::{ModelHandle, ProviderId};
     pub use lithos_llm::client::ProbeReport;
     pub use lithos_llm::types::{
@@ -97,12 +102,6 @@ pub mod types {
         SkillsProjection as AgentSessionSkills, SubagentCounts as AgentSessionSubagentCounts,
         SubagentProjection as AgentSessionSubagent, SubagentStatus as AgentSessionSubagentStatus,
         ToolActivity as AgentSessionToolActivity,
-    };
-    /// A sandbox's status on the API is the sandbox driver's own type.
-    // TODO(parity): the legacy status types; see `build.rs`.
-    pub use sandbox_driver::legacy::{
-        NetworkPolicy as SandboxNetworkPolicy, Resources as SandboxResources, SandboxId,
-        SandboxKind, SandboxState, SandboxStatus, WorkspaceOwnership as SandboxWorkspaceOwnership,
     };
 
     pub use crate::generated::types::*;

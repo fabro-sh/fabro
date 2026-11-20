@@ -28,9 +28,7 @@ fabro-db = { path = "../../foundation/fabro-db" }
 fabro-http.workspace = true
 fabro-static = { path = "../../foundation/fabro-static" }
 sandbox-driver.workspace = true
-sandbox-driver-host.workspace = true
-sandbox-driver-docker.workspace = true
-sandbox-driver-daytona.workspace = true
+sandbox-driver-protocol.workspace = true
 fabro-interview = { path = "../fabro-interview" }
 fabro-store = { path = "../fabro-store" }
 fabro-types = { path = "../../foundation/fabro-types" }

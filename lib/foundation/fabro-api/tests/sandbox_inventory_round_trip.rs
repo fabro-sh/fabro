@@ -1,17 +1,15 @@
 use std::any::{TypeId, type_name};
-use std::time::SystemTime;
 
-use chrono::DateTime;
+use chrono::{DateTime, Utc};
 use fabro_api::types::{
     SandboxInfo as ApiSandboxInfo, SandboxListMeta as ApiSandboxListMeta,
     SandboxListResponse as ApiSandboxListResponse, SandboxProviderKind as ApiSandboxProviderKind,
     SandboxProviderLookupError as ApiSandboxProviderLookupError,
 };
 use fabro_types::{
-    SandboxInfo, SandboxListMeta, SandboxListResponse, SandboxProviderKind,
-    SandboxProviderLookupError,
+    SandboxInfo, SandboxListMeta, SandboxListResponse, SandboxNetworkPolicy, SandboxProviderKind,
+    SandboxProviderLookupError, SandboxResources, SandboxState, SandboxStatus,
 };
-use sandbox_driver::legacy::{NetworkPolicy, Resources, SandboxId, SandboxState, SandboxStatus};
 use serde_json::json;
 
 #[test]
@@ -25,26 +23,26 @@ fn sandbox_inventory_round_trip_reuses_domain_types() {
 
 #[test]
 fn sandbox_inventory_round_trip_json_matches_openapi_shape() {
-    let mut status = SandboxStatus::new(
-        SandboxId::try_new("sandbox-abc123").unwrap(),
-        SandboxState::Running,
-    );
+    let mut status = SandboxStatus::new("sandbox-abc123", SandboxState::Running);
     status.name = Some("fabro-01KSGHGMCFM8W2FHXNMJ7MVY65".to_string());
     status.provider_state = "started".to_string();
-    let mut resources = Resources::default();
-    resources.cpu_cores = Some(2);
-    resources.memory_mb = Some(4096);
-    resources.disk_mb = Some(20 * 1024);
-    status.resources = Some(resources);
+    status.resources = Some(SandboxResources {
+        cpu_cores: Some(2),
+        memory_mb: Some(4096),
+        disk_mb: Some(20 * 1024),
+        ..SandboxResources::default()
+    });
     status.region = Some("us".to_string());
     status
         .labels
         .insert("sh.fabro.managed".to_string(), "true".to_string());
     status.snapshot = Some("daytona-medium".to_string());
-    status.network = Some(NetworkPolicy::Block);
+    status.network = Some(SandboxNetworkPolicy::Block);
     status.web_url =
         Some("https://app.daytona.io/dashboard/sandboxes?sandboxId=sandbox-abc123".to_string());
-    let at = SystemTime::from(DateTime::parse_from_rfc3339("2026-05-25T12:00:00Z").unwrap());
+    let at = DateTime::parse_from_rfc3339("2026-05-25T12:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
     status.created_at = Some(at);
     status.updated_at = Some(at);
     let response = SandboxListResponse {
@@ -104,7 +102,7 @@ fn sandbox_inventory_round_trip_json_matches_openapi_shape() {
     assert_eq!(decoded.data[0].status.state, SandboxState::Running);
     assert!(matches!(
         decoded.data[0].status.network,
-        Some(NetworkPolicy::Block)
+        Some(SandboxNetworkPolicy::Block)
     ));
 }
 

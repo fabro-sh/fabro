@@ -98,7 +98,10 @@ async fn final_patch_survives_sandbox_removal_and_reports_unreadable_blobs() {
         .unwrap()
         .expect("durable patch bytes");
     let live = get_json(&app, &files_url(&run_id), StatusCode::OK).await;
-    assert_eq!(live["meta"]["source"], "sandbox");
+    // Run Files cannot read a live sandbox's repository until sandbox-driver
+    // can run git in it, so even a live run shows the saved patch.
+    assert_eq!(live["meta"]["source"], "final_patch");
+    assert_eq!(live["meta"]["degraded_reason"], "provider_unsupported");
     assert_eq!(live["meta"]["total_changed"], 3);
 
     let sandbox_dir = projection["sandbox"]["instance"]["runtime"]["working_directory"]
@@ -111,7 +114,7 @@ async fn final_patch_survives_sandbox_removal_and_reports_unreadable_blobs() {
     let saved = get_json(&app, &files_url(&run_id), StatusCode::OK).await;
     assert_eq!(saved["meta"]["source"], "final_patch");
     assert_eq!(saved["meta"]["degraded"], true);
-    assert_eq!(saved["meta"]["degraded_reason"], "sandbox_gone");
+    assert_eq!(saved["meta"]["degraded_reason"], "provider_unsupported");
     assert_eq!(saved["meta"]["scope"], "committed");
     assert_eq!(saved["meta"]["total_changed"], 3);
     assert_eq!(

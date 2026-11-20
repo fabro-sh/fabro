@@ -670,12 +670,11 @@ async fn runtime_spec(
             None
         }
     };
-    let daytona = vault.read().await.get(EnvVars::DAYTONA_API_KEY).map(|key| {
-        // The same shared client the server attaches, so the worker's
-        // Daytona calls take the server's proxy and CA policy.
-        DaytonaCredentials::from_api_key(key.to_owned(), crate::process_env_var)
-            .with_http_client(fabro_http::http_client().ok())
-    });
+    let daytona = vault
+        .read()
+        .await
+        .get(EnvVars::DAYTONA_API_KEY)
+        .map(|key| DaytonaCredentials::from_api_key(key.to_owned(), crate::process_env_var));
     Ok(RuntimeSpec {
         stage_credentials: None,
         sandbox: SandboxProviderConfig::from_lookup(daytona, crate::process_env_var),

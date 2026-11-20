@@ -16,7 +16,7 @@ use fabro_petri::runtime::RuntimeSpec;
 use fabro_types::settings::run::{EnvironmentNetworkMode, EnvironmentNetworkSettings};
 use fabro_types::{RunId, SandboxProviderKind};
 use petri_store::MemoryRunStore;
-use sandbox_driver::legacy::{NetworkPolicy, SandboxFilter, SandboxState, SnapshotFilter};
+use sandbox_driver::{LabelFilter, NetworkPolicy, SandboxState, Status};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::process::Command;
@@ -111,20 +111,14 @@ async fn daytona_block_prevents_outbound_https_while_allow_all_preserves_it() {
         fabro_test::require_env("DAYTONA_API_KEY").expect("guard checked the credential"),
         provider_env,
     );
-    let provider = providers::connect_daytona(&credentials).await.unwrap();
-    let snapshots = provider.snapshots().unwrap();
-    let before = snapshots.list(&SnapshotFilter::default()).await.unwrap();
-    // Live validation requires the standard runner snapshot to exist already.
-    // Its exact name is supplied by the operator after checking the pinned
-    // Petri runner, so the test does not create or delete shared snapshots.
+    // The operator names the existing pinned Petri runner snapshot after
+    // checking it, so the test does not create or delete shared snapshots.
+    // sandbox-driver has no snapshot listing, so its presence is not checked
+    // here; a missing snapshot fails the run.
     let runner = fabro_test::require_env("FABRO_TEST_DAYTONA_RUNNER_SNAPSHOT")
         .expect("set the existing pinned Petri runner snapshot name");
-    assert!(
-        before
-            .iter()
-            .any(|s| s.name.as_deref() == Some(runner.as_str()))
-    );
     let config = SandboxProviderConfig::from_lookup(Some(credentials), provider_env);
+    let sandboxes = providers::open_catalog(&config, []).unwrap();
     for (mode, expected) in [
         (EnvironmentNetworkMode::AllowAll, NetworkPolicy::AllowAll),
         (EnvironmentNetworkMode::Block, NetworkPolicy::Block),
@@ -148,11 +142,8 @@ async fn daytona_block_prevents_outbound_https_while_allow_all_preserves_it() {
             curl,
         );
         let outcome = engine::run(request).await;
-        let mut filter = SandboxFilter::default();
-        filter
-            .labels
-            .insert("petri.run".to_string(), run_id.clone());
-        let observed = provider.list(&filter).await;
+        let filter = LabelFilter::eq("petri.run", run_id.clone());
+        let observed = daytona_statuses(&sandboxes, &filter).await;
         let cleanup = prune::prune(PruneRequest {
             sandbox: config.clone(),
             run_id,
@@ -164,13 +155,16 @@ async fn daytona_block_prevents_outbound_https_while_allow_all_preserves_it() {
         assert!(cleanup.unwrap().is_clean());
         let observed = observed.unwrap();
         assert_eq!(observed.len(), 1);
-        assert_eq!(observed[0].snapshot.as_deref(), Some(runner.as_str()));
+        assert_eq!(
+            observed[0].snapshot.as_ref().map(ToString::to_string),
+            Some(runner.clone())
+        );
         assert_eq!(observed[0].network.as_ref(), Some(&expected));
         let outcome = outcome.unwrap();
         assert_eq!(outcome.status, RunStatus::Success, "{mode}: {outcome:?}");
         let deadline = Instant::now() + Duration::from_mins(2);
         loop {
-            let remaining = provider.list(&filter).await.unwrap();
+            let remaining = daytona_statuses(&sandboxes, &filter).await.unwrap();
             if remaining
                 .iter()
                 .all(|sandbox| sandbox.state == SandboxState::Deleted)
@@ -184,6 +178,22 @@ async fn daytona_block_prevents_outbound_https_while_allow_all_preserves_it() {
             time::sleep(Duration::from_millis(500)).await;
         }
     }
+}
+
+/// The status of every Daytona sandbox `filter` matches.
+async fn daytona_statuses(
+    sandboxes: &sandbox_driver::Sandboxes,
+    filter: &LabelFilter,
+) -> Result<Vec<Status>, sandbox_driver::Error> {
+    let mut statuses = Vec::new();
+    for summary in sandboxes.provider("daytona")?.list(filter).await? {
+        match sandboxes.attach(&summary.reference).await {
+            Ok(sandbox) => statuses.push(sandbox.status().await?),
+            Err(sandbox_driver::Error::NotFound { .. }) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(statuses)
 }
 
 /// A one-stage run whose probe script must succeed under `AllowAll`, and

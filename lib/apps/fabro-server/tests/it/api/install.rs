@@ -121,7 +121,8 @@ async fn mock_daytona_current_key<'a>(
                     "permissions": permissions,
                     "lastUsedAt": null,
                     "expiresAt": null,
-                    "userId": "user_123"
+                    "userId": "user_123",
+                    "organizationId": "org_123"
                 }));
         })
         .await
@@ -2765,13 +2766,16 @@ async fn sandbox_daytona_test_endpoint_rejects_under_scoped_api_key() {
     )
     .await;
 
+    // TODO(parity): sandbox-driver's health keeps the missing scopes only in
+    // its message, so the response can no longer offer its own remediation.
     assert_eq!(
         body["errors"][0]["detail"],
-        "Daytona API key is missing required scopes: write:snapshots, write:sandboxes. \
-         Regenerate the key with all snapshot and sandbox scopes."
+        "daytona credential validation failed: Daytona did not accept the credential: \
+         API key \"delete-only\" is missing required scopes: write:snapshots, write:sandboxes"
     );
     auth.assert_async().await;
-    current_key.assert_async().await;
+    // Once to open the provider (its organization), once for its health.
+    current_key.assert_calls_async(2).await;
 }
 
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"))]

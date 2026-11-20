@@ -109,8 +109,6 @@ use fabro_workflow::{Error as WorkflowError, operations, pull_request};
 use futures_util::future::join_all;
 use lithos_llm::catalog::ProviderId;
 use lithos_llm::types::Usage;
-use tempfile::NamedTempFile;
-use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::runtime::Builder as TokioRuntimeBuilder;
@@ -1556,13 +1554,11 @@ impl AppState {
         (self.env_lookup)(name)
     }
 
-    /// Daytona credentials for `api_key`: the key from the vault, the
-    /// control-plane URL and organization from server configuration, and
-    /// the server's HTTP client. The process environment is consulted only
-    /// through the configured lookup.
+    /// Daytona credentials for `api_key`: the key from the vault, and the
+    /// control-plane URL and organization from server configuration. The
+    /// process environment is consulted only through the configured lookup.
     pub(crate) fn daytona_credentials(&self, api_key: String) -> DaytonaCredentials {
         DaytonaCredentials::from_api_key(api_key, |name| self.config_env_lookup(name))
-            .with_http_client(self.http_client().ok())
     }
 
     /// The same provider selection for execution, fork and prune; credentials
@@ -1597,12 +1593,9 @@ impl AppState {
     /// when no key is stored).
     pub(crate) async fn provider_access(&self) -> Result<ProviderAccess, SecretStoreError> {
         Ok(ProviderAccess {
-            providers:    self.server_settings().server.sandbox.providers.clone(),
-            daytona:      self
-                .vault_secret(EnvVars::DAYTONA_API_KEY)
-                .await?
-                .map(|api_key| self.daytona_credentials(api_key)),
-            storage_root: Some(self.server_storage_dir()),
+            providers: self.server_settings().server.sandbox.providers.clone(),
+            sandbox:   self
+                .sandbox_provider_config(self.vault_secret(EnvVars::DAYTONA_API_KEY).await?),
         })
     }
 
@@ -2444,18 +2437,15 @@ fn build_sandbox_inventory(
     server_settings: &ServerSettings,
     daytona_api_key: Option<String>,
     env_lookup: &EnvLookup,
-    http_client: Option<fabro_http::HttpClient>,
 ) -> SandboxInventory {
     let provider_settings = &server_settings.server.sandbox.providers;
     let access = ProviderAccess {
-        providers:    provider_settings.clone(),
-        daytona:      daytona_api_key.map(|api_key| {
-            DaytonaCredentials::from_api_key(api_key, |name| env_lookup(name))
-                .with_http_client(http_client)
-        }),
-        // The inventory lists and looks up by id; no run's host directory is
-        // reached through it.
-        storage_root: None,
+        providers: provider_settings.clone(),
+        sandbox:   SandboxProviderConfig::from_lookup(
+            daytona_api_key
+                .map(|api_key| DaytonaCredentials::from_api_key(api_key, |name| env_lookup(name))),
+            |name| env_lookup(name),
+        ),
     };
     let mut inventory = SandboxInventory::empty();
 
@@ -2465,7 +2455,9 @@ fn build_sandbox_inventory(
     if provider_settings.is_enabled(&SandboxProviderKind::DOCKER) {
         inventory = inventory.with_lazy(SandboxProviderKind::DOCKER, access.clone());
     }
-    if provider_settings.is_enabled(&SandboxProviderKind::DAYTONA) && access.daytona.is_some() {
+    if provider_settings.is_enabled(&SandboxProviderKind::DAYTONA)
+        && access.sandbox.daytona().is_some()
+    {
         inventory = inventory.with_lazy(SandboxProviderKind::DAYTONA, access);
     }
 
@@ -2608,7 +2600,6 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
             current_server_settings.as_ref(),
             daytona_api_key,
             &env_lookup,
-            http_client.clone(),
         )
     });
     let slack_service = {

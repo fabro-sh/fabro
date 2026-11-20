@@ -1,5 +1,5 @@
-//! The sandbox catalog Fabro gives Petri, and the provider connections the
-//! server opens itself.
+//! The sandbox catalog Fabro gives Petri, and the catalog the server opens
+//! itself to reach a run's sandboxes.
 //!
 //! Petri places every scope on a [`SandboxCatalog`]: Host, Docker and
 //! Daytona are sandbox-driver built-ins that run in this process, so no
@@ -22,42 +22,39 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fabro_static::EnvVars;
 use petri_runtime::{Runtime, SandboxCatalog, SandboxOptions};
-use sandbox_driver::legacy::SandboxProvider;
 use sandbox_driver::{
-    Error, ProviderEntry, ProviderKind, ProviderName, Sandboxes, SecretResolver, legacy,
+    Environment, EnvironmentName, Error, ProviderEntry, ProviderKind, ProviderName, SandboxSpec,
+    Sandboxes, SecretResolver, Source, StaticEnvironments,
 };
-use sandbox_driver_daytona::{DaytonaConfig, DaytonaProvider};
-use sandbox_driver_docker::DockerProvider;
+use sandbox_driver_protocol::PluginLoader;
 
 /// The secret name the built-in Daytona provider reads its API key from.
 const DAYTONA_API_KEY: &str = "DAYTONA_API_KEY";
 
-const USER_AGENT: &str = concat!("fabro-server/", env!("CARGO_PKG_VERSION"));
-
-/// Explicit Daytona credentials: the SDK's configuration with the API key
-/// always present and a `Debug` that never prints it. The process
-/// environment is never consulted.
+/// Explicit Daytona credentials: the API key, always present, with the
+/// control plane's URL and organization, and a `Debug` that never prints the
+/// key. The process environment is never consulted.
 #[derive(Clone)]
-pub struct DaytonaCredentials(DaytonaConfig);
+pub struct DaytonaCredentials {
+    api_key:         String,
+    api_url:         Option<String>,
+    organization_id: Option<String>,
+}
 
 impl DaytonaCredentials {
-    /// Credentials for `api_key` against Daytona's public control plane,
-    /// presenting Fabro's `User-Agent`.
+    /// Credentials for `api_key` against Daytona's public control plane.
     #[must_use]
     pub fn new(api_key: String) -> Self {
-        Self(DaytonaConfig {
-            api_key: Some(api_key),
-            user_agent: Some(USER_AGENT.to_string()),
-            ..DaytonaConfig::default()
-        })
+        Self {
+            api_key,
+            api_url: None,
+            organization_id: None,
+        }
     }
 
     /// Credentials for a vault API key, with the control-plane URL and
     /// organization taken from `lookup` (server configuration). Nothing is
-    /// read implicitly.
-    ///
-    /// These are the two settings the Daytona plugin read in the worker: no
-    /// URL alias and no placement target, neither of which reached it.
+    /// read implicitly. There is no URL alias and no placement target.
     pub fn from_api_key(api_key: String, lookup: impl Fn(&str) -> Option<String>) -> Self {
         Self::new(api_key)
             .with_api_url(lookup(EnvVars::DAYTONA_API_URL))
@@ -67,35 +64,22 @@ impl DaytonaCredentials {
     /// The control-plane URL; Daytona's public API when `None`.
     #[must_use]
     pub fn with_api_url(mut self, api_url: Option<String>) -> Self {
-        self.0.api_url = api_url;
+        self.api_url = api_url;
         self
     }
 
     #[must_use]
     pub fn with_organization_id(mut self, organization_id: Option<String>) -> Self {
-        self.0.organization_id = organization_id;
+        self.organization_id = organization_id;
         self
-    }
-
-    /// A shared HTTP client; tests pass a no-proxy client here.
-    #[must_use]
-    pub fn with_http_client(mut self, http_client: Option<fabro_http::HttpClient>) -> Self {
-        self.0.http_client = http_client;
-        self
-    }
-
-    /// The SDK configuration the driver's Daytona provider connects with.
-    #[must_use]
-    fn config(&self) -> &DaytonaConfig {
-        &self.0
     }
 }
 
 impl std::fmt::Debug for DaytonaCredentials {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DaytonaCredentials")
-            .field("api_url", &self.0.api_url)
-            .field("organization_id", &self.0.organization_id)
+            .field("api_url", &self.api_url)
+            .field("organization_id", &self.organization_id)
             .finish_non_exhaustive()
     }
 }
@@ -134,6 +118,12 @@ impl SandboxProviderConfig {
             daytona,
         }
     }
+
+    /// The Daytona credentials, when the vault holds a key.
+    #[must_use]
+    pub fn daytona(&self) -> Option<&DaytonaCredentials> {
+        self.daytona.as_ref()
+    }
 }
 
 /// Petri's standard runtime on Fabro's sandbox catalog for the default
@@ -161,11 +151,38 @@ pub fn bare_runtime(config: &SandboxProviderConfig) -> Runtime {
     runtime.sandbox_catalog(default_catalog(config))
 }
 
-/// A live sandbox catalog over Fabro's entries, outside any run: the
-/// server's own access to a run's sandbox through sandbox-driver's new API.
-/// Entries connect lazily, when a sandbox is attached or created on them.
-pub fn open_catalog(config: &SandboxProviderConfig) -> Result<Sandboxes, Error> {
-    default_catalog(config).open()
+/// The server's own catalog, outside any run: Fabro's Host, Docker and
+/// Daytona entries, a `host` environment for designating a run's directory,
+/// and `plugins`, the operator's third-party provider entries, which
+/// sandbox-driver launches over protocol 3. Entries connect lazily, when a
+/// sandbox is attached or created on them, or their health is asked.
+pub fn open_catalog(
+    config: &SandboxProviderConfig,
+    plugins: impl IntoIterator<Item = (ProviderName, ProviderEntry)>,
+) -> Result<Sandboxes, Error> {
+    let host = entry_name("host");
+    let environments = StaticEnvironments(BTreeMap::from([(
+        EnvironmentName::try_new("host").expect("a built-in environment name is valid"),
+        Environment {
+            provider: host.clone(),
+            spec:     SandboxSpec::new(Source::HostDirectory),
+        },
+    )]));
+    let providers = [
+        (host, entry("host", BTreeMap::new(), Vec::new())),
+        (entry_name("docker"), docker_entry(config)),
+        (entry_name("daytona"), daytona_entry(config)),
+    ]
+    .into_iter()
+    .chain(plugins);
+    let registry = SandboxCatalog::builtin_registry().plugins(Arc::new(PluginLoader::default()));
+    SandboxCatalog::new(
+        providers,
+        Arc::new(environments),
+        registry,
+        Arc::new(VaultSecrets(config.daytona.clone())),
+    )
+    .open()
 }
 
 fn default_catalog(config: &SandboxProviderConfig) -> SandboxCatalog {
@@ -185,6 +202,23 @@ pub fn sandbox_catalog(
     config: &SandboxProviderConfig,
     options: &SandboxOptions,
 ) -> Result<SandboxCatalog, String> {
+    // TODO(parity): sandbox-driver's Daytona entry config has no field for
+    // the client's `User-Agent` or for an HTTP client the application
+    // supplies, so the built-in provider sends `sandbox-driver/<version>`
+    // and uses its own client: Fabro's `fabro-server/<version>` agent and
+    // its proxy policy do not reach Daytona.
+    let mut catalog = SandboxCatalog::from_options(options)?
+        .with_provider(entry_name("docker"), docker_entry(config))
+        .with_provider(entry_name("daytona"), daytona_entry(config))
+        .with_secrets(Arc::new(VaultSecrets(config.daytona.clone())));
+    if let Some(address) = &config.docker_host_address {
+        catalog = catalog.with_host_address("docker", Some(address.clone()));
+    }
+    Ok(catalog)
+}
+
+/// The Docker entry: the daemon this process's `DOCKER_HOST` names.
+fn docker_entry(config: &SandboxProviderConfig) -> ProviderEntry {
     let mut docker = BTreeMap::new();
     if let Some(host) = config
         .docker_host
@@ -194,31 +228,22 @@ pub fn sandbox_catalog(
     {
         docker.insert("host".to_owned(), host.into());
     }
+    entry("docker", docker, Vec::new())
+}
+
+/// The Daytona entry: the configured control plane, with the API key
+/// resolved from the vault.
+fn daytona_entry(config: &SandboxProviderConfig) -> ProviderEntry {
     let mut daytona = BTreeMap::new();
     if let Some(credentials) = &config.daytona {
-        let sdk = credentials.config();
-        if let Some(api_url) = &sdk.api_url {
+        if let Some(api_url) = &credentials.api_url {
             daytona.insert("api_url".to_owned(), api_url.clone().into());
         }
-        if let Some(organization) = &sdk.organization_id {
+        if let Some(organization) = &credentials.organization_id {
             daytona.insert("organization".to_owned(), organization.clone().into());
         }
     }
-    // TODO(parity): the built-in Daytona provider presents sandbox-driver's
-    // own `User-Agent` and its own HTTP client; Fabro's `fabro-server/<version>`
-    // agent and an injected client (tests' no-proxy client) reach only the
-    // server's own connections until the Daytona entry config carries them.
-    let mut catalog = SandboxCatalog::from_options(options)?
-        .with_provider(entry_name("docker"), entry("docker", docker, Vec::new()))
-        .with_provider(
-            entry_name("daytona"),
-            entry("daytona", daytona, vec![DAYTONA_API_KEY.to_owned()]),
-        )
-        .with_secrets(Arc::new(VaultSecrets(config.daytona.clone())));
-    if let Some(address) = &config.docker_host_address {
-        catalog = catalog.with_host_address("docker", Some(address.clone()));
-    }
-    Ok(catalog)
+    entry("daytona", daytona, vec![DAYTONA_API_KEY.to_owned()])
 }
 
 fn entry_name(name: &str) -> ProviderName {
@@ -254,39 +279,10 @@ impl SecretResolver for VaultSecrets {
             DAYTONA_API_KEY => self
                 .0
                 .as_ref()
-                .and_then(|credentials| credentials.config().api_key.clone()),
+                .map(|credentials| credentials.api_key.clone()),
             _ => None,
         })
     }
-}
-
-/// The server's own connection to the run's Docker daemon, for the sandbox
-/// page, Run Files, the terminal and Ask Fabro.
-///
-/// TODO(parity): this is sandbox-driver's legacy provider. The server keeps
-/// it until the new API carries what those tabs use (git, a tty, listening
-/// ports, and the legacy status fields): parity plan items B2 to B4, D2 and
-/// A10. Petri's runs no longer go through it.
-#[expect(
-    clippy::result_large_err,
-    reason = "preserve sandbox-driver's typed error"
-)]
-pub fn connect_docker() -> legacy::Result<Arc<dyn SandboxProvider>> {
-    Ok(Arc::new(DockerProvider::connect_unverified()?))
-}
-
-/// The server's own Daytona connection, with only the vault credentials and
-/// explicit control-plane configuration; no ambient secret fallback.
-///
-/// TODO(parity): sandbox-driver's legacy provider, kept for the server's
-/// tabs until the new API carries git, a tty, SSH and VNC endpoints, and
-/// the legacy status fields (parity plan B2 to B4, Y5, Y6, A10 and W).
-pub async fn connect_daytona(
-    credentials: &DaytonaCredentials,
-) -> legacy::Result<Arc<dyn SandboxProvider>> {
-    Ok(Arc::new(
-        DaytonaProvider::connect_explicit(credentials.config().clone()).await?,
-    ))
 }
 
 #[cfg(test)]
@@ -323,13 +319,11 @@ mod tests {
     }
 
     #[test]
-    fn daytona_configuration_ignores_the_url_alias_and_keeps_the_http_client() {
+    fn daytona_configuration_ignores_the_url_alias() {
         let credentials = DaytonaCredentials::from_api_key("test-key".to_string(), |name| {
             (name == EnvVars::DAYTONA_SERVER_URL).then(|| "https://alias.example".to_string())
-        })
-        .with_http_client(Some(fabro_test::test_http_client()));
-        assert_eq!(credentials.config().api_url, None);
-        assert!(credentials.config().http_client.is_some());
+        });
+        assert_eq!(credentials.api_url, None);
     }
 
     #[test]
@@ -342,7 +336,7 @@ mod tests {
             |_| None,
         );
         let daytona = config.daytona.as_ref().expect("the credentials are kept");
-        assert_eq!(daytona.config().api_key.as_deref(), Some(key));
+        assert_eq!(daytona.api_key, key);
         let rendered = format!("{config:?}");
         assert!(!rendered.contains(key));
         assert!(rendered.contains("org-1"));

@@ -77,19 +77,17 @@ fn provider_list(providers: &[SandboxProviderKind]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
+    use fabro_petri::providers::SandboxProviderConfig;
     use fabro_types::SandboxProviderKind;
     use fabro_types::settings::server::{
         SandboxPluginSettings, ServerSandboxProviderSettings, ServerSandboxProvidersSettings,
     };
-    use sandbox_driver::legacy::SandboxProvider;
     use serde_json::{Value, json};
     use tower::ServiceExt;
 
-    use crate::sandbox_access::test_support::{petri_scripted_sandbox, scripted_provider};
+    use crate::sandbox_access::test_support::{FAKE_ENTRY, petri_fake_catalog};
     use crate::sandbox_access::{ProviderAccess, SandboxInventory};
     use crate::test_support::{TestAppStateBuilder, build_test_router};
 
@@ -100,15 +98,20 @@ mod tests {
         build_test_router(state)
     }
 
-    /// A provider of `kind` holding the sandboxes Petri created for a run,
-    /// `ids`.
-    fn provider(kind: &SandboxProviderKind, ids: &[&str]) -> Arc<dyn SandboxProvider> {
-        scripted_provider(
-            kind.as_str(),
-            ids.iter()
-                .map(|id| petri_scripted_sandbox(id, "01HY0000000000000000000000"))
-                .collect(),
-        )
+    /// The inventory with a fake catalog for each of `kinds`, holding
+    /// `count` sandboxes Petri created for a run, and their ids per kind.
+    async fn inventory(
+        kinds: &[(SandboxProviderKind, usize)],
+    ) -> (SandboxInventory, Vec<Vec<String>>) {
+        let mut inventory = SandboxInventory::empty();
+        let mut ids = Vec::new();
+        for (kind, count) in kinds {
+            let runs = vec!["01HY0000000000000000000000"; *count];
+            let (sandboxes, kind_ids) = petri_fake_catalog(&runs).await;
+            inventory = inventory.with_connected(kind.clone(), sandboxes, FAKE_ENTRY);
+            ids.push(kind_ids);
+        }
+        (inventory, ids)
     }
 
     /// A plugin kind whose executable does not exist, so every lookup fails
@@ -128,8 +131,7 @@ mod tests {
             });
         inventory.with_lazy(kind, ProviderAccess {
             providers,
-            daytona: None,
-            storage_root: None,
+            sandbox: SandboxProviderConfig::default(),
         })
     }
 
@@ -150,16 +152,14 @@ mod tests {
 
     #[tokio::test]
     async fn list_returns_provider_backed_data_without_run_projection_state() {
-        let app = app_with_inventory(SandboxInventory::empty().with_connected(
-            SandboxProviderKind::DOCKER,
-            provider(&SandboxProviderKind::DOCKER, &["docker-native-id"]),
-        ));
+        let (inventory, ids) = inventory(&[(SandboxProviderKind::DOCKER, 1)]).await;
+        let app = app_with_inventory(inventory);
 
         let response = app.oneshot(req_get("/api/v1/sandboxes")).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
         let body = body_json(response).await;
-        assert_eq!(body["data"][0]["status"]["id"], "docker-native-id");
+        assert_eq!(body["data"][0]["status"]["id"], ids[0][0]);
         assert_eq!(body["data"][0]["provider"], "docker");
         assert_eq!(body["data"][0]["status"]["state"], "running");
         assert_eq!(body["meta"]["provider_errors"], json!([]));
@@ -167,42 +167,32 @@ mod tests {
 
     #[tokio::test]
     async fn retrieve_searches_all_configured_providers() {
-        let app = app_with_inventory(
-            SandboxInventory::empty()
-                .with_connected(
-                    SandboxProviderKind::DOCKER,
-                    provider(&SandboxProviderKind::DOCKER, &[]),
-                )
-                .with_connected(
-                    SandboxProviderKind::DAYTONA,
-                    provider(&SandboxProviderKind::DAYTONA, &["native-id"]),
-                ),
-        );
+        let (inventory, ids) = inventory(&[
+            (SandboxProviderKind::DOCKER, 0),
+            (SandboxProviderKind::DAYTONA, 1),
+        ])
+        .await;
+        let app = app_with_inventory(inventory);
 
         let response = app
-            .oneshot(req_get("/api/v1/sandboxes/native-id"))
+            .oneshot(req_get(&format!("/api/v1/sandboxes/{}", ids[1][0])))
             .await
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
         let body = body_json(response).await;
-        assert_eq!(body["status"]["id"], "native-id");
+        assert_eq!(body["status"]["id"], ids[1][0]);
         assert_eq!(body["provider"], "daytona");
     }
 
     #[tokio::test]
     async fn no_matching_sandbox_returns_404() {
-        let app = app_with_inventory(
-            SandboxInventory::empty()
-                .with_connected(
-                    SandboxProviderKind::DOCKER,
-                    provider(&SandboxProviderKind::DOCKER, &[]),
-                )
-                .with_connected(
-                    SandboxProviderKind::DAYTONA,
-                    provider(&SandboxProviderKind::DAYTONA, &[]),
-                ),
-        );
+        let (inventory, _) = inventory(&[
+            (SandboxProviderKind::DOCKER, 0),
+            (SandboxProviderKind::DAYTONA, 0),
+        ])
+        .await;
+        let app = app_with_inventory(inventory);
 
         let response = app
             .oneshot(req_get("/api/v1/sandboxes/missing"))
@@ -214,20 +204,17 @@ mod tests {
 
     #[tokio::test]
     async fn duplicate_native_ids_return_409() {
-        let app = app_with_inventory(
-            SandboxInventory::empty()
-                .with_connected(
-                    SandboxProviderKind::DOCKER,
-                    provider(&SandboxProviderKind::DOCKER, &["same-id"]),
-                )
-                .with_connected(
-                    SandboxProviderKind::DAYTONA,
-                    provider(&SandboxProviderKind::DAYTONA, &["same-id"]),
-                ),
-        );
+        // The fakes number their sandboxes alike, so both hold the same id.
+        let (inventory, ids) = inventory(&[
+            (SandboxProviderKind::DOCKER, 1),
+            (SandboxProviderKind::DAYTONA, 1),
+        ])
+        .await;
+        assert_eq!(ids[0], ids[1]);
+        let app = app_with_inventory(inventory);
 
         let response = app
-            .oneshot(req_get("/api/v1/sandboxes/same-id"))
+            .oneshot(req_get(&format!("/api/v1/sandboxes/{}", ids[0][0])))
             .await
             .unwrap();
 
@@ -243,13 +230,8 @@ mod tests {
 
     #[tokio::test]
     async fn provider_lookup_uncertainty_returns_502() {
-        let app = app_with_inventory(with_unreachable_plugin(
-            SandboxInventory::empty().with_connected(
-                SandboxProviderKind::DOCKER,
-                provider(&SandboxProviderKind::DOCKER, &[]),
-            ),
-            "e2b",
-        ));
+        let (inventory, _) = inventory(&[(SandboxProviderKind::DOCKER, 0)]).await;
+        let app = app_with_inventory(with_unreachable_plugin(inventory, "e2b"));
 
         let response = app
             .oneshot(req_get("/api/v1/sandboxes/maybe-missing"))
@@ -262,7 +244,7 @@ mod tests {
             body["errors"][0]["detail"]
                 .as_str()
                 .unwrap_or_default()
-                .contains("e2b: Failed to connect to the e2b provider")
+                .contains("e2b: Failed to look up e2b sandbox 'maybe-missing': Failed to connect to the e2b provider")
         );
     }
 }

@@ -23,7 +23,6 @@ workspace = true
 anyhow.workspace = true
 fabro-auth = { path = "../../foundation/fabro-auth" }
 fabro-config = { path = "../../foundation/fabro-config" }
-sandbox-driver.workspace = true
 pebble-coding-agent.workspace = true
 fabro-github = { path = "../fabro-github" }
 fabro-tool = { path = "../fabro-tool" }
@@ -60,7 +59,6 @@ fabro-store = { path = "../fabro-store", features = ["test-support"] }
 fabro-auth = { path = "../../foundation/fabro-auth", features = ["test-support"] }
 fabro-github = { path = "../fabro-github", features = ["test-support"] }
 fabro-workflow = { path = ".", features = ["test-support"] }
-sandbox-driver-host.workspace = true
 tokio = { workspace = true, features = ["test-util", "macros"] }
 httpmock = "0.8"
 fabro-macros = { path = "../../foundation/fabro-macros" }

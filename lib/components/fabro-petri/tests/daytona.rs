@@ -155,9 +155,8 @@ async fn run_daytona(
     resources: EnvironmentResourcesSettings,
     network: EnvironmentNetworkSettings,
 ) -> engine::RunOutcome {
-    let credentials = DaytonaCredentials::new("test-key".to_string())
-        .with_api_url(Some(server.base_url()))
-        .with_http_client(Some(fabro_test::test_http_client()));
+    let credentials =
+        DaytonaCredentials::new("test-key".to_string()).with_api_url(Some(server.base_url()));
     let runtime = RuntimeSpec {
         sandbox: SandboxProviderConfig::from_lookup(Some(credentials), |_| None),
         ..RuntimeSpec::default()

@@ -88,17 +88,12 @@ twin-github = { path = "test/twin/github" }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 # sandbox-driver: the sandbox provider layer. Host, Docker and Daytona are
-# built-in providers that run in-process; third-party providers run as stdio
-# plugins through sandbox-driver-protocol. Name the same branch as Petri's
+# built-in providers that run in-process, registered by Petri; third-party
+# providers run as protocol 3 plugins through sandbox-driver-protocol. Name the same branch as Petri's
 # and Pebble's declarations so they resolve to one source: the graph must
 # hold exactly one sandbox-driver (see .github/workflows/internal-deps.yml).
 sandbox-driver = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
 sandbox-driver-protocol = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
-sandbox-driver-host = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
-sandbox-driver-docker = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
-sandbox-driver-docker-config = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
-sandbox-driver-daytona = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
-sandbox-driver-daytona-config = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
 sandbox-driver-testing = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
 # pebble: tracks Pebble's `sandbox-driver-new-api` branch
 # (lithoscomputer/pebble#45) until it merges.

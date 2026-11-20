@@ -1,54 +1,37 @@
-//! The server's direct access to run sandboxes through the sandbox driver.
+//! The server's direct access to run sandboxes through sandbox-driver.
 //!
 //! Petri creates every run sandbox and records it: the provider, the
 //! provider's id and the working directory travel on `scope.acquired` into
 //! the run's [`RunSandboxInstance`], and every Docker or Daytona sandbox
 //! carries the `petri.run` label with the run id. The server reaches a
-//! run's sandbox for the sandbox tab, Run Files, the terminal, SSH, preview
-//! URLs, VNC, `fabro cp` and Ask Fabro by connecting the record's provider
-//! itself and attaching to the record's id, without going through Petri.
+//! run's sandbox for the sandbox tab, the terminal, SSH, preview URLs, VNC,
+//! `fabro cp` and Ask Fabro by opening its own sandbox catalog and attaching
+//! to the record's reference, without going through Petri.
 //!
 //! Ownership is keyed on `petri.run`: a persisted id is acted on only when
 //! the sandbox behind it still carries the run's label, so an id that has
-//! come to name someone else's sandbox on a shared daemon is refused. A host
-//! sandbox is a managed directory the run's worker recorded, with the same
-//! labels, in the host registry inside the run's Petri directory; the
-//! server reads that registry without writing it and attaches to the
-//! directory by path, so the run's ownership is checked on the host as it
-//! is on Docker. Only a directory no registry records is designated again
-//! without a record.
+//! come to name someone else's sandbox on a shared daemon is refused.
+//!
+//! TODO(parity): a host sandbox is the record's working directory,
+//! designated again, with no ownership check: sandbox-driver's built-in
+//! Host provider serves its owning process only and keeps no record the
+//! server could check the run's label against.
 //!
 //! Credentials arrive explicitly. Nothing here reads the process
 //! environment for a secret: the Daytona key comes from the vault through
-//! [`DaytonaCredentials`]. The Docker client resolves its endpoint from the
-//! same variables Fabro forwards to its worker (`DOCKER_HOST` and
-//! its TLS companions), so the server and the run's containers meet on one
-//! daemon.
-//!
-//! Ask Fabro reaches a run's sandbox through sandbox-driver's new API
-//! ([`open_run_sandbox`]), the handle Pebble's adapter takes.
-//!
-//! TODO(parity): everything else here is sandbox-driver's legacy API, kept
-//! so no tab loses a feature while Petri's runs move to the new one. Each
-//! piece moves when the new API carries it (parity plan,
-//! <https://ampcode.com/artifacts/plans/parity-plan-fabro-and-petri-on-the-new-sandbox-driver-api-87b2e18c-6e40-4c01-af60-ce1905c3bd11>):
-//! - Host: Petri's built-in Host keeps no registry in the run directory, so a
-//!   run's host sandbox is now always designated again by path, without the
-//!   `petri.run` check a registry record gave (H1, decision 3).
-//! - The terminal's pty (H2, D2, Y6); SSH, the copy command and VNC (Y5, W);
-//!   listening ports (B1); preview URLs (`Ports::expose`); `activate` (status
-//!   plus start); health with Daytona's permission lists (A11); inventory by
-//!   label key (A8); the legacy status (A10).
-//! - Third-party plugins: the protocol 2 `PluginSupervisor`, until protocol 3
-//!   carries endpoints and one-shot containers (W).
+//! [`DaytonaCredentials`]. The Docker entry names the daemon this process's
+//! `DOCKER_HOST` names, the same variables Fabro forwards to its worker, so
+//! the server and the run's containers meet on one daemon. A third-party
+//! provider kind is the operator's plugin entry, launched by sandbox-driver
+//! over protocol 3.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::env;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
-use fabro_config::Storage;
 pub(crate) use fabro_petri::providers::DaytonaCredentials;
 use fabro_petri::providers::{self, SandboxProviderConfig};
 use fabro_types::settings::run::RunEnvironmentSettings;
@@ -57,17 +40,14 @@ use fabro_types::settings::server::{
 };
 use fabro_types::{
     BundledProvider, RunId, RunSandboxInstance, SandboxInfo, SandboxListMeta, SandboxListResponse,
-    SandboxProviderKind, SandboxProviderLookupError,
+    SandboxProviderKind, SandboxProviderLookupError, SandboxStatus,
 };
 use futures_util::future::join_all;
-use sandbox_driver::legacy;
-use sandbox_driver::legacy::{
-    Error as DriverError, HealthStatus, OwnedProvider, Ownership, ProviderHealth, ProviderKind,
-    Sandbox, SandboxFilter, SandboxId, SandboxProvider, SandboxSource, SandboxSpec, SandboxState,
-    WaitOptions,
+use sandbox_driver::{
+    Descriptor, Error as DriverError, Health, LabelFilter, PluginTrust, ProviderEntry,
+    ProviderKind, ProviderName, Sandbox, SandboxId, SandboxRef, SandboxSpec, SandboxState,
+    Sandboxes, Sha256Digest, Source, WorkspaceOwnership,
 };
-use sandbox_driver_host::HostProvider;
-use sandbox_driver_protocol::{PluginConfig, PluginSupervisor};
 use tokio::sync::OnceCell;
 use tokio::time;
 
@@ -77,42 +57,23 @@ pub(crate) const PETRI_RUN_LABEL: &str = "petri.run";
 
 /// Binary naming prefix for a plugin provider's executable: a plugin for
 /// kind `e2b` is `sandbox-driver-e2b` on `PATH` unless the settings name a
-/// path. The same executable serves Petri's run in the worker, which looks
-/// it up under the same name.
+/// path.
 const PLUGIN_BINARY_PREFIX: &str = "sandbox-driver";
 
 /// Budget for the credential probe `fabro doctor` and the install flow run.
 pub(crate) const DAYTONA_CREDENTIAL_PROBE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// What the server needs to reach every provider a run record can name:
-/// its provider settings (which kinds are enabled, which run as plugins),
-/// the Daytona credentials from the vault, and the storage root under
-/// which each run's worker kept its host registry.
+/// its provider settings (which kinds are enabled, which run as plugins)
+/// and the sandbox configuration, with the Daytona credentials from the
+/// vault.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ProviderAccess {
-    pub(crate) providers:    ServerSandboxProvidersSettings,
-    pub(crate) daytona:      Option<DaytonaCredentials>,
-    /// The server's storage root. `None` where no run's host sandbox is
-    /// reached (the doctor's probes, the startup inventory): a host
-    /// record is then designated by path without its registry record.
-    pub(crate) storage_root: Option<PathBuf>,
+    pub(crate) providers: ServerSandboxProvidersSettings,
+    pub(crate) sandbox:   SandboxProviderConfig,
 }
 
 impl ProviderAccess {
-    /// The host registry the run's worker kept: Petri's `host-registry`
-    /// inside the run's Petri directory, which is `petri` under the run's
-    /// scratch directory (the run directory `petri_runs` hands the worker).
-    fn host_registry(&self, run_id: RunId) -> Option<PathBuf> {
-        let root = self.storage_root.as_ref()?;
-        Some(
-            Storage::new(root)
-                .run_scratch(&run_id)
-                .root()
-                .join("petri")
-                .join("host-registry"),
-        )
-    }
-
     /// The settings entry for `kind`. A bundled kind without an entry is
     /// enabled with defaults; any other kind must be configured.
     fn settings_for(&self, kind: &SandboxProviderKind) -> Option<ServerSandboxProviderSettings> {
@@ -122,6 +83,107 @@ impl ProviderAccess {
             None => None,
         }
     }
+
+    /// The catalog entry `kind` is reached through, after its policy check:
+    /// configured, enabled, and for Daytona a vault key. Disabled entries
+    /// are refused here so no caller has to remember the policy check.
+    fn entry_for(&self, kind: &SandboxProviderKind) -> Result<ProviderName, ConnectError> {
+        let settings = self
+            .settings_for(kind)
+            .ok_or_else(|| ConnectError::Unconfigured { kind: kind.clone() })?;
+        if !settings.enabled {
+            return Err(ConnectError::Disabled { kind: kind.clone() });
+        }
+        let name = match kind.bundled() {
+            Some(BundledProvider::Local) => "host",
+            Some(BundledProvider::Docker) => "docker",
+            Some(BundledProvider::Daytona) => {
+                if self.sandbox.daytona().is_none() {
+                    return Err(ConnectError::MissingDaytonaCredentials);
+                }
+                "daytona"
+            }
+            None => {
+                if settings.plugin.is_none() {
+                    return Err(ConnectError::MissingPluginSettings { kind: kind.clone() });
+                }
+                kind.as_str()
+            }
+        };
+        ProviderName::try_new(name).map_err(|source| ConnectError::InvalidKind {
+            kind: kind.clone(),
+            source,
+        })
+    }
+
+    /// The server's catalog: the built-in entries and an entry per enabled
+    /// plugin kind.
+    fn open(&self) -> Result<Sandboxes, ConnectError> {
+        let mut plugins = Vec::new();
+        for (kind, settings) in &self.providers.entries {
+            let (None, true, Some(plugin)) = (kind.bundled(), settings.enabled, &settings.plugin)
+            else {
+                continue;
+            };
+            let invalid = |source| ConnectError::InvalidKind {
+                kind: kind.clone(),
+                source,
+            };
+            let name = ProviderName::try_new(kind.as_str()).map_err(invalid)?;
+            let plugin_kind = ProviderKind::try_new(kind.as_str()).map_err(invalid)?;
+            plugins.push((name, plugin_entry(plugin_kind, plugin)?));
+        }
+        providers::open_catalog(&self.sandbox, plugins).map_err(|source| ConnectError::Driver {
+            kind: SandboxProviderKind::LOCAL,
+            source,
+        })
+    }
+}
+
+/// A plugin kind's catalog entry from its settings. Without a configured
+/// path the executable is `sandbox-driver-<kind>` on `PATH`.
+fn plugin_entry(
+    kind: ProviderKind,
+    settings: &SandboxPluginSettings,
+) -> Result<ProviderEntry, ConnectError> {
+    let path = match &settings.path {
+        Some(path) => Some(path.clone()),
+        None => find_on_path(&format!("{PLUGIN_BINARY_PREFIX}-{kind}"))
+            .map(|path| path.display().to_string()),
+    };
+    let trust = match (&settings.sha256, settings.dev) {
+        (Some(digest), _) => Some(PluginTrust::Sha256 {
+            digest: Sha256Digest::try_new(digest.as_str()).map_err(|source| {
+                ConnectError::InvalidChecksum {
+                    kind: kind.to_string(),
+                    source,
+                }
+            })?,
+        }),
+        (None, true) => Some(PluginTrust::Development),
+        (None, false) => None,
+    };
+    Ok(ProviderEntry {
+        plugin: kind,
+        config: BTreeMap::new(),
+        secrets: Vec::new(),
+        path,
+        trust,
+        args: settings.args.clone(),
+        env: settings.env.clone(),
+        inherit_env: Some(settings.inherit_env.clone()),
+    })
+}
+
+fn find_on_path(binary: &str) -> Option<PathBuf> {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a plugin without a configured path is found on this process's PATH"
+    )]
+    let path = env::var_os("PATH")?;
+    env::split_paths(&path)
+        .map(|directory| directory.join(binary))
+        .find(|candidate| candidate.is_file())
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -144,101 +206,20 @@ pub(crate) enum ConnectError {
     InvalidKind {
         kind:   SandboxProviderKind,
         #[source]
-        source: legacy::InvalidIdError,
+        source: sandbox_driver::InvalidIdError,
     },
-    #[error("failed to connect sandbox provider `{kind}`")]
+    #[error("sandbox provider `{kind}` has an invalid sha256 checksum")]
+    InvalidChecksum {
+        kind:   String,
+        #[source]
+        source: sandbox_driver::InvalidIdError,
+    },
+    #[error("failed to open the sandbox catalog")]
     Driver {
         kind:   SandboxProviderKind,
         #[source]
-        source: legacy::Error,
+        source: DriverError,
     },
-}
-
-/// Connects the provider behind `kind`, unscoped: every sandbox on the
-/// backend is visible to it. Callers that act on a persisted id narrow it
-/// to the run, as [`attach_run_sandbox`] does.
-///
-/// Bundled kinds link the driver's provider crates in process. `local` is
-/// the driver's Host provider with a fresh registry, enough for health;
-/// a run's host sandbox is reached through the run's own registry by
-/// [`attach_run_sandbox`].
-/// `docker` connects to the daemon the process environment names, the
-/// same variables Fabro forwards to its worker, without requiring the
-/// daemon to answer: `health` reports an unreachable daemon so preflight
-/// and the doctor see the cause. `daytona` needs the vault key. Any other
-/// kind launches the plugin executable its settings name and supervises
-/// it. Disabled entries are refused here so no caller has to remember the
-/// policy check.
-pub(crate) async fn connect_provider(
-    kind: &SandboxProviderKind,
-    access: &ProviderAccess,
-) -> Result<Arc<dyn SandboxProvider>, ConnectError> {
-    let settings = access
-        .settings_for(kind)
-        .ok_or_else(|| ConnectError::Unconfigured { kind: kind.clone() })?;
-    if !settings.enabled {
-        return Err(ConnectError::Disabled { kind: kind.clone() });
-    }
-    let driver = |source| ConnectError::Driver {
-        kind: kind.clone(),
-        source,
-    };
-    Ok(match kind.bundled() {
-        Some(BundledProvider::Local) => Arc::new(HostProvider::new()),
-        Some(BundledProvider::Docker) => providers::connect_docker().map_err(driver)?,
-        Some(BundledProvider::Daytona) => {
-            let credentials = access
-                .daytona
-                .as_ref()
-                .ok_or(ConnectError::MissingDaytonaCredentials)?;
-            providers::connect_daytona(credentials)
-                .await
-                .map_err(driver)?
-        }
-        None => {
-            let plugin = settings
-                .plugin
-                .as_ref()
-                .ok_or_else(|| ConnectError::MissingPluginSettings { kind: kind.clone() })?;
-            let driver_kind = ProviderKind::try_new(kind.as_str()).map_err(|source| {
-                ConnectError::InvalidKind {
-                    kind: kind.clone(),
-                    source,
-                }
-            })?;
-            // The supervisor is the provider: it launches the executable now,
-            // so a misconfigured plugin fails at connect time, and relaunches
-            // it after a crash for new work only.
-            Arc::new(
-                PluginSupervisor::launch(PLUGIN_BINARY_PREFIX, plugin_config(driver_kind, plugin))
-                    .await
-                    .map_err(driver)?,
-            )
-        }
-    })
-}
-
-fn plugin_config(kind: ProviderKind, settings: &SandboxPluginSettings) -> PluginConfig {
-    PluginConfig {
-        kind,
-        path: settings.path.as_deref().map(PathBuf::from),
-        sha256: settings.sha256.clone(),
-        dev: settings.dev,
-        args: settings.args.clone(),
-        env: settings
-            .env
-            .iter()
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect::<BTreeMap<_, _>>(),
-        inherit_env: settings.inherit_env.clone(),
-    }
-}
-
-/// Fabro's ownership of a run's sandboxes: the `petri.run` label Petri
-/// stamps, with the run id.
-#[must_use]
-pub(crate) fn run_ownership(run_id: RunId) -> Ownership {
-    Ownership::label(PETRI_RUN_LABEL, run_id.to_string())
 }
 
 /// Whether `labels` are a Petri run sandbox's: Petri's run label is
@@ -247,46 +228,156 @@ fn is_petri_sandbox(labels: &BTreeMap<String, String>) -> bool {
     labels.contains_key(PETRI_RUN_LABEL)
 }
 
-/// Attaches to a run's sandbox from its record, through the record's
-/// provider scoped to the run: an attach whose sandbox does not carry the
-/// run's `petri.run` label is refused. The handle is whatever state the
-/// sandbox is in; [`activate`] brings it to `Running`. Deletion does not
-/// come through here: a run's sandboxes are deleted through Petri's lease
-/// ledger (`fabro_petri::prune`).
+/// A run's sandbox and its provider's descriptor, which says what the
+/// sandbox supports: its isolation, which ports it exposes, its endpoints.
+pub(crate) struct RunSandbox {
+    pub(crate) sandbox:    Arc<dyn Sandbox>,
+    pub(crate) descriptor: Descriptor,
+}
+
+impl RunSandbox {
+    /// The driver's status, as the API shows it.
+    pub(crate) async fn status(&self) -> Result<SandboxStatus, DriverError> {
+        let status = self.sandbox.status().await?;
+        Ok(SandboxStatus::from_driver(
+            &status,
+            Some(self.descriptor.isolation),
+        ))
+    }
+}
+
+/// Attaches to a run's sandbox from its record, refused unless the sandbox
+/// carries the run's `petri.run` label. The handle is whatever state the
+/// sandbox is in. Deletion does not come through here: a run's sandboxes
+/// are deleted through Petri's lease ledger (`fabro_petri::prune`).
 ///
-/// A host sandbox goes through [`attach_host_run_sandbox`]; every other
-/// kind through its connected provider and [`attach_run_sandbox_on`].
+/// A host sandbox is the record's working directory, designated again.
 pub(crate) async fn attach_run_sandbox(
     access: &ProviderAccess,
     record: &RunSandboxInstance,
     run_id: RunId,
-) -> anyhow::Result<Arc<dyn Sandbox>> {
-    if record.provider.bundled() == Some(BundledProvider::Local) {
-        return attach_host_run_sandbox(access, record, run_id).await;
+) -> anyhow::Result<RunSandbox> {
+    let kind = &record.provider;
+    let entry = access
+        .entry_for(kind)
+        .with_context(|| format!("Failed to connect to the {kind} provider"))?;
+    let sandboxes = access.open()?;
+    if kind.bundled() == Some(BundledProvider::Local) {
+        return designate_host_directory(&sandboxes, &entry, record).await;
     }
-    let provider = connect_provider(&record.provider, access)
-        .await
-        .with_context(|| format!("Failed to connect to the {} provider", record.provider))?;
-    attach_run_sandbox_on(provider, record, run_id).await
+    attach_owned(&sandboxes, &entry, record, run_id).await
 }
 
-/// [`attach_run_sandbox`] on an already connected, unscoped `provider` for
-/// the record's kind, which attaches by the record's id: the run scope is
-/// applied here.
-async fn attach_run_sandbox_on(
-    provider: Arc<dyn SandboxProvider>,
+/// [`attach_run_sandbox`] for a record on catalog `entry` of `sandboxes`.
+async fn attach_owned(
+    sandboxes: &Sandboxes,
+    entry: &ProviderName,
     record: &RunSandboxInstance,
     run_id: RunId,
-) -> anyhow::Result<Arc<dyn Sandbox>> {
+) -> anyhow::Result<RunSandbox> {
     let kind = &record.provider;
     let sandbox_id = &record.runtime.id;
-    let provider = OwnedProvider::new(provider, run_ownership(run_id));
-    let id =
-        SandboxId::try_new(sandbox_id).with_context(|| format!("Invalid {kind} sandbox id"))?;
-    provider
-        .attach(&id, None)
+    let descriptor = describe(sandboxes, entry, kind).await?;
+    let reference = reference_in(&descriptor, entry, kind, sandbox_id)?;
+    let handle: Arc<dyn Sandbox> = Arc::from(
+        sandboxes
+            .attach(&reference)
+            .await
+            .with_context(|| format!("Failed to reconnect {kind} sandbox '{sandbox_id}'"))?,
+    );
+    let status = handle
+        .status()
         .await
-        .with_context(|| format!("Failed to reconnect {kind} sandbox '{sandbox_id}'"))
+        .with_context(|| format!("Failed to read {kind} sandbox '{sandbox_id}'"))?;
+    if status.labels.get(PETRI_RUN_LABEL).map(String::as_str) != Some(run_id.to_string().as_str()) {
+        anyhow::bail!("{kind} sandbox '{sandbox_id}' does not belong to run {run_id}");
+    }
+    Ok(RunSandbox {
+        sandbox: handle,
+        descriptor,
+    })
+}
+
+/// The descriptor of catalog `entry`, connecting it if needed.
+async fn describe(
+    sandboxes: &Sandboxes,
+    entry: &ProviderName,
+    kind: &SandboxProviderKind,
+) -> anyhow::Result<Descriptor> {
+    sandboxes
+        .provider(entry.as_str())?
+        .describe()
+        .await
+        .with_context(|| format!("Failed to connect to the {kind} provider"))
+}
+
+/// The reference of `sandbox_id` on `entry`, in the namespace `descriptor`
+/// reports.
+fn reference_in(
+    descriptor: &Descriptor,
+    entry: &ProviderName,
+    kind: &SandboxProviderKind,
+    sandbox_id: &str,
+) -> anyhow::Result<SandboxRef> {
+    Ok(SandboxRef {
+        provider:  entry.clone(),
+        namespace: descriptor.namespace.id.clone(),
+        id:        SandboxId::try_new(sandbox_id)
+            .with_context(|| format!("Invalid {kind} sandbox id"))?,
+    })
+}
+
+/// A run's host sandbox: its recorded working directory, designated again
+/// on the built-in Host provider, which never removes it.
+async fn designate_host_directory(
+    sandboxes: &Sandboxes,
+    entry: &ProviderName,
+    record: &RunSandboxInstance,
+) -> anyhow::Result<RunSandbox> {
+    let kind = &record.provider;
+    let descriptor = describe(sandboxes, entry, kind).await?;
+    let working_directory = &record.runtime.working_directory;
+    let mut spec = SandboxSpec::new(Source::HostDirectory);
+    spec.working_directory = Some(working_directory.clone());
+    spec.workspace_ownership = Some(WorkspaceOwnership::Designated);
+    let handle = sandboxes
+        .builder("host")
+        .await?
+        .spec(spec)
+        .create()
+        .await
+        .with_context(|| format!("Failed to reconnect {kind} sandbox at {working_directory}"))?;
+    Ok(RunSandbox {
+        sandbox: Arc::from(handle),
+        descriptor,
+    })
+}
+
+/// Attaches to a run's sandbox and brings it to `Running`, for every
+/// access-time caller. A host sandbox is returned as designated: its
+/// directory is usable in any recorded state.
+pub(crate) async fn attach_running_run_sandbox(
+    access: &ProviderAccess,
+    record: &RunSandboxInstance,
+    run_id: RunId,
+) -> anyhow::Result<RunSandbox> {
+    let sandbox = attach_run_sandbox(access, record, run_id).await?;
+    if record.provider.bundled() == Some(BundledProvider::Local) {
+        return Ok(sandbox);
+    }
+    activate(sandbox.sandbox.as_ref())
+        .await
+        .with_context(|| format!("Failed to start {} sandbox", record.provider))?;
+    Ok(sandbox)
+}
+
+/// Brings a sandbox back into use, idempotently: a running sandbox is left
+/// alone; any other is started.
+pub(crate) async fn activate(sandbox: &dyn Sandbox) -> Result<(), DriverError> {
+    if sandbox.status().await?.state == SandboxState::Running {
+        return Ok(());
+    }
+    sandbox.start().await
 }
 
 /// Stop the sandboxes an exited worker can no longer release. This is a
@@ -303,214 +394,42 @@ pub(crate) async fn stop_run_sandboxes(
     {
         return Ok(());
     }
-    let provider = connect_provider(&environment.provider, access).await?;
-    stop_run_sandboxes_on(provider, run_id).await
+    let entry = access.entry_for(&environment.provider)?;
+    stop_run_sandboxes_on(&access.open()?, &entry, run_id).await
 }
 
 async fn stop_run_sandboxes_on(
-    provider: Arc<dyn SandboxProvider>,
+    sandboxes: &Sandboxes,
+    entry: &ProviderName,
     run_id: RunId,
 ) -> anyhow::Result<()> {
-    // Listing also finds a container whose create completed just before the
-    // worker died without recording its id, and every nested scope. Both
-    // list and attach verify ownership, so unrelated resources stay alone.
-    let provider = OwnedProvider::new(provider, run_ownership(run_id));
-    let sandboxes = provider
-        .list(&SandboxFilter::default())
+    // Listing also finds a sandbox whose create completed just before the
+    // worker died without recording its id, and every nested scope. Only
+    // sandboxes carrying the run's label are listed.
+    let owned = sandboxes
+        .provider(entry.as_str())?
+        .list(&LabelFilter::eq(PETRI_RUN_LABEL, run_id.to_string()))
         .await
         .context("Failed to list the exited worker's sandboxes")?;
-    let results =
-        join_all(sandboxes.into_iter().map(|status| {
-            let provider = &provider;
-            async move {
-                let result = match provider.attach(&status.id, None).await {
-                    Ok(sandbox) => sandbox.stop().await,
-                    Err(error) => Err(error),
-                };
-                match result {
-                    // A concurrent run deletion already cleaned it up.
-                    Ok(()) | Err(DriverError::NotFound { .. }) => Ok(()),
-                    Err(error) => Err(anyhow::Error::new(error)
-                        .context("Failed to stop an exited worker's sandbox")),
-                }
+    let results = join_all(owned.into_iter().map(|summary| async move {
+        let result = match sandboxes.attach(&summary.reference).await {
+            Ok(sandbox) => sandbox.stop().await,
+            Err(error) => Err(error),
+        };
+        match result {
+            // A concurrent run deletion already cleaned it up.
+            Ok(()) | Err(DriverError::NotFound { .. }) => Ok(()),
+            Err(error) => {
+                Err(anyhow::Error::new(error).context("Failed to stop an exited worker's sandbox"))
             }
-        }))
-        .await;
+        }
+    }))
+    .await;
     // Every owned sandbox gets its stop attempt even if one fails.
     for result in results {
         result?;
     }
     Ok(())
-}
-
-/// Attaches to a run's host sandbox: the managed directory the record
-/// names, with the record the run's worker kept for it.
-///
-/// The worker's host registry is one process's at a time, so the server
-/// observes it (`HostProvider::observe_registry`) rather than opening it:
-/// the registry is read, never written, and the directory is resolved to
-/// its record by path. That record carries Petri's labels, so the run's
-/// `petri.run` ownership is checked here exactly as it is on Docker, and
-/// the handle refuses every lifecycle change: starting, stopping, and
-/// deleting the sandbox stay the worker's. A stopped sandbox's retained
-/// workspace is usable through the handle.
-///
-/// A directory the registry does not know is designated again without a
-/// record, as before this check existed: the run predates the driver that
-/// records it, this process has no storage root to find the registry under
-/// (a probe, a test), or the run's Petri directory is gone while the
-/// directory is not. Such a handle carries no labels and so no ownership;
-/// it serves the read paths only.
-async fn attach_host_run_sandbox(
-    access: &ProviderAccess,
-    record: &RunSandboxInstance,
-    run_id: RunId,
-) -> anyhow::Result<Arc<dyn Sandbox>> {
-    let kind = &record.provider;
-    // The kind's policy (configured, enabled) is checked as for any other
-    // provider; the fresh provider that connects is not what a run's
-    // directory is reached through.
-    connect_provider(kind, access)
-        .await
-        .with_context(|| format!("Failed to connect to the {kind} provider"))?;
-    let sandbox_id = &record.runtime.id;
-    let working_directory = &record.runtime.working_directory;
-    if let Some(registry) = access.host_registry(run_id) {
-        let observer: Arc<HostProvider> = Arc::new(HostProvider::observe_registry(registry));
-        match observer
-            .attach_directory(Path::new(working_directory), None)
-            .await
-        {
-            Ok(handle) => {
-                return OwnedProvider::new(observer, run_ownership(run_id))
-                    .check(handle)
-                    .await
-                    .with_context(|| format!("Failed to reconnect {kind} sandbox '{sandbox_id}'"));
-            }
-            Err(DriverError::NotFound { .. }) => {}
-            Err(error) => {
-                return Err(anyhow::Error::new(error).context(format!(
-                    "Failed to reconnect {kind} sandbox '{sandbox_id}' at {working_directory}"
-                )));
-            }
-        }
-    }
-    let spec =
-        SandboxSpec::new(SandboxSource::HostDirectory).working_directory(working_directory.clone());
-    HostProvider::new()
-        .create(&spec, None)
-        .await
-        .with_context(|| {
-            format!("Failed to reconnect {kind} sandbox '{sandbox_id}' at {working_directory}")
-        })
-}
-
-/// Opens a run's sandbox through sandbox-driver's new API, brought to
-/// `Running`, for Pebble's adapter (Ask Fabro): the handle Pebble's
-/// `SandboxEnvironment` takes.
-///
-/// Docker and Daytona sandboxes are attached by the record's id on Fabro's
-/// catalog entry for the kind, and refused unless they carry the run's
-/// `petri.run` label. A host sandbox is the record's working directory,
-/// designated again: the built-in Host provider serves its owning process
-/// only, so the server cannot attach the worker's sandbox.
-///
-/// TODO(parity): designating the directory skips the `petri.run` check a
-/// shared registry gave (parity plan H1, decision 3), and third-party
-/// plugin kinds are not reachable here until protocol 3 carries them (W).
-pub(crate) async fn open_run_sandbox(
-    config: &SandboxProviderConfig,
-    record: &RunSandboxInstance,
-    run_id: RunId,
-) -> anyhow::Result<Arc<dyn sandbox_driver::Sandbox>> {
-    let kind = &record.provider;
-    let sandboxes =
-        providers::open_catalog(config).context("Failed to open the sandbox catalog")?;
-    let working_directory = &record.runtime.working_directory;
-    let entry = match kind.bundled() {
-        Some(BundledProvider::Local) => {
-            let mut spec = sandbox_driver::SandboxSpec::new(sandbox_driver::Source::HostDirectory);
-            spec.working_directory = Some(working_directory.clone());
-            spec.workspace_ownership = Some(sandbox_driver::WorkspaceOwnership::Designated);
-            let handle = sandboxes
-                .builder("host")
-                .await?
-                .spec(spec)
-                .create()
-                .await
-                .with_context(|| {
-                    format!("Failed to reconnect {kind} sandbox at {working_directory}")
-                })?;
-            return Ok(Arc::from(handle));
-        }
-        Some(BundledProvider::Docker) => "docker",
-        Some(BundledProvider::Daytona) => "daytona",
-        None => anyhow::bail!(
-            "sandbox provider `{kind}` is not reachable through sandbox-driver's new API yet"
-        ),
-    };
-    let provider = sandboxes.provider(entry)?;
-    let namespace = provider
-        .describe()
-        .await
-        .with_context(|| format!("Failed to connect to the {kind} provider"))?
-        .namespace
-        .id;
-    let reference = sandbox_driver::SandboxRef {
-        provider: sandbox_driver::ProviderName::try_new(entry)?,
-        namespace,
-        id: SandboxId::try_new(&record.runtime.id)
-            .with_context(|| format!("Invalid {kind} sandbox id"))?,
-    };
-    let handle: Arc<dyn sandbox_driver::Sandbox> = Arc::from(
-        sandboxes
-            .attach(&reference)
-            .await
-            .with_context(|| format!("Failed to reconnect {kind} sandbox '{}'", reference.id))?,
-    );
-    let status = handle.status().await?;
-    if status.labels.get(PETRI_RUN_LABEL).map(String::as_str) != Some(run_id.to_string().as_str()) {
-        anyhow::bail!(
-            "{kind} sandbox '{}' does not belong to run {run_id}",
-            reference.id
-        );
-    }
-    if status.state != sandbox_driver::SandboxState::Running {
-        handle
-            .start()
-            .await
-            .with_context(|| format!("Failed to start {kind} sandbox"))?;
-    }
-    Ok(handle)
-}
-
-/// Brings a sandbox back into use, idempotently: a running sandbox is left
-/// alone; a stopped or paused one is started and its Bash verified.
-pub(crate) async fn activate(sandbox: &dyn Sandbox) -> legacy::Result<()> {
-    let status = sandbox.describe().await?;
-    if status.state == SandboxState::Running {
-        return Ok(());
-    }
-    legacy::activate(sandbox, &WaitOptions::default()).await
-}
-
-/// Attaches to a run's sandbox and brings it to `Running`, for every
-/// access-time caller. A host sandbox is returned as attached: its handle
-/// works in the directory in any recorded state, and starting it is the
-/// worker's alone.
-pub(crate) async fn attach_running_run_sandbox(
-    access: &ProviderAccess,
-    record: &RunSandboxInstance,
-    run_id: RunId,
-) -> anyhow::Result<Arc<dyn Sandbox>> {
-    let sandbox = attach_run_sandbox(access, record, run_id).await?;
-    if record.provider.bundled() == Some(BundledProvider::Local) {
-        return Ok(sandbox);
-    }
-    activate(sandbox.as_ref())
-        .await
-        .with_context(|| format!("Failed to start {} sandbox", record.provider))?;
-    Ok(sandbox)
 }
 
 /// Whether the backend behind `kind` is reachable and the configured
@@ -519,11 +438,13 @@ pub(crate) async fn attach_running_run_sandbox(
 pub(crate) async fn provider_health(
     kind: &SandboxProviderKind,
     access: &ProviderAccess,
-) -> anyhow::Result<ProviderHealth> {
-    let provider = connect_provider(kind, access)
-        .await
+) -> anyhow::Result<Health> {
+    let entry = access
+        .entry_for(kind)
         .with_context(|| format!("Failed to connect to the {kind} provider"))?;
-    provider
+    access
+        .open()?
+        .provider(entry.as_str())?
         .health()
         .await
         .with_context(|| format!("{kind} health check failed"))
@@ -532,18 +453,15 @@ pub(crate) async fn provider_health(
 /// Whether the Docker daemon answers, for `fabro doctor`.
 pub(crate) async fn check_docker_daemon() -> anyhow::Result<()> {
     let health = provider_health(&SandboxProviderKind::DOCKER, &ProviderAccess::default()).await?;
-    match health.status {
-        HealthStatus::Ok | HealthStatus::Unknown => Ok(()),
-        HealthStatus::Unreachable | HealthStatus::Unauthorized => Err(anyhow::anyhow!(
-            "{}",
-            health
-                .message
-                .unwrap_or_else(|| "Failed to reach Docker daemon".to_string())
-        )),
-        _ => Err(anyhow::anyhow!(
-            "Docker daemon reported an unknown health state"
-        )),
+    if health.healthy {
+        return Ok(());
     }
+    Err(anyhow::anyhow!(
+        "{}",
+        health
+            .message
+            .unwrap_or_else(|| "Failed to reach Docker daemon".to_string())
+    ))
 }
 
 /// Outcome of probing a Daytona credential through the provider's health
@@ -602,44 +520,36 @@ impl DaytonaCredentialProbeTimeout {
     }
 }
 
-/// Whether `credentials` reach Daytona, are accepted, and carry the scopes
-/// Fabro needs. Reachability and authentication failures are errors; a key
-/// that authenticates but lacks scopes is an `Ok` check that is not `ok()`.
+/// Whether `credentials` reach Daytona and are accepted. Reachability and
+/// authentication failures are errors.
+///
+/// TODO(parity): sandbox-driver's provider health reports only whether the
+/// provider is healthy, with a message. Its Daytona provider works out the
+/// scopes a key lacks but the new `Health` drops that list, so a key
+/// missing scopes is a rejected credential whose message names them, and
+/// Fabro cannot offer its own remediation.
 pub(crate) async fn check_daytona_api_key(
     credentials: &DaytonaCredentials,
     probe_timeout: Duration,
 ) -> anyhow::Result<DaytonaKeyCheck> {
     let access = ProviderAccess {
-        providers:    ServerSandboxProvidersSettings::default(),
-        daytona:      Some(credentials.clone()),
-        storage_root: None,
+        providers: ServerSandboxProvidersSettings::default(),
+        sandbox:   SandboxProviderConfig::from_lookup(Some(credentials.clone()), |_| None),
     };
     let probe = async {
         let health = provider_health(&SandboxProviderKind::DAYTONA, &access).await?;
-        match health.status {
-            HealthStatus::Ok | HealthStatus::Unknown => Ok(DaytonaKeyCheck {
+        if health.healthy {
+            return Ok(DaytonaKeyCheck {
                 missing:  Vec::new(),
-                required: health.required_permissions,
-            }),
-            HealthStatus::Unauthorized if !health.missing_permissions.is_empty() => {
-                Ok(DaytonaKeyCheck {
-                    missing:  health.missing_permissions,
-                    required: health.required_permissions,
-                })
-            }
-            HealthStatus::Unauthorized => Err(anyhow::anyhow!(
-                "failed to authenticate with Daytona: {}",
-                health
-                    .message
-                    .unwrap_or_else(|| "the credential was rejected".to_string())
-            )),
-            _ => Err(anyhow::anyhow!(
-                "failed to reach Daytona: {}",
-                health
-                    .message
-                    .unwrap_or_else(|| "the control plane did not answer".to_string())
-            )),
+                required: Vec::new(),
+            });
         }
+        Err(anyhow::anyhow!(
+            "Daytona did not accept the credential: {}",
+            health
+                .message
+                .unwrap_or_else(|| "the control plane gave no reason".to_string())
+        ))
     };
     match time::timeout(probe_timeout, probe).await {
         Ok(result) => result,
@@ -652,13 +562,13 @@ pub(crate) async fn check_daytona_api_key(
 /// The sandboxes Petri created for Fabro's runs, by provider, for the
 /// `/sandboxes` endpoints.
 ///
-/// Every entry is a provider connected on first use: the inventory is
-/// assembled synchronously at startup, and a provider that is down surfaces
-/// as a lookup error rather than a startup failure. A listing keeps only
-/// the sandboxes that carry Petri's run label, and a lookup by id answers
-/// only for one that does. The `local` kind has an entry too, so a caller
-/// can ask whether the kind is ready, but its sandboxes are directories the
-/// run record names and there is nothing to list.
+/// Every entry is opened on first use: the inventory is assembled
+/// synchronously at startup, and a provider that is down surfaces as a
+/// lookup error rather than a startup failure. A listing keeps only the
+/// sandboxes that carry Petri's run label, and a lookup by id answers only
+/// for one that does. The `local` kind has an entry too, so a caller can
+/// ask whether the kind is ready, but its sandboxes are directories the run
+/// record names and there is nothing to list.
 #[derive(Clone, Default)]
 pub(crate) struct SandboxInventory {
     entries: Vec<Arc<InventoryEntry>>,
@@ -674,14 +584,14 @@ enum Connection {
     /// there is nothing to list.
     HostDirectories,
     #[cfg(test)]
-    Connected(Arc<dyn SandboxProvider>),
-    /// Connected through [`connect_provider`] on first use.
+    Connected(Sandboxes, ProviderName),
+    /// The server's catalog, opened through `access` on first use.
     Lazy(Box<LazyConnection>),
 }
 
 struct LazyConnection {
-    access:   ProviderAccess,
-    provider: OnceCell<Arc<dyn SandboxProvider>>,
+    access:  ProviderAccess,
+    catalog: OnceCell<(Sandboxes, ProviderName)>,
 }
 
 impl SandboxInventory {
@@ -697,26 +607,28 @@ impl SandboxInventory {
         self.with_entry(kind, Connection::HostDirectories)
     }
 
-    /// A provider already connected, tagged with the kind Fabro persists
-    /// for it.
+    /// A catalog already open, whose `entry` holds the sandboxes Fabro
+    /// persists as `kind`.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn with_connected(
         self,
         kind: SandboxProviderKind,
-        provider: Arc<dyn SandboxProvider>,
+        sandboxes: Sandboxes,
+        entry: &str,
     ) -> Self {
-        self.with_entry(kind, Connection::Connected(provider))
+        let entry = ProviderName::try_new(entry).expect("a valid test entry name");
+        self.with_entry(kind, Connection::Connected(sandboxes, entry))
     }
 
-    /// A provider connected through `access` on first use.
+    /// A provider reached through `access` on first use.
     #[must_use]
     pub(crate) fn with_lazy(self, kind: SandboxProviderKind, access: ProviderAccess) -> Self {
         self.with_entry(
             kind,
             Connection::Lazy(Box::new(LazyConnection {
                 access,
-                provider: OnceCell::new(),
+                catalog: OnceCell::new(),
             })),
         )
     }
@@ -797,74 +709,87 @@ impl SandboxInventory {
 }
 
 impl InventoryEntry {
-    /// The provider, connected on first use; `None` when the kind has
-    /// nothing to list.
-    async fn provider(&self) -> anyhow::Result<Option<&Arc<dyn SandboxProvider>>> {
+    /// The catalog and this kind's entry on it, opened on first use; `None`
+    /// when the kind has nothing to list.
+    async fn catalog(&self) -> anyhow::Result<Option<(&Sandboxes, &ProviderName)>> {
         match &self.connection {
             Connection::HostDirectories => Ok(None),
             #[cfg(test)]
-            Connection::Connected(provider) => Ok(Some(provider)),
-            Connection::Lazy(lazy) => lazy
-                .provider
-                .get_or_try_init(|| async {
-                    connect_provider(&self.kind, &lazy.access)
-                        .await
-                        .with_context(|| format!("Failed to connect to the {} provider", self.kind))
-                })
-                .await
-                .map(Some),
+            Connection::Connected(sandboxes, entry) => Ok(Some((sandboxes, entry))),
+            Connection::Lazy(lazy) => {
+                let (sandboxes, entry) = lazy
+                    .catalog
+                    .get_or_try_init(|| async {
+                        let entry = lazy.access.entry_for(&self.kind)?;
+                        anyhow::Ok((lazy.access.open()?, entry))
+                    })
+                    .await
+                    .with_context(|| format!("Failed to connect to the {} provider", self.kind))?;
+                Ok(Some((sandboxes, entry)))
+            }
         }
     }
 
     async fn list(&self) -> anyhow::Result<Vec<SandboxInfo>> {
-        let Some(provider) = self.provider().await? else {
+        let Some((sandboxes, entry)) = self.catalog().await? else {
             return Ok(Vec::new());
         };
+        let failed = || format!("Failed to list {} sandboxes", self.kind);
+        let provider = sandboxes.provider(entry.as_str()).with_context(failed)?;
+        let isolation = provider.describe().await.with_context(failed)?.isolation;
         // The driver filters on a label's value; Petri's run label is a
         // different run id on every sandbox, so the listing is narrowed to
         // the key here.
-        let statuses = provider
-            .list(&SandboxFilter::default())
+        let summaries = provider
+            .list(&LabelFilter::default())
             .await
-            .with_context(|| format!("Failed to list {} sandboxes", self.kind))?;
-        Ok(statuses
+            .with_context(failed)?;
+        Ok(summaries
             .into_iter()
-            .filter(|status| is_petri_sandbox(&status.labels))
-            .map(|status| SandboxInfo {
-                provider: self.kind.clone(),
-                status,
+            .filter(|summary| is_petri_sandbox(&summary.labels))
+            .map(|summary| {
+                let mut status =
+                    SandboxStatus::new(summary.reference.id.as_str(), summary.state.into());
+                status.name = summary.name;
+                status.labels = summary.labels;
+                status.sandbox_kind = fabro_types::SandboxKind::from_isolation(isolation);
+                SandboxInfo {
+                    provider: self.kind.clone(),
+                    status,
+                }
             })
             .collect())
     }
 
     async fn get(&self, id: &str) -> anyhow::Result<Option<SandboxInfo>> {
-        let Some(provider) = self.provider().await? else {
+        let Some((sandboxes, entry)) = self.catalog().await? else {
             return Ok(None);
         };
         // An id the driver cannot even name is not one of ours.
-        let Ok(sandbox_id) = SandboxId::try_new(id) else {
+        if SandboxId::try_new(id).is_err() {
             return Ok(None);
-        };
-        let handle = match provider.attach(&sandbox_id, None).await {
+        }
+        let failed = || format!("Failed to look up {} sandbox '{id}'", self.kind);
+        let descriptor = describe(sandboxes, entry, &self.kind)
+            .await
+            .with_context(failed)?;
+        let reference = reference_in(&descriptor, entry, &self.kind, id)?;
+        let handle = match sandboxes.attach(&reference).await {
             Ok(handle) => handle,
             Err(DriverError::NotFound { .. }) => return Ok(None),
-            Err(error) => {
-                return Err(anyhow::Error::new(error)
-                    .context(format!("Failed to look up {} sandbox '{id}'", self.kind)));
-            }
+            Err(error) => return Err(anyhow::Error::new(error).context(failed())),
         };
         let status = handle
-            .describe()
+            .status()
             .await
             .with_context(|| format!("Failed to describe {} sandbox '{id}'", self.kind))?;
-        // Unknown to the provider, deleted, or not a run's: none is in the
-        // inventory.
+        // Deleted, or not a run's: neither is in the inventory.
         if status.state == SandboxState::Deleted || !is_petri_sandbox(&status.labels) {
             return Ok(None);
         }
         Ok(Some(SandboxInfo {
             provider: self.kind.clone(),
-            status,
+            status:   SandboxStatus::from_driver(&status, Some(descriptor.isolation)),
         }))
     }
 }
@@ -901,63 +826,64 @@ fn provider_error(
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    //! Scripted providers holding Petri-labelled sandboxes, for the
-    //! inventory and the attach path.
+    //! Fake catalogs holding Petri-labelled sandboxes, for the inventory and
+    //! the attach path.
 
-    use std::sync::Arc;
-
-    use sandbox_driver::legacy::{SandboxProvider, SandboxState};
-    use sandbox_driver_testing::legacy::{ScriptedProvider, ScriptedSandbox};
+    use sandbox_driver::Sandboxes;
+    use sandbox_driver_testing::FakeProvider;
 
     use super::PETRI_RUN_LABEL;
 
-    /// A running scripted sandbox Petri created for `run_id`, so a scoped
-    /// attach accepts it and the inventory lists it.
-    #[must_use]
-    pub(crate) fn petri_scripted_sandbox(id: &str, run_id: &str) -> Arc<ScriptedSandbox> {
-        Arc::new(
-            ScriptedSandbox::with_id_and_working_dir(id, "/workspace")
-                .state(SandboxState::Running)
-                .label(PETRI_RUN_LABEL, run_id),
-        )
-    }
+    /// The fake entry every catalog here holds its sandboxes on.
+    pub(crate) const FAKE_ENTRY: &str = "fake";
 
-    /// A scripted provider of `kind` holding `sandboxes`.
-    #[must_use]
-    pub(crate) fn scripted_provider(
-        kind: &str,
-        sandboxes: Vec<Arc<ScriptedSandbox>>,
-    ) -> Arc<dyn SandboxProvider> {
-        let provider = ScriptedProvider::new(kind);
-        for sandbox in sandboxes {
-            provider.register(sandbox);
+    /// A fake catalog whose [`FAKE_ENTRY`] holds a running sandbox Petri
+    /// created for each of `run_ids`, and those sandboxes' ids, in order.
+    pub(crate) async fn petri_fake_catalog(run_ids: &[&str]) -> (Sandboxes, Vec<String>) {
+        let sandboxes = FakeProvider::new().sandboxes();
+        let mut ids = Vec::new();
+        for run_id in run_ids {
+            let sandbox = sandboxes
+                .builder("default")
+                .await
+                .expect("the fake environment exists")
+                .label(PETRI_RUN_LABEL, run_id)
+                .create()
+                .await
+                .expect("the fake creates a sandbox");
+            ids.push(sandbox.reference().id.to_string());
         }
-        Arc::new(provider)
+        (sandboxes, ids)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use fabro_types::RunSandboxRuntime;
-    use fabro_types::settings::server::SandboxPluginSettings;
-    use sandbox_driver::legacy::SandboxProvider as _;
-    use sandbox_driver_testing::legacy::ScriptedSandbox;
 
-    use super::test_support::{petri_scripted_sandbox, scripted_provider};
+    use super::test_support::{FAKE_ENTRY, petri_fake_catalog};
     use super::*;
 
     fn kind(name: &str) -> SandboxProviderKind {
         SandboxProviderKind::try_new(name).expect("valid kind")
     }
 
-    fn record(provider: SandboxProviderKind, id: &str) -> RunSandboxInstance {
+    fn fake_entry() -> ProviderName {
+        ProviderName::try_new(FAKE_ENTRY).unwrap()
+    }
+
+    fn record(
+        provider: SandboxProviderKind,
+        id: &str,
+        working_directory: &str,
+    ) -> RunSandboxInstance {
         RunSandboxInstance {
             provider,
             image: None,
             snapshot: None,
             runtime: RunSandboxRuntime {
                 id:                id.to_string(),
-                working_directory: "/workspace".to_string(),
+                working_directory: working_directory.to_string(),
                 repo_cloned:       None,
                 clone_origin_url:  None,
                 clone_branch:      None,
@@ -987,60 +913,128 @@ mod tests {
             });
         ProviderAccess {
             providers,
-            daytona: None,
-            storage_root: None,
+            sandbox: SandboxProviderConfig::default(),
         }
+    }
+
+    async fn state_of(sandboxes: &Sandboxes, id: &str) -> SandboxState {
+        let descriptor = describe(sandboxes, &fake_entry(), &kind("fake"))
+            .await
+            .unwrap();
+        let reference = reference_in(&descriptor, &fake_entry(), &kind("fake"), id).unwrap();
+        sandboxes
+            .attach(&reference)
+            .await
+            .unwrap()
+            .status()
+            .await
+            .unwrap()
+            .state
     }
 
     #[test]
-    fn ownership_is_keyed_on_petris_run_label() {
-        let run_id: RunId = "01HY0000000000000000000000".parse().unwrap();
-        let ownership = run_ownership(run_id);
-        assert_eq!(ownership.labels().iter().collect::<Vec<_>>(), vec![(
-            &"petri.run".to_string(),
-            &run_id.to_string()
-        )]);
-        let mut labels = BTreeMap::new();
-        assert!(!ownership.owns(&labels));
-        labels.insert("sh.fabro.managed".to_string(), "true".to_string());
+    fn daytona_requires_explicit_credentials() {
+        let error = ProviderAccess::default()
+            .entry_for(&SandboxProviderKind::DAYTONA)
+            .expect_err("daytona must not fall back to the environment");
+        assert!(matches!(error, ConnectError::MissingDaytonaCredentials));
+    }
+
+    #[test]
+    fn disabled_and_unconfigured_kinds_are_refused_before_any_connection() {
+        let mut providers = ServerSandboxProvidersSettings::default();
+        providers
+            .entries
+            .insert(SandboxProviderKind::DOCKER, ServerSandboxProviderSettings {
+                enabled: false,
+                plugin:  None,
+            });
+        let access = ProviderAccess {
+            providers,
+            sandbox: SandboxProviderConfig::default(),
+        };
+        let error = access
+            .entry_for(&SandboxProviderKind::DOCKER)
+            .expect_err("a disabled provider must not connect");
         assert!(
-            !ownership.owns(&labels),
-            "Fabro's old labels prove nothing; Petri stamps petri.*"
+            matches!(error, ConnectError::Disabled { kind } if kind == SandboxProviderKind::DOCKER)
         );
-        labels.insert("petri.run".to_string(), "another-run".to_string());
-        assert!(!ownership.owns(&labels));
-        labels.insert("petri.run".to_string(), run_id.to_string());
-        assert!(ownership.owns(&labels));
+
+        let error = ProviderAccess::default()
+            .entry_for(&kind("e2b"))
+            .expect_err("a plugin kind without settings cannot launch");
+        assert!(matches!(error, ConnectError::Unconfigured { kind: k } if k == kind("e2b")));
+    }
+
+    #[test]
+    fn plugin_settings_become_a_protocol_3_entry() {
+        let digest = "a".repeat(64);
+        let entry = plugin_entry(
+            ProviderKind::try_new("e2b").unwrap(),
+            &SandboxPluginSettings {
+                path:        Some("/opt/plugins/sandbox-driver-e2b".to_string()),
+                sha256:      Some(digest.clone()),
+                dev:         true,
+                args:        vec!["--verbose".to_string()],
+                env:         BTreeMap::from([("REGION".to_string(), "eu".to_string())]),
+                inherit_env: vec!["HOME".to_string()],
+            },
+        )
+        .unwrap();
+        assert_eq!(entry.plugin.as_str(), "e2b");
+        assert_eq!(
+            entry.path.as_deref(),
+            Some("/opt/plugins/sandbox-driver-e2b")
+        );
+        // A pinned checksum wins over the development opt-in.
+        assert!(matches!(
+            entry.trust,
+            Some(PluginTrust::Sha256 { digest: ref pinned }) if pinned.as_str() == digest
+        ));
+        assert_eq!(entry.args, ["--verbose"]);
+        assert_eq!(entry.env.get("REGION").map(String::as_str), Some("eu"));
+        assert_eq!(entry.inherit_env, Some(vec!["HOME".to_string()]));
+
+        let unpinned = plugin_entry(
+            ProviderKind::try_new("nowhere-xyz").unwrap(),
+            &SandboxPluginSettings {
+                dev: true,
+                ..SandboxPluginSettings::default()
+            },
+        )
+        .unwrap();
+        assert!(matches!(unpinned.trust, Some(PluginTrust::Development)));
+        assert_eq!(unpinned.path, None, "no sandbox-driver-nowhere-xyz on PATH");
     }
 
     #[tokio::test]
-    async fn worker_cleanup_stops_all_owned_sandboxes_without_deleting_their_data() {
+    async fn worker_cleanup_stops_all_owned_sandboxes_without_deleting_them() {
         let run_id = RunId::new();
-        let mine = petri_scripted_sandbox("root", &run_id.to_string());
-        let nested = petri_scripted_sandbox("nested", &run_id.to_string());
-        let theirs = petri_scripted_sandbox("foreign", &RunId::new().to_string());
-        let unlabelled = Arc::new(ScriptedSandbox::new());
-        mine.fs().write("retained", b"keep me").await.unwrap();
-        let provider = scripted_provider("docker", vec![
-            Arc::clone(&mine),
-            Arc::clone(&nested),
-            Arc::clone(&theirs),
-            Arc::clone(&unlabelled),
-        ]);
+        let other_run = RunId::new().to_string();
+        let (sandboxes, ids) =
+            petri_fake_catalog(&[&run_id.to_string(), &run_id.to_string(), &other_run]).await;
+        let unlabelled = sandboxes
+            .builder("default")
+            .await
+            .unwrap()
+            .create()
+            .await
+            .unwrap()
+            .reference()
+            .id
+            .to_string();
 
-        stop_run_sandboxes_on(provider, run_id).await.unwrap();
+        stop_run_sandboxes_on(&sandboxes, &fake_entry(), run_id)
+            .await
+            .unwrap();
 
-        for sandbox in [&mine, &nested] {
-            assert_eq!(sandbox.current_state(), SandboxState::Stopped);
-            assert_eq!(sandbox.delete_count(), 0);
-            assert_eq!(sandbox.start_count(), 0);
-        }
-        assert_eq!(mine.fs().read("retained").await.unwrap(), b"keep me");
-        for sandbox in [&theirs, &unlabelled] {
-            assert_eq!(sandbox.current_state(), SandboxState::Running);
-            assert_eq!(sandbox.stop_count(), 0);
-            assert_eq!(sandbox.delete_count(), 0);
-        }
+        assert_eq!(state_of(&sandboxes, &ids[0]).await, SandboxState::Stopped);
+        assert_eq!(state_of(&sandboxes, &ids[1]).await, SandboxState::Stopped);
+        assert_eq!(state_of(&sandboxes, &ids[2]).await, SandboxState::Running);
+        assert_eq!(
+            state_of(&sandboxes, &unlabelled).await,
+            SandboxState::Running
+        );
     }
 
     #[tokio::test]
@@ -1062,309 +1056,62 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_scoped_provider_attaches_only_to_the_runs_sandbox() {
+    async fn attach_keys_ownership_on_petris_run_label() {
         let run_id = RunId::new();
-        let other_run = RunId::new();
-        let provider = scripted_provider("docker", vec![
-            petri_scripted_sandbox("mine", &run_id.to_string()),
-            petri_scripted_sandbox("theirs", &other_run.to_string()),
-            Arc::new(
-                ScriptedSandbox::with_id_and_working_dir("unlabelled", "/work")
-                    .state(SandboxState::Running),
-            ),
-        ]);
-        let scoped = OwnedProvider::new(provider, run_ownership(run_id));
-
-        let mine = scoped
-            .attach(&SandboxId::try_new("mine").unwrap(), None)
+        let (sandboxes, ids) =
+            petri_fake_catalog(&[&run_id.to_string(), &RunId::new().to_string()]).await;
+        let unlabelled = sandboxes
+            .builder("default")
             .await
-            .expect("the run's own sandbox attaches");
-        assert_eq!(mine.id().as_str(), "mine");
-        for foreign in ["theirs", "unlabelled"] {
-            let error = scoped
-                .attach(&SandboxId::try_new(foreign).unwrap(), None)
-                .await
-                .err()
-                .expect("a sandbox without the run's label is refused");
-            assert!(
-                matches!(error, DriverError::NotOwned { .. }),
-                "{foreign}: {error:?}"
-            );
-        }
-    }
+            .unwrap()
+            .create()
+            .await
+            .unwrap()
+            .reference()
+            .id
+            .to_string();
 
-    #[tokio::test]
-    async fn attach_run_sandbox_keys_ownership_on_petris_run_label() {
-        let run_id = RunId::new();
-        let other_run = RunId::new();
-        // Petri's own sandbox for the run, another run's, and one that carries
-        // only Fabro's retired labels.
-        let fabro_labelled = Arc::new(
-            ScriptedSandbox::with_id_and_working_dir("fabro-era", "/workspace")
-                .state(SandboxState::Running)
-                .label("sh.fabro.managed", "true")
-                .label("sh.fabro.run_id", run_id.to_string()),
-        );
-        let provider = scripted_provider("docker", vec![
-            petri_scripted_sandbox("petri-container", &run_id.to_string()),
-            petri_scripted_sandbox("other-runs-container", &other_run.to_string()),
-            fabro_labelled,
-        ]);
-
-        let attached = attach_run_sandbox_on(
-            Arc::clone(&provider),
-            &record(SandboxProviderKind::DOCKER, "petri-container"),
+        let mine = attach_owned(
+            &sandboxes,
+            &fake_entry(),
+            &record(kind("fake"), &ids[0], "/"),
             run_id,
         )
         .await
-        .expect("the container Petri labelled with the run attaches");
-        assert_eq!(attached.id().as_str(), "petri-container");
-
-        for foreign in ["other-runs-container", "fabro-era"] {
-            let error = attach_run_sandbox_on(
-                Arc::clone(&provider),
-                &record(SandboxProviderKind::DOCKER, foreign),
+        .expect("the run's own sandbox attaches");
+        assert_eq!(mine.sandbox.reference().id.as_str(), ids[0]);
+        for foreign in [&ids[1], &unlabelled] {
+            let error = attach_owned(
+                &sandboxes,
+                &fake_entry(),
+                &record(kind("fake"), foreign, "/"),
                 run_id,
             )
             .await
             .err()
-            .unwrap_or_else(|| panic!("{foreign} does not carry petri.run={run_id}"));
+            .expect("a sandbox without the run's label is refused");
             assert!(
-                error.chain().any(|cause| matches!(
-                    cause.downcast_ref::<DriverError>(),
-                    Some(DriverError::NotOwned { .. })
-                )),
+                error.to_string().contains("does not belong to run"),
                 "{foreign}: {error:#}"
             );
         }
     }
 
     #[tokio::test]
-    async fn daytona_requires_explicit_credentials() {
-        let error = connect_provider(&SandboxProviderKind::DAYTONA, &ProviderAccess::default())
-            .await
-            .err()
-            .expect("daytona must not fall back to the environment");
-        assert!(matches!(error, ConnectError::MissingDaytonaCredentials));
-    }
-
-    #[tokio::test]
-    async fn disabled_and_unconfigured_kinds_are_refused_before_any_connection() {
-        let mut providers = ServerSandboxProvidersSettings::default();
-        providers
-            .entries
-            .insert(SandboxProviderKind::DOCKER, ServerSandboxProviderSettings {
-                enabled: false,
-                plugin:  None,
-            });
-        let access = ProviderAccess {
-            providers,
-            daytona: None,
-            storage_root: None,
-        };
-        let error = connect_provider(&SandboxProviderKind::DOCKER, &access)
-            .await
-            .err()
-            .expect("a disabled provider must not connect");
-        assert!(
-            matches!(error, ConnectError::Disabled { kind } if kind == SandboxProviderKind::DOCKER)
-        );
-
-        let error = connect_provider(&kind("e2b"), &ProviderAccess::default())
-            .await
-            .err()
-            .expect("a plugin kind without settings cannot launch");
-        assert!(matches!(error, ConnectError::Unconfigured { kind: k } if k == kind("e2b")));
-    }
-
-    /// The worker's registry knows the run's directory: the server attaches
-    /// to it with the worker's record, checks the run's label on it, and
-    /// works in it in whatever state the worker left it.
-    #[tokio::test]
-    async fn a_host_record_attaches_with_the_workers_managed_record() {
-        let storage = tempfile::tempdir().unwrap();
-        let access = ProviderAccess {
-            storage_root: Some(storage.path().to_path_buf()),
-            ..ProviderAccess::default()
-        };
-        let run_id = RunId::new();
-        let registry = access.host_registry(run_id).expect("a storage root");
-        // The worker's provider over the run's registry, creating the scope's
-        // managed workspace with Petri's labels.
-        let worker = HostProvider::with_registry(&registry)
-            .await
-            .expect("the worker opens the run's registry");
-        let workspace = registry
-            .parent()
-            .expect("the run's Petri directory")
-            .join("scopes")
-            .join("ws")
-            .join("work");
-        let mut spec = SandboxSpec::new(SandboxSource::HostDirectory)
-            .working_directory(workspace.display().to_string());
-        spec.workspace_ownership = Some(legacy::WorkspaceOwnership::Managed);
-        spec.labels
-            .insert(PETRI_RUN_LABEL.to_owned(), run_id.to_string());
-        let created = worker
-            .create(&spec, None)
-            .await
-            .expect("the worker creates the managed workspace");
-        created
-            .fs()
-            .write("note", b"kept")
-            .await
-            .expect("the worker writes");
-        let mut record = record(SandboxProviderKind::LOCAL, created.id().as_str());
-        record.runtime.working_directory = created.working_directory().to_owned();
-
-        let attached = attach_run_sandbox(&access, &record, run_id)
-            .await
-            .expect("the run's directory attaches with its record");
-        assert_eq!(
-            attached.id(),
-            created.id(),
-            "the worker's id, not a derived one"
-        );
-        let status = attached.describe().await.expect("describe");
-        assert_eq!(
-            status.labels.get(PETRI_RUN_LABEL).map(String::as_str),
-            Some(run_id.to_string().as_str())
-        );
-        assert_eq!(
-            status.workspace_ownership,
-            Some(legacy::WorkspaceOwnership::Managed)
-        );
-
-        // A directory the registry records for another run is refused, as
-        // on Docker: the record's label, not the directory, is the proof.
-        let other_run = RunId::new();
-        let mut foreign_spec = SandboxSpec::new(SandboxSource::HostDirectory).working_directory(
-            registry
-                .parent()
-                .expect("the run's Petri directory")
-                .join("scopes")
-                .join("foreign")
-                .join("work")
-                .display()
-                .to_string(),
-        );
-        foreign_spec.workspace_ownership = Some(legacy::WorkspaceOwnership::Managed);
-        foreign_spec
-            .labels
-            .insert(PETRI_RUN_LABEL.to_owned(), other_run.to_string());
-        let foreign = worker
-            .create(&foreign_spec, None)
-            .await
-            .expect("another run's workspace in the same registry");
-        let mut foreign_record = record.clone();
-        foreign_record.runtime.working_directory = foreign.working_directory().to_owned();
-        let error = attach_run_sandbox(&access, &foreign_record, run_id)
-            .await
-            .err()
-            .expect("the directory carries another run's label");
-        assert!(
-            error.chain().any(|cause| matches!(
-                cause.downcast_ref::<DriverError>(),
-                Some(DriverError::NotOwned { .. })
-            )),
-            "{error:#}"
-        );
-
-        // The worker stops the sandbox at release; the retained workspace is
-        // still read through the server's handle, without starting it.
-        created.stop().await.expect("the worker stops");
-        let running = attach_running_run_sandbox(&access, &record, run_id)
-            .await
-            .expect("a stopped host sandbox's workspace is usable");
-        assert_eq!(
-            running.describe().await.expect("describe").state,
-            SandboxState::Stopped,
-            "the worker's state shows through"
-        );
-        assert_eq!(running.fs().read("note").await.expect("read"), b"kept");
-        let refused = running
-            .delete()
-            .await
-            .expect_err("deletion is the worker's");
-        assert!(matches!(refused, DriverError::ReadOnly { .. }), "{refused}");
-
-        // A directory the registry does not know is designated as before.
-        let other = tempfile::tempdir().unwrap();
-        let mut unknown = record.clone();
-        unknown.runtime.working_directory =
-            other.path().canonicalize().unwrap().display().to_string();
-        let designated = attach_run_sandbox(&access, &unknown, run_id)
-            .await
-            .expect("an unrecorded directory is designated");
-        let status = designated.describe().await.expect("describe");
-        assert_eq!(
-            status.workspace_ownership,
-            Some(legacy::WorkspaceOwnership::Designated)
-        );
-        assert!(status.labels.is_empty());
-
-        created.delete().await.expect("the worker deletes");
-        foreign.delete().await.expect("the worker deletes");
-    }
-
-    /// Without a storage root there is no registry to consult: the directory
-    /// is designated again, whatever id the record carries.
-    #[tokio::test]
     async fn a_host_record_reconnects_by_designating_its_directory() {
-        let directory = tempfile::tempdir().unwrap();
-        let working_directory = directory
-            .path()
-            .canonicalize()
-            .unwrap()
-            .display()
-            .to_string();
-        // An id no registry of this process knows, as a worker mints for a
-        // long path.
-        let mut record = record(SandboxProviderKind::LOCAL, "host-0123456789abcdef");
-        record.runtime.working_directory = working_directory.clone();
-
-        let sandbox = attach_run_sandbox(&ProviderAccess::default(), &record, RunId::new())
-            .await
-            .expect("the directory is designated again");
-        assert_eq!(sandbox.working_directory(), working_directory);
-        activate(sandbox.as_ref())
-            .await
-            .expect("a host sandbox runs");
-        assert!(directory.path().is_dir());
-
-        // The path-derived id designates the same directory.
-        let derived = HostProvider::directory_id(directory.path())
-            .await
-            .expect("an id for the directory");
-        record.runtime.id = derived.to_string();
-        let sandbox = attach_run_sandbox(&ProviderAccess::default(), &record, RunId::new())
-            .await
-            .expect("the derived id attaches");
-        assert_eq!(sandbox.id(), &derived);
-    }
-
-    #[test]
-    fn plugin_config_carries_every_launch_setting() {
-        let config = plugin_config(
-            ProviderKind::try_new("e2b").unwrap(),
-            &SandboxPluginSettings {
-                path:        Some("/opt/e2b".to_string()),
-                sha256:      Some("abc".to_string()),
-                dev:         true,
-                args:        vec!["--flag".to_string()],
-                env:         BTreeMap::from([("A".to_string(), "1".to_string())]),
-                inherit_env: vec!["PATH".to_string()],
-            },
-        );
+        let workspace = tempfile::tempdir().unwrap();
+        let directory = workspace.path().display().to_string();
+        let sandbox = attach_running_run_sandbox(
+            &ProviderAccess::default(),
+            &record(SandboxProviderKind::LOCAL, "host-recorded-id", &directory),
+            RunId::new(),
+        )
+        .await
+        .expect("the recorded directory is designated again");
         assert_eq!(
-            config.path.as_deref(),
-            Some(std::path::Path::new("/opt/e2b"))
+            sandbox.sandbox.working_directory().canonicalize().unwrap(),
+            workspace.path().canonicalize().unwrap()
         );
-        assert_eq!(config.sha256.as_deref(), Some("abc"));
-        assert!(config.dev);
-        assert_eq!(config.args, vec!["--flag"]);
-        assert_eq!(config.env.get("A").map(String::as_str), Some("1"));
-        assert_eq!(config.inherit_env, vec!["PATH"]);
     }
 
     #[test]
@@ -1411,32 +1158,52 @@ mod tests {
 
     #[tokio::test]
     async fn the_inventory_lists_petris_sandboxes_across_providers() {
-        let foreign = Arc::new(
-            ScriptedSandbox::with_id_and_working_dir("someone-elses", "/work")
-                .state(SandboxState::Running),
-        );
+        let (docker, docker_ids) = petri_fake_catalog(&["run-1"]).await;
+        let foreign = docker
+            .builder("default")
+            .await
+            .unwrap()
+            .create()
+            .await
+            .unwrap()
+            .reference()
+            .id
+            .to_string();
+        // The fakes number their sandboxes alike, so Daytona destroys the
+        // sandbox whose id is Docker's unlabelled one; its third sandbox's id
+        // is then Daytona's alone.
+        let (daytona, mut daytona_ids) = petri_fake_catalog(&["run-2", "run-5", "run-3"]).await;
+        assert_eq!(daytona_ids[1], foreign);
+        let gone = daytona_ids.remove(1);
+        let descriptor = describe(&daytona, &fake_entry(), &kind("fake"))
+            .await
+            .unwrap();
+        let gone = reference_in(&descriptor, &fake_entry(), &kind("fake"), &gone).unwrap();
+        daytona.destroy(&gone).await.unwrap();
         let inventory = SandboxInventory::empty()
             .with_host_directories(SandboxProviderKind::LOCAL)
-            .with_connected(
-                SandboxProviderKind::DOCKER,
-                scripted_provider("docker", vec![
-                    petri_scripted_sandbox("docker-1", "run-1"),
-                    foreign,
-                ]),
-            )
-            .with_connected(
-                SandboxProviderKind::DAYTONA,
-                scripted_provider("daytona", vec![petri_scripted_sandbox(
-                    "daytona-1",
-                    "run-2",
-                )]),
-            );
+            .with_connected(SandboxProviderKind::DOCKER, docker, FAKE_ENTRY)
+            .with_connected(SandboxProviderKind::DAYTONA, daytona, FAKE_ENTRY);
 
         let response = inventory.list_managed().await;
 
-        let mut ids: Vec<_> = response.data.iter().map(|s| s.status.id.as_str()).collect();
-        ids.sort_unstable();
-        assert_eq!(ids, ["daytona-1", "docker-1"]);
+        let mut listed: Vec<_> = response
+            .data
+            .iter()
+            .map(|s| (s.provider.clone(), s.status.id.clone()))
+            .collect();
+        listed.sort_unstable();
+        let mut expected: Vec<_> = docker_ids
+            .iter()
+            .map(|id| (SandboxProviderKind::DOCKER, id.clone()))
+            .collect();
+        expected.extend(
+            daytona_ids
+                .iter()
+                .map(|id| (SandboxProviderKind::DAYTONA, id.clone())),
+        );
+        expected.sort_unstable();
+        assert_eq!(listed, expected);
         assert!(response.meta.provider_errors.is_empty());
         let kinds: Vec<_> = inventory.kinds().cloned().collect();
         assert_eq!(kinds, [
@@ -1446,12 +1213,16 @@ mod tests {
         ]);
 
         let found = inventory
-            .get_managed_by_native_id("daytona-1")
+            .get_managed_by_native_id(&daytona_ids[1])
             .await
             .expect("one provider matches");
         assert_eq!(found.provider, SandboxProviderKind::DAYTONA);
+        assert_eq!(
+            found.status.labels.get(PETRI_RUN_LABEL).map(String::as_str),
+            Some("run-3")
+        );
         let error = inventory
-            .get_managed_by_native_id("someone-elses")
+            .get_managed_by_native_id(&foreign)
             .await
             .expect_err("a sandbox without Petri's label is not in the inventory");
         assert!(matches!(error, SandboxLookupError::NotFound { .. }));
@@ -1459,11 +1230,9 @@ mod tests {
 
     #[tokio::test]
     async fn the_inventory_reports_a_provider_that_cannot_connect_beside_the_others() {
+        let (docker, _) = petri_fake_catalog(&["run-1"]).await;
         let inventory = SandboxInventory::empty()
-            .with_connected(
-                SandboxProviderKind::DOCKER,
-                scripted_provider("docker", vec![petri_scripted_sandbox("docker-1", "run-1")]),
-            )
+            .with_connected(SandboxProviderKind::DOCKER, docker, FAKE_ENTRY)
             .with_lazy(kind("e2b"), unreachable_plugin_access("e2b"));
 
         let response = inventory.list_managed().await;
@@ -1473,7 +1242,7 @@ mod tests {
         assert!(
             response.meta.provider_errors[0]
                 .message
-                .contains("Failed to connect to the e2b provider"),
+                .contains("/nonexistent/sandbox-driver-e2b"),
             "{}",
             response.meta.provider_errors[0].message
         );
@@ -1490,18 +1259,18 @@ mod tests {
 
     #[tokio::test]
     async fn the_inventory_reports_a_conflict_when_two_providers_match() {
+        let (docker, docker_ids) = petri_fake_catalog(&["run-1"]).await;
+        let (daytona, daytona_ids) = petri_fake_catalog(&["run-1"]).await;
+        assert_eq!(
+            docker_ids, daytona_ids,
+            "the fakes number their sandboxes alike"
+        );
         let inventory = SandboxInventory::empty()
-            .with_connected(
-                SandboxProviderKind::DOCKER,
-                scripted_provider("docker", vec![petri_scripted_sandbox("same-id", "run-1")]),
-            )
-            .with_connected(
-                SandboxProviderKind::DAYTONA,
-                scripted_provider("daytona", vec![petri_scripted_sandbox("same-id", "run-1")]),
-            );
+            .with_connected(SandboxProviderKind::DOCKER, docker, FAKE_ENTRY)
+            .with_connected(SandboxProviderKind::DAYTONA, daytona, FAKE_ENTRY);
 
         let error = inventory
-            .get_managed_by_native_id("same-id")
+            .get_managed_by_native_id(&docker_ids[0])
             .await
             .expect_err("two providers match");
 

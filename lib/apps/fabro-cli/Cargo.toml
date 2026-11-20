@@ -34,7 +34,6 @@ fabro-petri = { path = "../../components/fabro-petri" }
 fabro-manifest = { path = "../../components/fabro-manifest" }
 fabro-proc = { path = "../../foundation/fabro-proc" }
 sandbox-driver.workspace = true
-sandbox-driver-host.workspace = true
 fabro-graphviz = { path = "../../components/fabro-graphviz" }
 fabro-workflow = { path = "../../components/fabro-workflow" }
 fabro-server = { path = "../fabro-server" }

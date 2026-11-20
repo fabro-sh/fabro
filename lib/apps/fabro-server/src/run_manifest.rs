@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, SystemTime};
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use fabro_api::types;
@@ -13,7 +13,7 @@ use fabro_config::{
     WorkflowSettingsBuilder, parse_input_overrides, parse_labels, project,
 };
 use fabro_dot::WorkflowGraph;
-use fabro_github::token_source::{InstallationTokenSource, ResolvedToken, TokenSnapshot};
+use fabro_github::token_source::{InstallationTokenSource, ResolvedToken};
 use fabro_graphviz::render::apply_direction;
 use fabro_petri::check::Launch;
 use fabro_petri::run_graph;
@@ -33,15 +33,7 @@ use fabro_workflow::Error as WorkflowError;
 use fabro_workflow::workflow_bundle::{BundledWorkflow, ParsedWorkflowConfig, WorkflowBundle};
 use futures_util::stream::{self, StreamExt};
 use lithos_llm::catalog::ProviderId;
-// TODO(parity): `retry_git` and its failure types are legacy, with no
-// new-API home yet: they stay a library utility or move into Fabro before
-// the legacy module goes (parity plan B4). Provider health keeps Daytona's
-// permission lists, which the new `Health` lacks (A11).
-use sandbox_driver::legacy;
-use sandbox_driver::legacy::{
-    GitBackoff, GitCredentials, GitFailure, GitFailureKind, GitRetryPolicy, HealthStatus,
-    ProviderHealth,
-};
+use sandbox_driver::Health;
 use tokio::process::Command;
 use tokio::task;
 #[cfg(test)]
@@ -892,11 +884,11 @@ async fn run_sandbox_check(
 }
 
 /// The preflight check for a provider's health report: a connection
-/// failure and an unreachable or rejected backend fail with the reason; a
-/// healthy backend, or one whose provider has no health check, passes.
+/// failure and an unhealthy provider fail with the reason; a healthy
+/// provider passes.
 fn sandbox_health_check(
     sandbox_provider: &SandboxProviderKind,
-    health: std::result::Result<ProviderHealth, String>,
+    health: std::result::Result<Health, String>,
 ) -> CheckResult {
     let details = vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))];
     let failure = |remediation: String| CheckResult {
@@ -910,34 +902,25 @@ fn sandbox_health_check(
         Ok(health) => health,
         Err(err) => return failure(err),
     };
-    match health.status {
-        HealthStatus::Ok | HealthStatus::Unknown => CheckResult {
+    // TODO(parity): sandbox-driver's provider health says only whether the
+    // provider is healthy, with a message; it no longer tells an unreachable
+    // backend from a rejected credential, or lists the permissions a
+    // credential lacks, so the remediation is the provider's message.
+    if health.healthy {
+        return CheckResult {
             name: "Sandbox".into(),
             status: CheckStatus::Pass,
             summary: sandbox_provider.to_string(),
             details,
             remediation: None,
-        },
-        HealthStatus::Unreachable => failure(format!(
-            "{sandbox_provider} backend is unreachable: {}",
-            health
-                .message
-                .unwrap_or_else(|| "the backend did not answer".to_string())
-        )),
-        HealthStatus::Unauthorized if !health.missing_permissions.is_empty() => failure(format!(
-            "{sandbox_provider} credential is missing required permissions: {}",
-            health.missing_permissions.join(", ")
-        )),
-        HealthStatus::Unauthorized => failure(format!(
-            "{sandbox_provider} rejected the credential: {}",
-            health
-                .message
-                .unwrap_or_else(|| "the credential was rejected".to_string())
-        )),
-        _ => failure(format!(
-            "{sandbox_provider} reported an unknown health state"
-        )),
+        };
     }
+    failure(format!(
+        "{sandbox_provider} is unhealthy: {}",
+        health
+            .message
+            .unwrap_or_else(|| "the provider gave no reason".to_string())
+    ))
 }
 
 async fn run_github_token_check(
@@ -1229,127 +1212,13 @@ async fn probe_github_repository(
     token: ResolvedToken,
 ) -> std::result::Result<(), String> {
     let url = slug.https_url();
-    probe_with_replication_retry(token.snapshot, || run_probe_ls_remote(&url, &token)).await
-}
-
-/// Retry auth-shaped failures with the SAME token: replication of a given
-/// token only makes progress, while re-minting would restart the replication
-/// clock. The driver's git retry owns the decision and the pacing; fabro's
-/// probe policy owns the attempt count.
-async fn probe_with_replication_retry<F, Fut>(
-    snapshot: TokenSnapshot,
-    run: F,
-) -> std::result::Result<(), String>
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = std::result::Result<(), String>>,
-{
-    retry_git_messages(
-        &repository_probe_policy(),
-        Some(&snapshot),
-        "repository probe",
-        run,
-    )
-    .await
-}
-
-// ── Fabro's retry budget for git operations against GitHub ─────────────────
-//
-// The driver owns the retry loop and the decision
-// (`sandbox_driver::legacy::retry_git`): a remote that cannot be reached is
-// retried, a rejected credential is retried only while the token is fresh
-// enough to still be replicating to GitHub's git endpoints, a static credential
-// fails fast, and a command whose outcome is unknown is never replayed. Fabro
-// keeps what is policy: how many attempts the host-side repository probe
-// gets, how it paces them, and when the credential it runs with was minted.
-//
-// Retries reuse the same token on purpose. Replication of a given token
-// only makes progress, so each attempt strictly improves the odds, while
-// re-minting would restart the replication clock.
-
-/// The username GitHub expects with an installation token or PAT.
-const GITHUB_TOKEN_USERNAME: &str = "x-access-token";
-
-/// Backoff between attempts: 3s, then 9s.
-///
-/// GitHub's guidance for token replication is to wait a few seconds and
-/// retry with the same token. Sub-second delays land inside the same
-/// replication window and spend an attempt for nothing.
-fn replication_backoff() -> GitBackoff {
-    GitBackoff::new(Duration::from_secs(3), 3.0, Duration::from_secs(10))
-}
-
-/// Host-side repository probes get 3 attempts at replication pacing, with
-/// no deadline of their own.
-fn repository_probe_policy() -> GitRetryPolicy {
-    GitRetryPolicy::new(3, replication_backoff())
-}
-
-/// Credentials carrying only the token's mint time, which is all the
-/// driver's decision reads for git that ran outside a sandbox. The token
-/// itself never leaves its snapshot.
-fn credential_age(snapshot: Option<&TokenSnapshot>) -> Option<GitCredentials> {
-    let snapshot = snapshot?;
-    let credentials = GitCredentials::new(GITHUB_TOKEN_USERNAME, "");
-    Some(match snapshot.minted_at() {
-        Some(minted_at) => credentials.minted_at(SystemTime::from(minted_at)),
-        None => credentials,
-    })
-}
-
-/// The driver's failure for a rendered git message, so git that ran
-/// outside a sandbox (the host-side repository probe) is classified the
-/// same way as git the driver ran.
-fn classified_git_failure(operation: &str, message: &str) -> legacy::Error {
-    legacy::Error::Git(GitFailure::classified(
-        operation,
-        GitFailureKind::from_message(message),
-        None,
-    ))
-}
-
-/// Runs a host-side git operation that reports failures as rendered
-/// messages under `policy`, retrying while the driver's decision says the
-/// message is transient for the token behind `snapshot`. The final failure
-/// comes back as the operation's own message.
-async fn retry_git_messages<F, Fut>(
-    policy: &GitRetryPolicy,
-    snapshot: Option<&TokenSnapshot>,
-    operation: &str,
-    mut run: F,
-) -> std::result::Result<(), String>
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = std::result::Result<(), String>>,
-{
-    let credentials = credential_age(snapshot);
-    // The operation's own message is kept beside the classified failure the
-    // driver decides on, so the caller reads the message it knows.
-    let last_message = Mutex::new(None);
-    let result = legacy::retry_git(
-        policy,
-        credentials.as_ref(),
-        operation,
-        |_attempt, _timeout| {
-            let attempt = run();
-            let last_message = &last_message;
-            async move {
-                attempt.await.map_err(|message| {
-                    let error = classified_git_failure(operation, &message);
-                    *last_message.lock().unwrap_or_else(PoisonError::into_inner) = Some(message);
-                    error
-                })
-            }
-        },
-    )
-    .await;
-    match result {
-        Ok(_) => Ok(()),
-        Err(failure) => Err(last_message
-            .into_inner()
-            .unwrap_or_else(PoisonError::into_inner)
-            .unwrap_or_else(|| failure.error.to_string())),
-    }
+    // TODO(parity): one attempt. The probe used to retry a rejected, freshly
+    // minted GitHub token while it replicated to GitHub's git endpoints,
+    // with sandbox-driver's git retry policy deciding which failures were
+    // transient. The new sandbox-driver API has no git retry policy, and
+    // whether git belongs in sandbox-driver or in Fabro is undecided, so a
+    // token still replicating fails the probe.
+    run_probe_ls_remote(&url, &token).await
 }
 
 async fn run_probe_ls_remote(url: &str, token: &ResolvedToken) -> std::result::Result<(), String> {
@@ -2013,30 +1882,28 @@ provider = "local"
         );
     }
 
-    fn health(status: HealthStatus, message: Option<&str>) -> ProviderHealth {
-        let mut health = ProviderHealth::new(status);
-        health.message = message.map(str::to_string);
-        health
-    }
-
-    #[test]
-    fn a_healthy_or_uncheckable_provider_passes_the_sandbox_check() {
-        for status in [HealthStatus::Ok, HealthStatus::Unknown] {
-            let check =
-                sandbox_health_check(&SandboxProviderKind::DOCKER, Ok(health(status, None)));
-            assert_eq!(check.status, CheckStatus::Pass, "{status:?}");
-            assert_eq!(check.summary, "docker");
-            assert_eq!(check.details[0].text, "Provider: docker");
-            assert!(check.remediation.is_none());
+    fn health(healthy: bool, message: Option<&str>) -> Health {
+        Health {
+            healthy,
+            message: message.map(str::to_string),
         }
     }
 
     #[test]
-    fn an_unreachable_backend_fails_the_sandbox_check_with_its_reason() {
+    fn a_healthy_provider_passes_the_sandbox_check() {
+        let check = sandbox_health_check(&SandboxProviderKind::DOCKER, Ok(health(true, None)));
+        assert_eq!(check.status, CheckStatus::Pass);
+        assert_eq!(check.summary, "docker");
+        assert_eq!(check.details[0].text, "Provider: docker");
+        assert!(check.remediation.is_none());
+    }
+
+    #[test]
+    fn an_unhealthy_provider_fails_the_sandbox_check_with_its_reason() {
         let check = sandbox_health_check(
             &SandboxProviderKind::DOCKER,
             Ok(health(
-                HealthStatus::Unreachable,
+                false,
                 Some("connection refused on /var/run/docker.sock"),
             )),
         );
@@ -2044,28 +1911,7 @@ provider = "local"
         assert_eq!(check.summary, "failed");
         assert_eq!(
             check.remediation.as_deref(),
-            Some("docker backend is unreachable: connection refused on /var/run/docker.sock")
-        );
-    }
-
-    #[test]
-    fn a_rejected_credential_fails_the_sandbox_check_naming_the_missing_scopes() {
-        let mut unauthorized = health(HealthStatus::Unauthorized, Some("forbidden"));
-        unauthorized.missing_permissions = vec!["write:sandboxes".to_string()];
-        let check = sandbox_health_check(&SandboxProviderKind::DAYTONA, Ok(unauthorized));
-        assert_eq!(check.status, CheckStatus::Error);
-        assert_eq!(
-            check.remediation.as_deref(),
-            Some("daytona credential is missing required permissions: write:sandboxes")
-        );
-
-        let check = sandbox_health_check(
-            &SandboxProviderKind::DAYTONA,
-            Ok(health(HealthStatus::Unauthorized, Some("bad key"))),
-        );
-        assert_eq!(
-            check.remediation.as_deref(),
-            Some("daytona rejected the credential: bad key")
+            Some("docker is unhealthy: connection refused on /var/run/docker.sock")
         );
     }
 
@@ -2127,67 +1973,6 @@ provider = "local"
                 .contains("DAYTONA_API_KEY"),
             "{checks:?}"
         );
-    }
-
-    fn snapshot(age: Duration) -> TokenSnapshot {
-        let now = chrono::Utc::now();
-        TokenSnapshot {
-            generation: 1,
-            provenance: fabro_github::token_source::TokenProvenance::Minted {
-                minted_at:  now - chrono::Duration::from_std(age).unwrap(),
-                expires_at: now + chrono::Duration::hours(1),
-            },
-        }
-    }
-
-    fn static_snapshot() -> TokenSnapshot {
-        TokenSnapshot {
-            generation: 0,
-            provenance: fabro_github::token_source::TokenProvenance::Static,
-        }
-    }
-
-    #[test]
-    fn probe_backoff_paces_at_replication_intervals() {
-        let backoff = repository_probe_policy().backoff;
-        assert_eq!(backoff.delay_after(1), Duration::from_secs(3));
-        assert_eq!(backoff.delay_after(2), Duration::from_secs(9));
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn host_side_retries_keep_the_operations_own_message() {
-        let calls = Mutex::new(0_u32);
-        let result = retry_git_messages(
-            &repository_probe_policy(),
-            Some(&snapshot(Duration::from_secs(1))),
-            "repository probe",
-            || {
-                let attempt = {
-                    let mut calls = calls.lock().unwrap();
-                    *calls += 1;
-                    *calls
-                };
-                async move {
-                    if attempt < 3 {
-                        Err(format!("remote: Repository not found. (attempt {attempt})"))
-                    } else {
-                        Ok(())
-                    }
-                }
-            },
-        )
-        .await;
-        assert_eq!(result, Ok(()));
-        assert_eq!(*calls.lock().unwrap(), 3);
-
-        let permanent = retry_git_messages(
-            &repository_probe_policy(),
-            Some(&static_snapshot()),
-            "repository probe",
-            || async { Err("remote: Repository not found.".to_owned()) },
-        )
-        .await;
-        assert_eq!(permanent, Err("remote: Repository not found.".to_owned()));
     }
 
     #[test]
@@ -3111,17 +2896,6 @@ dockerfile = { path = "Dockerfile" }
             }
         }
 
-        fn fresh_minted_snapshot() -> TokenSnapshot {
-            let now = chrono::Utc::now();
-            TokenSnapshot {
-                generation: 1,
-                provenance: TokenProvenance::Minted {
-                    minted_at:  now,
-                    expires_at: now + chrono::Duration::minutes(60),
-                },
-            }
-        }
-
         fn declared(origin: &str, additional: &[&str]) -> (PreparedManifest, RunNamespace) {
             let (prepared, mut resolved) = prepared_and_resolved_for_sandbox(
                 &SandboxProviderKind::LOCAL,
@@ -3366,53 +3140,6 @@ dockerfile = { path = "Dockerfile" }
 
             assert!(!ok);
             assert_eq!(checks.last().unwrap().summary, "missing credentials");
-        }
-
-        #[tokio::test(start_paused = true)]
-        async fn replication_lag_failure_retries_with_the_same_token_and_succeeds() {
-            let attempts = Arc::new(AtomicU64::new(0));
-            let attempts_for_run = Arc::clone(&attempts);
-
-            let result = probe_with_replication_retry(fresh_minted_snapshot(), move || {
-                let attempts = Arc::clone(&attempts_for_run);
-                async move {
-                    if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
-                        Err("remote: Repository not found.".to_string())
-                    } else {
-                        Ok(())
-                    }
-                }
-            })
-            .await;
-
-            assert!(result.is_ok());
-            assert_eq!(attempts.load(Ordering::SeqCst), 2);
-        }
-
-        #[tokio::test(start_paused = true)]
-        async fn static_credential_auth_failures_do_not_retry() {
-            let attempts = Arc::new(AtomicU64::new(0));
-            let attempts_for_run = Arc::clone(&attempts);
-            let static_snapshot = TokenSnapshot {
-                generation: 0,
-                provenance: TokenProvenance::Static,
-            };
-
-            let result = probe_with_replication_retry(static_snapshot, move || {
-                let attempts = Arc::clone(&attempts_for_run);
-                async move {
-                    attempts.fetch_add(1, Ordering::SeqCst);
-                    Err("remote: Repository not found.".to_string())
-                }
-            })
-            .await;
-
-            assert!(result.is_err());
-            assert_eq!(
-                attempts.load(Ordering::SeqCst),
-                1,
-                "a 404 with a static credential cannot become valid by waiting"
-            );
         }
     }
 }

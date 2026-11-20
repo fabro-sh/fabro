@@ -728,13 +728,14 @@ async fn build_agent(
     let sandbox_instance = sandbox_record.instance().ok_or_else(|| {
         AskFabroBuildError::SandboxUnavailable(anyhow::anyhow!("run sandbox was not created"))
     })?;
-    let config = state
-        .load_sandbox_provider_config(&sandbox_instance.provider)
+    let access = state
+        .provider_access()
         .await
         .map_err(|err| AskFabroBuildError::Agent(anyhow::Error::new(err)))?;
-    let handle = sandbox_access::open_run_sandbox(&config, sandbox_instance, run_id)
+    let handle = sandbox_access::attach_running_run_sandbox(&access, sandbox_instance, run_id)
         .await
-        .map_err(AskFabroBuildError::SandboxUnavailable)?;
+        .map_err(AskFabroBuildError::SandboxUnavailable)?
+        .sandbox;
     let environment: Arc<dyn Environment> = Arc::new(
         SandboxEnvironment::attach(handle, &sandbox_instance.runtime.working_directory)
             .await

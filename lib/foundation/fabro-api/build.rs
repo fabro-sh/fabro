@@ -758,26 +758,18 @@ fn main() {
             "fabro_types::SandboxListResponse",
             &[],
         ),
-        // A sandbox's status is the sandbox driver's own type: the API reuses
-        // it and the types it carries rather than projecting them.
-        // TODO(parity): these are sandbox-driver's legacy types. The new
-        // API's `Status` has no provider state, error reason, region, kind,
-        // workspace ownership or timestamps, which the sandbox page shows;
-        // move to it after parity plan A10 (decision 4) and A9.
-        ("SandboxStatus", "sandbox_driver::legacy::SandboxStatus", &[
-        ]),
-        ("SandboxId", "sandbox_driver::legacy::SandboxId", &[]),
-        ("SandboxState", "sandbox_driver::legacy::SandboxState", &[]),
-        ("SandboxResources", "sandbox_driver::legacy::Resources", &[]),
+        // A sandbox's status is Fabro's projection of the sandbox driver's
+        // `Status`, in the shape the sandbox page reads.
+        ("SandboxStatus", "fabro_types::SandboxStatus", &[]),
         (
             "SandboxNetworkPolicy",
-            "sandbox_driver::legacy::NetworkPolicy",
+            "fabro_types::SandboxNetworkPolicy",
             &[],
         ),
-        ("SandboxKind", "sandbox_driver::legacy::SandboxKind", &[]),
+        ("SandboxKind", "fabro_types::SandboxKind", &[]),
         (
             "SandboxWorkspaceOwnership",
-            "sandbox_driver::legacy::WorkspaceOwnership",
+            "fabro_types::SandboxWorkspaceOwnership",
             &[],
         ),
         ("SandboxService", "fabro_types::SandboxService", &[]),

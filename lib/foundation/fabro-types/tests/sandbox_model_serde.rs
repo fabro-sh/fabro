@@ -1,8 +1,7 @@
 use fabro_types::{
     RunSandbox, RunSandboxInstance, RunSandboxPlan, RunSandboxRuntime, SandboxDetails,
-    SandboxProviderKind,
+    SandboxProviderKind, SandboxState, SandboxStatus,
 };
-use sandbox_driver::legacy::{SandboxId, SandboxState, SandboxStatus};
 use serde_json::json;
 
 #[test]
@@ -73,10 +72,7 @@ fn run_sandbox_ready_requires_instance() {
 
 #[test]
 fn sandbox_details_keep_the_record_beside_the_status() {
-    let mut status = SandboxStatus::new(
-        SandboxId::try_new("daytona-sandbox-name").unwrap(),
-        SandboxState::Running,
-    );
+    let mut status = SandboxStatus::new("daytona-sandbox-name", SandboxState::Running);
     status.provider_state = "started".to_string();
     status.region = Some("us".to_string());
     status.web_url = Some(

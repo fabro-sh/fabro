@@ -5,7 +5,7 @@
 //! crate keeps what Fabro itself owns: the run's creation around Petri's
 //! admission and the other run operations (`operations`), the bundle a run
 //! is created from (`workflow_bundle`), the Git helpers a run's platform
-//! effects use (`git`, `sandbox_git`), pull request creation
+//! effects use (`git`), pull request creation
 //! (`pull_request`), the run tools an agent session calls (`run_tools`,
 //! `services`), the built-in web search backend (`web_search`). The run
 //! records and status vocabulary are `fabro_types`'.
@@ -36,7 +36,6 @@ pub mod run_lookup;
 pub use error::{Error, Result};
 pub use fabro_types::ManifestPath;
 pub mod run_tools;
-pub mod sandbox_git;
 pub mod services;
 pub mod web_search;
 pub mod workflow_bundle;

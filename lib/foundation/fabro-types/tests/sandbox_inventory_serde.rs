@@ -1,33 +1,30 @@
-use std::time::SystemTime;
-
-use chrono::DateTime;
+use chrono::{DateTime, Utc};
 use fabro_types::{
-    SandboxInfo, SandboxListMeta, SandboxListResponse, SandboxProviderKind,
-    SandboxProviderLookupError,
+    SandboxInfo, SandboxListMeta, SandboxListResponse, SandboxNetworkPolicy, SandboxProviderKind,
+    SandboxProviderLookupError, SandboxResources, SandboxState, SandboxStatus,
 };
-use sandbox_driver::legacy::{NetworkPolicy, Resources, SandboxId, SandboxState, SandboxStatus};
 use serde_json::json;
 
 #[test]
 fn sandbox_inventory_serializes_the_provider_and_the_drivers_status() {
-    let mut status = SandboxStatus::new(
-        SandboxId::try_new("container-abc123").unwrap(),
-        SandboxState::Running,
-    );
+    let mut status = SandboxStatus::new("container-abc123", SandboxState::Running);
     status.name = Some("fabro-run-abc".to_string());
     status.provider_state = "running".to_string();
     status.image = Some("buildpack-deps:noble".to_string());
-    let mut resources = Resources::default();
-    resources.cpu_cores = Some(2);
-    resources.memory_mb = Some(4096);
-    status.resources = Some(resources);
-    status.network = Some(NetworkPolicy::AllowAll);
+    status.resources = Some(SandboxResources {
+        cpu_cores: Some(2),
+        memory_mb: Some(4096),
+        ..SandboxResources::default()
+    });
+    status.network = Some(SandboxNetworkPolicy::AllowAll);
     status
         .labels
         .insert("sh.fabro.managed".to_string(), "true".to_string());
-    status.created_at = Some(SystemTime::from(
-        DateTime::parse_from_rfc3339("2026-05-25T12:00:00Z").unwrap(),
-    ));
+    status.created_at = Some(
+        DateTime::parse_from_rfc3339("2026-05-25T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc),
+    );
     let response = SandboxListResponse {
         data: vec![SandboxInfo {
             provider: SandboxProviderKind::DOCKER,

@@ -532,7 +532,7 @@ async fn run_session(
 async fn host_sandbox(
     working_directory: PathBuf,
 ) -> AnyResult<(Sandboxes, Arc<SandboxEnvironment>)> {
-    let sandboxes = providers::open_catalog(&SandboxProviderConfig::default())
+    let sandboxes = providers::open_catalog(&SandboxProviderConfig::default(), [])
         .context("failed to open the local sandbox provider")?;
     let mut spec = SandboxSpec::new(Source::HostDirectory);
     spec.working_directory = Some(working_directory.display().to_string());
