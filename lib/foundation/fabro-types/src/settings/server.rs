@@ -108,6 +108,17 @@ pub struct ServerAuthGithubSettings {
     pub allowed_usernames: Vec<String>,
 }
 
+impl ServerAuthGithubSettings {
+    /// Whether this GitHub login may sign in. GitHub logins are ASCII and
+    /// case-insensitive, so `Octocat` in the allowlist admits `octocat`.
+    #[must_use]
+    pub fn allows_login(&self, login: &str) -> bool {
+        self.allowed_usernames
+            .iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(login))
+    }
+}
+
 /// `[server.sandbox]` — which sandbox providers this server may launch.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerSandboxSettings {
@@ -356,4 +367,30 @@ pub enum GithubIntegrationStrategy {
 pub enum WebhookStrategy {
     TailscaleFunnel,
     ServerUrl,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ServerAuthGithubSettings;
+
+    #[test]
+    fn github_allowlist_ignores_case() {
+        let github = ServerAuthGithubSettings {
+            allowed_usernames: vec!["OctoCat".to_string()],
+        };
+        assert!(github.allows_login("octocat"));
+        assert!(github.allows_login("OCTOCAT"));
+        assert!(github.allows_login("OctoCat"));
+    }
+
+    #[test]
+    fn github_allowlist_matches_whole_logins_only() {
+        let github = ServerAuthGithubSettings {
+            allowed_usernames: vec!["octocat".to_string()],
+        };
+        assert!(!github.allows_login("octocat2"));
+        assert!(!github.allows_login("octo"));
+        assert!(!github.allows_login(""));
+        assert!(!ServerAuthGithubSettings::default().allows_login("octocat"));
+    }
 }
