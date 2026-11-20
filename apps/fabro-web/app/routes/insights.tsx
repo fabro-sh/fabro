@@ -4,11 +4,8 @@ import { useInsightsHistory, useInsightsQueries } from "../lib/queries";
 import { timeAgo } from "../lib/time";
 import type { PaginatedSavedQueryList, PaginatedHistoryEntryList } from "@qltysh/fabro-api-client";
 
-export function meta({}: any) {
-  return [{ title: "Insights — Fabro" }];
-}
-
 export const handle = {
+  title: "Insights",
   wide: true,
 };
 

@@ -93,6 +93,17 @@ export function formatStageLabel(stage: { name: string; visit: number }): string
   return stage.visit > 1 ? `${stage.name}@${stage.visit}` : stage.name;
 }
 
+/**
+ * A run state's stage key (`node@visit`) as the Stages sidebar labels that
+ * stage: `spec`, or `review@3` for a later visit.
+ */
+export function formatStageKey(key: string | null): string | null {
+  if (!key) return null;
+  const at = key.lastIndexOf("@");
+  if (at <= 0) return key;
+  return formatStageLabel({ name: key.slice(0, at), visit: Number.parseInt(key.slice(at + 1), 10) || 1 });
+}
+
 export function mapRunStagesToSidebarStages(
   stagesResult: PaginatedRunStageList | null | undefined,
 ): Stage[] {

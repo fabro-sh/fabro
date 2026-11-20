@@ -26,6 +26,7 @@ import {
   gitTarget,
   workflowSourceLabel,
 } from "../lib/automation";
+import { usePageTitle } from "../lib/page-title";
 import { useAutomation, useAutomationRuns } from "../lib/queries";
 import { queryKeys } from "../lib/query-keys";
 import { useDataUpdatedAt } from "../hooks/use-data-updated-at";
@@ -58,16 +59,12 @@ import {
   SECONDARY_BUTTON_CLASS,
 } from "../components/ui";
 
-export const handle = { hideHeader: true, wide: true };
-
-export function meta({ data }: any) {
-  const title = data?.automation?.name ?? "Automation";
-  return [{ title: `${title} — Fabro` }];
-}
+export const handle = { title: "Automation", hideHeader: true, wide: true };
 
 export default function AutomationDetail() {
   const { id } = useParams<{ id: string }>();
   const automationQuery = useAutomation(id);
+  usePageTitle([automationQuery.data?.name]);
 
   if (automationQuery.error) {
     return (

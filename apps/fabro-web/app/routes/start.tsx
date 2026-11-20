@@ -17,11 +17,7 @@ import {
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 
-export const handle = { hideHeader: true, wide: true };
-
-export function meta({}: any) {
-  return [{ title: "Start — Fabro" }];
-}
+export const handle = { title: "Start", hideHeader: true, wide: true };
 
 const projects = [
   { id: "fabro-web", name: "fabro-web" },

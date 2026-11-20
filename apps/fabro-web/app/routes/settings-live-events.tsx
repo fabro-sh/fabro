@@ -24,11 +24,7 @@ import {
   type DebugRow,
 } from "../lib/petri-stream";
 
-export function meta() {
-  return [{ title: "Live Events — Fabro" }];
-}
-
-export const handle = { wide: true, fullHeight: true };
+export const handle = { title: "Live Events", wide: true, fullHeight: true };
 
 export const MAX_EVENTS = 1000;
 

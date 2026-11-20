@@ -25,12 +25,10 @@ const MENU_ITEM_CLASS =
 const MENU_ITEM_DANGER_CLASS =
   "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-coral transition-colors data-focus:bg-coral/10 data-focus:text-coral data-focus:outline-hidden disabled:cursor-not-allowed disabled:opacity-60";
 
-export function meta() {
-  return [{ title: "Variables — Fabro" }];
-}
-
 const DESCRIPTION =
   "Variables are non-sensitive values stored on this Fabro server and available to workflow runs through {{ vars.NAME }} interpolation. Values are visible — use Secrets for credentials.";
+
+export const handle = { title: "Variables" };
 
 export default function SettingsVariables() {
   const query = useVariables();

@@ -24,11 +24,7 @@ import {
 } from "../components/ui";
 import { useToast } from "../components/toast";
 
-export function meta() {
-  return [{ title: "New automation — Fabro" }];
-}
-
-export const handle = { hideHeader: true };
+export const handle = { title: "New automation", hideHeader: true };
 
 export default function AutomationsNew() {
   const [searchParams] = useSearchParams();

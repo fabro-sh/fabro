@@ -14,9 +14,7 @@ import {
 } from "../components/ui";
 import { useToast } from "../components/toast";
 
-export function meta() {
-  return [{ title: "New variable — Fabro" }];
-}
+export const handle = { title: "New variable" };
 
 export default function SettingsVariablesNew() {
   return (

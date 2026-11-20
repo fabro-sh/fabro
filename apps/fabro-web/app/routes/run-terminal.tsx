@@ -1,9 +1,11 @@
 import TerminalView from "../components/terminal-view";
 import { ToastProvider } from "../components/toast";
-import { useDocumentTitle } from "../hooks/effects";
+import { usePageTitle } from "../lib/page-title";
+
+export const handle = { title: "Terminal" };
 
 export default function RunTerminal({ params }: { params: { id: string } }) {
-  useDocumentTitle(`Terminal · ${params.id} · Fabro`);
+  usePageTitle(["Terminal", params.id]);
 
   return (
     <ToastProvider>

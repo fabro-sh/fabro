@@ -35,9 +35,7 @@ import {
 } from "../lib/model-offerings";
 import { useDebouncedValue } from "../hooks/effects";
 
-export function meta() {
-  return [{ title: "Models — Fabro" }];
-}
+export const handle = { title: "Models" };
 
 export default function SettingsModels() {
   const query = useProviders();

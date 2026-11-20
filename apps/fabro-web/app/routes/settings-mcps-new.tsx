@@ -21,9 +21,7 @@ import { upsertMcpServerInList } from "../lib/mcp-server-cache";
 import { parseMcpTransportKind } from "../lib/mcp-transport-kinds";
 import { queryKeys } from "../lib/query-keys";
 
-export function meta() {
-  return [{ title: "New MCP server — Fabro" }];
-}
+export const handle = { title: "New MCP server" };
 
 export default function SettingsMcpsNew() {
   return (

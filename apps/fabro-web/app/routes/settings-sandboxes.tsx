@@ -21,10 +21,6 @@ import {
   type ProviderSettingsMap,
 } from "../lib/environment-providers";
 
-export function meta() {
-  return [{ title: "Sandboxes — Fabro" }];
-}
-
 type SandboxProvider = {
   id: string;
   name: string;
@@ -61,6 +57,8 @@ function pluginDescription(settings: ServerSandboxProviderSettings): string {
     ? `Sandbox plugin executable at ${path}.`
     : "Sandbox plugin executable resolved from PATH.";
 }
+
+export const handle = { title: "Sandboxes" };
 
 export default function SettingsSandboxes() {
   const query = useServerSettings();

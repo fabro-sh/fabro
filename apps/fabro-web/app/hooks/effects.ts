@@ -159,21 +159,6 @@ export function useElementEvent<K extends keyof HTMLElementEventMap>(
 }
 
 /**
- * Synchronizes React with `document.title`. The previous title is restored when
- * the title changes or the component unmounts.
- */
-export function useDocumentTitle(title: string): void {
-  useEffect(() => {
-    if (typeof document === "undefined") return undefined;
-    const previous = document.title;
-    document.title = title;
-    return () => {
-      document.title = previous;
-    };
-  }, [title]);
-}
-
-/**
  * Synchronizes React rendering with a browser media query using
  * `useSyncExternalStore`. The media query listener is removed on unsubscribe.
  */

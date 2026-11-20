@@ -55,9 +55,6 @@ export {
   persistRunsWorkspacePreferences,
   RUNS_PREFERENCES_STORAGE_KEY,
 } from "../components/runs-list/preferences";
-export function meta({}: any) {
-  return [{ title: "Runs — Fabro" }];
-}
 
 interface ColumnStyle {
   actions: string[];
@@ -298,6 +295,7 @@ function ChecksStatus({ checks }: { checks: CheckRun[] }) {
 }
 
 export const handle = {
+  title:      "Runs",
   wide:       true,
   hideHeader: true,
   fullHeight: true,

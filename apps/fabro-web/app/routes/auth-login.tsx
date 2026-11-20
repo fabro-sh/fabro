@@ -9,6 +9,8 @@ import {
 import { useLoginDevToken } from "../lib/mutations";
 import { useAuthConfig } from "../lib/queries";
 
+export const handle = { title: "Sign in" };
+
 export default function AuthLogin() {
   const { data: authConfig } = useAuthConfig();
   const loginDevToken = useLoginDevToken();

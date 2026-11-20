@@ -2,7 +2,12 @@ import { describe, expect, test } from "bun:test";
 import type { PaginatedRunStageList, StageHandler, StageState } from "@qltysh/fabro-api-client";
 
 import type { Stage } from "../components/stage-sidebar";
-import { aggregateGraphNodeStatus, formatStageLabel, mapRunStagesToSidebarStages } from "./stage-sidebar";
+import {
+  aggregateGraphNodeStatus,
+  formatStageKey,
+  formatStageLabel,
+  mapRunStagesToSidebarStages,
+} from "./stage-sidebar";
 import { makeUsage } from "./test-fixtures";
 import { makeStage as baseMakeStage } from "./test-utils";
 
@@ -302,5 +307,14 @@ describe("aggregateGraphNodeStatus", () => {
       displayStatus: "running",
       latestStageId: "apply@1",
     });
+  });
+});
+
+describe("formatStageKey", () => {
+  test("labels a run state's stage key as the sidebar does", () => {
+    expect(formatStageKey("spec@1")).toBe("spec");
+    expect(formatStageKey("review@3")).toBe("review@3");
+    expect(formatStageKey("start")).toBe("start");
+    expect(formatStageKey(null)).toBeNull();
   });
 });

@@ -20,10 +20,6 @@ import {
   UrlValue,
 } from "../components/settings-panel";
 
-export function meta() {
-  return [{ title: "Server settings — Fabro" }];
-}
-
 const DESCRIPTION = (
   <>
     Server URLs, listen address, and scheduler limits. Edit via{" "}
@@ -31,6 +27,8 @@ const DESCRIPTION = (
     effect on the next server restart.
   </>
 );
+
+export const handle = { title: "Server settings" };
 
 export default function SettingsGeneral() {
   const settingsQuery = useServerSettings();

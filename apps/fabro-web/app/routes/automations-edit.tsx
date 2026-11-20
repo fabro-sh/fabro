@@ -24,11 +24,7 @@ import {
 } from "../components/ui";
 import { useToast } from "../components/toast";
 
-export function meta() {
-  return [{ title: "Edit automation — Fabro" }];
-}
-
-export const handle = { hideHeader: true };
+export const handle = { title: "Edit automation", hideHeader: true };
 
 export default function AutomationsEdit() {
   const { id } = useParams<{ id: string }>();

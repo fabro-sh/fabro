@@ -13,7 +13,7 @@ import AskFabroSidebar, {
 
 // hideHeader/fullHeight/wide mirror the chats layout so the demo workspace and
 // the docked Ask-Fabro sidebar bleed edge-to-edge below the top nav.
-export const handle = { hideHeader: true, fullHeight: true, wide: true };
+export const handle = { title: "Ask Fabro", hideHeader: true, fullHeight: true, wide: true };
 
 /**
  * `/ask-fabro` — prototype page for the right-docked "Ask Fabro" assistant.

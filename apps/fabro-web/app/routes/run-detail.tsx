@@ -19,6 +19,9 @@ import { useToast } from "../components/toast";
 import {
   ConfirmDialog,
 } from "../components/ui";
+import { useRunFavicon } from "../hooks/use-run-favicon";
+import { usePageTitle } from "../lib/page-title";
+import { currentStage, runTabTitle } from "../lib/run-tab";
 import { mutateRunListCaches } from "../lib/board-cache";
 import { useDemoMode } from "../lib/demo-mode";
 import { useTickingNow } from "../lib/time";
@@ -68,7 +71,7 @@ import {
   runHasSandbox,
 } from "./run-detail/tabs-shell";
 
-export const handle = { hideHeader: true };
+export const handle = { title: "Run", hideHeader: true };
 
 const RUN_TIMING_REFRESH_INTERVAL_MS = 30_000;
 
@@ -91,18 +94,21 @@ export function resolveDockClearance(
   return hasPendingQuestions ? "18rem" : "5rem";
 }
 
-export function meta({ data }: any) {
-  const run = data?.run;
-  return [{ title: run ? `${run.title} — Fabro` : "Run — Fabro" }];
-}
-
 export default function RunDetail({ params }: { params: { id: string } }) {
   const demoMode = useDemoMode();
   const runQuery = useRun(params.id, RUN_TIMING_REFRESH_INTERVAL_MS);
   const runStateQuery = useRunState(params.id);
   const summary = runQuery.data;
   const run = summary ? buildRunDetailRun(summary) : null;
+  usePageTitle(
+    runTabTitle({
+      project: summary?.repository && run ? run.repo : null,
+      title: run?.title ?? null,
+      stage: currentStage(runStateQuery.data?.stages ?? {}),
+    }),
+  );
   const statusKind = runQuery.data?.lifecycle.status.kind;
+  useRunFavicon(statusKind);
   const isBlocked = statusKind === "blocked";
   const questionsQuery = useRunQuestions(params.id, isBlocked);
   const pendingQuestions = questionsQuery.data ?? [];

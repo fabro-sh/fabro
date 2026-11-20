@@ -32,11 +32,7 @@ import { ConfirmDialog, PRIMARY_BUTTON_CLASS } from "../components/ui";
 import { EmptyState, ErrorState, LoadingState } from "../components/state";
 import { useToast } from "../components/toast";
 
-export function meta({}: any) {
-  return [{ title: "Automations — Fabro" }];
-}
-
-export const handle = { hideHeader: true };
+export const handle = { title: "Automations", hideHeader: true };
 
 function CreateAutomationButton() {
   return (

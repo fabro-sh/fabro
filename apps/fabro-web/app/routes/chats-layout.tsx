@@ -3,7 +3,7 @@ import { PencilSquareIcon } from "@heroicons/react/24/outline";
 
 import { ChatsProvider, useChatsState } from "../lib/chats-store";
 
-export const handle = { hideHeader: true, fullHeight: true, wide: true };
+export const handle = { title: "Chats", hideHeader: true, fullHeight: true, wide: true };
 
 export default function ChatsLayout() {
   return (
