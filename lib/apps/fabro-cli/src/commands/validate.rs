@@ -10,6 +10,7 @@ use crate::args::ValidateArgs;
 use crate::command_context::CommandContext;
 use crate::commands::run::output::api_diagnostics_to_local;
 use crate::shared::{print_diagnostics, print_json_pretty, relative_path};
+use crate::user_config;
 
 pub(crate) fn run(
     args: &ValidateArgs,
@@ -22,6 +23,7 @@ pub(crate) fn run(
         cwd: base_ctx.cwd().to_path_buf(),
         environment_defaults: fabro_environment::seeded_catalog_layer(),
         user_settings_path: Some(active_settings_path(None)),
+        github_host: user_config::github_host()?,
         ..Default::default()
     })?;
     let response = manifest_validation::validate_manifest(&RunLayer::default(), &built.manifest)?;

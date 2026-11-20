@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use fabro_api::types as api_types;
 use fabro_config::user::active_settings_path;
+use fabro_github::GitHubHost;
 use fabro_types::settings::replace_wildcard_host;
 pub(crate) use fabro_util::check_report::{
     CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus,
@@ -125,10 +126,14 @@ fn wildcard_public_url_details(path: &Path) -> Vec<CheckDetail> {
         .unwrap_or(&bad_urls[0])
         .suggestion
         .as_str();
+    let github_host = toml_string_at(&doc, &["server", "integrations", "github", "web_url"])
+        .and_then(|web_url| GitHubHost::new(web_url, None).ok())
+        .and_then(|host| fabro_github::with_env_overrides(&host).ok())
+        .unwrap_or_default();
     let github_settings_url = toml_string_at(&doc, &["server", "integrations", "github", "slug"])
         .map_or_else(
             || "the GitHub App settings page".to_string(),
-            |slug| format!("https://github.com/settings/apps/{slug}"),
+            |slug| format!("{}/settings/apps/{slug}", github_host.web_url()),
         );
     details.push(CheckDetail {
         text: format!(
@@ -468,6 +473,40 @@ url = "http://0.0.0.0:32276"
         assert!(details.contains("cli.target.url"));
         assert!(details.contains("http://127.0.0.1:32276/auth/callback/github"));
         assert!(details.contains("https://github.com/settings/apps/octocat-fabro"));
+    }
+
+    #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "unit test stages a temporary settings.toml fixture with sync std::fs"
+    )]
+    fn check_config_links_the_github_app_on_the_enterprise_host() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings_path = dir.path().join("settings.toml");
+        std::fs::write(
+            &settings_path,
+            r#"
+_version = 1
+
+[server.web]
+url = "http://0.0.0.0:32276"
+
+[server.integrations.github]
+slug = "octocat-fabro"
+web_url = "https://ghe.example.com"
+"#,
+        )
+        .unwrap();
+
+        let result = check_config(Some(settings_path));
+        let details = result
+            .details
+            .iter()
+            .map(|detail| detail.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(details.contains("https://ghe.example.com/settings/apps/octocat-fabro"));
     }
 
     #[test]

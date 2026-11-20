@@ -455,7 +455,7 @@ async fn get_github_repo(
     }
     let settings = state.server_settings();
     let github_settings = &settings.server.integrations.github;
-    let base_url = fabro_github::github_api_base_url();
+    let base_url = state.github_host.api_url();
     let (token, client) = match github_settings.strategy {
         GithubIntegrationStrategy::App => {
             if github_settings.app_id.is_none() {
@@ -493,9 +493,14 @@ async fn get_github_repo(
                         .into_response();
                 }
             };
-            let install_url = creds.installation_url(&owner).unwrap_or_else(|| {
-                format!("https://github.com/organizations/{owner}/settings/installations")
-            });
+            let install_url = creds
+                .installation_url(&state.github_host, &owner)
+                .unwrap_or_else(|| {
+                    format!(
+                        "{}/organizations/{owner}/settings/installations",
+                        state.github_host.web_url()
+                    )
+                });
 
             let client = match state.http_client() {
                 Ok(http) => http,
@@ -505,7 +510,7 @@ async fn get_github_repo(
                 }
             };
             let installed =
-                match fabro_github::check_app_installed(&client, &jwt, &owner, &name, &base_url)
+                match fabro_github::check_app_installed(&client, &jwt, &owner, &name, base_url)
                     .await
                 {
                     Ok(installed) => installed,
@@ -537,7 +542,7 @@ async fn get_github_repo(
                 &jwt,
                 &owner,
                 &name,
-                &base_url,
+                &state.github_host,
                 serde_json::json!({ "contents": "write", "pull_requests": "write" }),
                 Some(&install_url),
             )

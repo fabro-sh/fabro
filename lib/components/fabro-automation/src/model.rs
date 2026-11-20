@@ -166,8 +166,7 @@ pub fn validate_workflow_source(
     source: AutomationGitWorkflowSource,
 ) -> Result<AutomationGitWorkflowSource, AutomationValidationError> {
     source
-        .validate()
-        .map(fabro_types::ValidatedGitRunTarget::into_target)
+        .canonical()
         .map_err(|source| AutomationValidationError::InvalidWorkflowSource { source })
 }
 
@@ -404,8 +403,7 @@ fn validate_target(target: RunTarget) -> Result<RunTarget, AutomationValidationE
         });
     }
     target
-        .validate()
-        .map(|validated| validated.target)
+        .canonical()
         .map_err(|source| AutomationValidationError::InvalidTarget { source })
 }
 

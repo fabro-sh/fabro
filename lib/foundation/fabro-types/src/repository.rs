@@ -5,6 +5,8 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
+use crate::GitHubHost;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepositoryRef {
     pub name:       String,
@@ -15,12 +17,13 @@ pub struct RepositoryRef {
 
 impl RepositoryRef {
     pub fn from_origin_and_source(
+        host: &GitHubHost,
         origin_url: Option<String>,
         source_directory: Option<&str>,
     ) -> Self {
         Self {
             name: repository_name(origin_url.as_deref(), source_directory),
-            provider: repository_provider(origin_url.as_deref()),
+            provider: repository_provider(host, origin_url.as_deref()),
             origin_url,
         }
     }
@@ -65,10 +68,10 @@ impl GitHubRepositorySlug {
         &self.repo
     }
 
-    /// Canonical credential-free HTTPS URL for this GitHub repository.
+    /// Canonical credential-free HTTPS URL for this repository on `host`.
     #[must_use]
-    pub fn https_url(&self) -> String {
-        format!("https://github.com/{self}")
+    pub fn https_url(&self, host: &GitHubHost) -> String {
+        host.repository_url(&self.owner, &self.repo)
     }
 
     /// Whether `other` names the same repository owner, ignoring ASCII case.
@@ -264,22 +267,15 @@ pub enum RepositoryProvider {
     Unknown,
 }
 
-fn repository_provider(origin_url: Option<&str>) -> RepositoryProvider {
+fn repository_provider(host: &GitHubHost, origin_url: Option<&str>) -> RepositoryProvider {
     let Some(origin) = origin_url.filter(|origin| !origin.trim().is_empty()) else {
         return RepositoryProvider::Unknown;
     };
-    if is_github_origin(origin) {
+    if host.is_origin(origin) {
         RepositoryProvider::Github
     } else {
         RepositoryProvider::Git
     }
-}
-
-fn is_github_origin(origin: &str) -> bool {
-    origin.starts_with("git@github.com:")
-        || origin.starts_with("https://github.com/")
-        || origin.starts_with("http://github.com/")
-        || origin.starts_with("ssh://git@github.com/")
 }
 
 fn repository_name(origin_url: Option<&str>, source_directory: Option<&str>) -> String {
@@ -330,6 +326,48 @@ fn path_basename(path: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repository_provider_is_github_only_for_origins_on_the_host() {
+        let ghes = GitHubHost::new("https://ghe.example.com", None).unwrap();
+        let provider = |host: &GitHubHost, origin: &str| {
+            RepositoryRef::from_origin_and_source(host, Some(origin.to_string()), None).provider
+        };
+
+        assert_eq!(
+            provider(&GitHubHost::default(), "git@github.com:acme/widgets.git"),
+            RepositoryProvider::Github
+        );
+        assert_eq!(
+            provider(
+                &GitHubHost::default(),
+                "https://ghe.example.com/acme/widgets"
+            ),
+            RepositoryProvider::Git
+        );
+        assert_eq!(
+            provider(&ghes, "https://ghe.example.com/acme/widgets"),
+            RepositoryProvider::Github
+        );
+        assert_eq!(
+            provider(&ghes, "ssh://git@ghe.example.com/acme/widgets"),
+            RepositoryProvider::Github
+        );
+        assert_eq!(
+            provider(&ghes, "https://github.com/acme/widgets"),
+            RepositoryProvider::Git
+        );
+    }
+
+    #[test]
+    fn https_url_follows_the_host() {
+        let slug = GitHubRepositorySlug::try_new("acme/widgets").unwrap();
+        let ghes = GitHubHost::new("https://octocorp.ghe.com", None).unwrap();
+        assert_eq!(
+            slug.https_url(&ghes),
+            "https://octocorp.ghe.com/acme/widgets"
+        );
+    }
 
     #[test]
     fn valid_slugs_preserve_exact_parts() {
@@ -404,8 +442,11 @@ mod tests {
     fn slug_https_url_preserves_spelling_and_has_no_credentials() {
         let slug: GitHubRepositorySlug = "Fabro-SH/Keystone".parse().unwrap();
 
-        assert_eq!(slug.https_url(), "https://github.com/Fabro-SH/Keystone");
-        assert!(!slug.https_url().contains('@'));
+        assert_eq!(
+            slug.https_url(&GitHubHost::default()),
+            "https://github.com/Fabro-SH/Keystone"
+        );
+        assert!(!slug.https_url(&GitHubHost::default()).contains('@'));
     }
 
     #[test]

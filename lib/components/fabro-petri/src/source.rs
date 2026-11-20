@@ -19,7 +19,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use fabro_types::settings::run::{RunCloneSettings, RunMode, RunNamespace};
-use fabro_types::{GitRunTarget, RunTarget};
+use fabro_types::{GitHubHost, GitRunTarget, RunTarget};
 
 /// The revision a run starts from, in the order the target names it: an
 /// exact commit wins over a tag, and a tag over the branch head.
@@ -170,6 +170,7 @@ impl RunSource {
     /// repository checks nothing out.
     #[must_use]
     pub fn for_run(
+        host: &GitHubHost,
         target: Option<&RunTarget>,
         settings: &RunNamespace,
         credentials: Option<Arc<dyn SourceCredentials>>,
@@ -180,8 +181,8 @@ impl RunSource {
         if settings.execution.mode == RunMode::DryRun {
             return None;
         }
-        let validated = target.clone().validate().ok()?;
-        let origin = validated.repository().https_url();
+        let validated = target.clone().validate(host).ok()?;
+        let origin = validated.repository().https_url(host);
         Self::for_target(validated.target(), origin, &settings.clone, credentials)
     }
 

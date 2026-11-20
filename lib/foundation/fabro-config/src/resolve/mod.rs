@@ -13,6 +13,7 @@ pub use error::ResolveError;
 use fabro_types::settings::InterpString;
 pub use project::resolve_project;
 pub use run::resolve_run;
+pub(crate) use server::resolve_github_host;
 pub use server::resolve_server;
 pub use workflow::resolve_workflow;
 

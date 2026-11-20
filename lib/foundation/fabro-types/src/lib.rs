@@ -15,6 +15,7 @@ pub mod diff;
 pub mod engine;
 pub mod failure_signature;
 pub mod git_identity;
+pub mod github_host;
 mod id;
 mod input_scalar;
 pub mod interview;
@@ -86,6 +87,7 @@ pub use diff::{DiffStats, DiffSummary, RunDiff};
 pub use engine::{PetriAdmission, PetriGraphRef};
 pub use failure_signature::FailureSignature;
 pub use git_identity::{GitIdentity, GitIdentitySource};
+pub use github_host::{GitHubHost, GitHubHostError};
 pub use input_scalar::{
     JsonScalarToTomlError, TomlScalarToJsonError, json_scalar_to_toml_value,
     toml_scalar_to_json_value,
