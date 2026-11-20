@@ -19,6 +19,7 @@ mod id;
 mod input_scalar;
 pub mod interview;
 pub mod llm_backend;
+pub mod main_event;
 pub mod manifest_path;
 pub mod mcp_store;
 pub mod model_test;
@@ -95,6 +96,11 @@ pub use interview::{
     ReviewTargetKind,
 };
 pub use llm_backend::AgentBackend;
+pub use main_event::{
+    MainEvent, MainEventBody, MainEventCancelledProps, MainEventCompletedProps,
+    MainEventCreatedProps, MainEventEnvelope, MainEventFailedProps, MainEventLifecycleProps,
+    MainEventSource, MainEventStartedProps,
+};
 pub use manifest_path::{ManifestPath, ManifestPathParseError};
 pub use mcp_store::{
     McpServerDefinition, McpServerDraft, McpServerId, McpServerReplace, McpServerRevision,

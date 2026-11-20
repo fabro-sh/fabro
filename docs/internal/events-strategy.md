@@ -32,6 +32,14 @@ Tracing logs are separate. Tracing is developer diagnostics; the stream is
 the product-facing record other systems consume. If something must be
 visible after a reattach, it has to be a record, not a log line.
 
+The server also mirrors selected lifecycle records into an independent
+global **main event stream** (`fabro-store::MainEventStore`). Its compact
+`fabro.run.*` events have their own sequence and survive run deletion.
+Source-keyed appends deduplicate replay of a run's canonical stream; the
+main stream is a cross-run mirror, not another source for run projections.
+See [the main event design](../superpowers/specs/2026-06-21-main-event-stream-design.md)
+for its event vocabulary, failure policy, and recovery boundary.
+
 ## Recording a fact
 
 Petri's own facts need nothing from Fabro: the engine records them and the

@@ -27,6 +27,7 @@ const RUN_SUMMARY_MIGRATIONS: &[&str] = &[
     fabro_db::RUNS_MIGRATION_SQL,
     fabro_db::DROP_RUN_EVENTS_MIGRATION_SQL,
     fabro_db::PETRI_PROJECTION_MIGRATION_SQL,
+    fabro_db::MAIN_EVENTS_MIGRATION_SQL,
 ];
 
 /// Returns an isolated SQLite run-summary store backed by its own in-memory
