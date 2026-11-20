@@ -1,9 +1,9 @@
 name: Internal dependencies
 
-# Every internal Git dependency names `branch = "main"`, and Cargo.lock picks
+# Unfrozen internal Git dependencies name `branch = "main"`; Cargo.lock picks
 # the commit CI builds and Fabro ships. Each night this job moves the lock to
-# the current main of each internal library with `cargo update -p`, then runs
-# the Linux test suite from rust.yml against it, so drift is noticed without
+# the current main of each eligible internal library with `cargo update -p`,
+# then runs the Linux test suite from rust.yml, so drift is noticed without
 # anyone asking. A passing lock goes to one pull request from
 # `bot/internal-deps`, opened or updated here and never merged here. A failure
 # opens one tracking issue labeled `internal-deps`, or comments on the open
@@ -31,6 +31,8 @@ jobs:
     name: Test (Linux)
     runs-on: ubuntu-24.04-x86-32-cores
     timeout-minutes: 60
+    env:
+      SANDBOX_DRIVER_PIN: 0a073809773b0ae007b316973d8c0993ca6a5d21 # tag v2
     permissions:
       contents: read
     outputs:
@@ -52,10 +54,18 @@ jobs:
       # through sandbox-driver, but its repository is separate, so it moves on
       # its own. The summary names each repository whose locked commit moved,
       # for the job summary, the pull request, and the tracking issue.
+      #
+      # sandbox-driver is excluded from updates to main: its main is becoming
+      # new-API-only, so Cargo.toml pins tag v2 by revision (SANDBOX_DRIVER_PIN),
+      # the last commit with the old API that Fabro, Petri, and Pebble use.
+      # Lift the pin once all three are ported to the new API and switch
+      # together: restore branch = "main" in all three manifests, add
+      # sandbox-driver back here and remove the explicit
+      # re-pin, SANDBOX_DRIVER_PIN, and the pin check.
       - name: Update internal dependencies
         id: update
         env:
-          INTERNAL_CRATES: sandbox-driver pebble-agent petri-runtime lithos-llm twin-openai daytona-sdk
+          INTERNAL_CRATES: pebble-agent petri-runtime lithos-llm twin-openai daytona-sdk
         run: |
           set -euo pipefail
           cp Cargo.lock "$RUNNER_TEMP/Cargo.lock.before"
@@ -63,7 +73,13 @@ jobs:
           for crate in $INTERNAL_CRATES; do
             args+=(-p "$crate")
           done
-          cargo update "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/cargo-update.log"
+          {
+            cargo update "${args[@]}"
+            # Retain the explicit re-pin as a safeguard alongside the
+            # manifest revision. The guard below must still reject a
+            # transitive dependency that introduces a different source.
+            cargo update -p sandbox-driver --precise "$SANDBOX_DRIVER_PIN"
+          } 2>&1 | tee "$RUNNER_TEMP/cargo-update.log"
 
           python3 - "$RUNNER_TEMP/Cargo.lock.before" Cargo.lock > "$RUNNER_TEMP/summary.md" <<'PY'
           import re
@@ -117,7 +133,7 @@ jobs:
           else
             git checkout -- Cargo.lock
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "Cargo.lock already locks every internal main; nothing to do."
+            echo "Cargo.lock already locks every eligible internal main; nothing to do."
           fi
           delimiter="SUMMARY_$(openssl rand -hex 16)"
           {
@@ -125,6 +141,17 @@ jobs:
             cat "$RUNNER_TEMP/summary.md"
             echo "$delimiter"
           } >> "$GITHUB_OUTPUT"
+
+      # A Petri or Pebble main that names sandbox-driver differently would
+      # add a second copy to the lock instead of moving the pinned one.
+      - name: Check that sandbox-driver is still pinned
+        run: |
+          set -euo pipefail
+          sources="$(grep -o 'git+https://github.com/lithoscomputer/sandbox-driver[^"]*' Cargo.lock | sort -u)"
+          if [ "$(wc -l <<< "$sources")" -ne 1 ] || [ "${sources##*#}" != "$SANDBOX_DRIVER_PIN" ]; then
+            echo "::error::Cargo.lock must lock sandbox-driver only at tag v2 ($SANDBOX_DRIVER_PIN), but locks: $sources"
+            exit 1
+          fi
 
       # The rest is rust.yml's Test (Linux) job on the updated lock.
       # Every Petri run takes its scope through a sandbox-driver plugin
@@ -247,7 +274,7 @@ jobs:
 
           body="$RUNNER_TEMP/body.md"
           {
-            echo "Moves Cargo.lock to the current main of each internal library with \`cargo update -p\`. The Linux test suite passed on this lock: $RUN_URL"
+            echo "Moves Cargo.lock to the current main of each eligible internal library with \`cargo update -p\`, preserving the sandbox-driver pin. The Linux test suite passed on this lock: $RUN_URL"
             echo
             echo "${SUMMARY:-No summary was recorded.}"
             echo
@@ -304,9 +331,9 @@ jobs:
           {
             echo "The nightly internal dependency update failed: $RUN_URL"
             echo
-            echo "It moved Cargo.lock to the current main of each internal library with \`cargo update -p\` and ran the Linux test suite against it. Whoever broke an API this repository uses fixes it here promptly."
+            echo "The dependency update or a subsequent validation step failed. Check the run log for the failing step; the Linux test suite may not have started."
             echo
-            echo "${SUMMARY:-No summary was recorded: the run failed before \`cargo update\` finished.}"
+            echo "${SUMMARY:-No summary was recorded: the dependency update step did not finish.}"
           } > "$body"
           if [ -n "$issue" ]; then
             gh api "$repo_api/issues/$issue/comments" -F body=@"$body" --silent

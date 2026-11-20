@@ -24,11 +24,17 @@ RUN apk add --no-cache \
       tini \
  && addgroup -S -g 1000 fabro \
  && adduser -S -u 1000 -G fabro -h /var/fabro -s /sbin/nologin fabro \
- && install -d -o fabro -g fabro -m 0755 /var/fabro /storage
+ && install -d -o fabro -g fabro -m 0755 /var/fabro /storage \
+ && install -d -m 0755 /usr/share/doc/fabro
 
 COPY --chmod=0755 tmp/docker-context/${TARGETARCH}/fabro /usr/local/bin/fabro
 
 COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/fabro-entrypoint
+
+# License and third-party notices must accompany every distributed copy.
+# The directory is created above: `COPY --chmod` would also apply 0644 to a
+# directory it creates, which makes the files unreadable for the fabro user.
+COPY --chmod=0644 LICENSE.md THIRD_PARTY_NOTICES.txt /usr/share/doc/fabro/
 
 ENV FABRO_HOME=/storage/.home \
     FABRO_STORAGE_DIR=/storage \

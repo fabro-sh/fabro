@@ -10,7 +10,7 @@ resolver = "2"
 
 [workspace.package]
 edition = "2021"
-version = "0.414.0-nightly.0"
+version = "0.421.0-nightly.0"
 license = "MIT"
 
 [workspace.dependencies]
@@ -90,14 +90,18 @@ futures-util = "0.3"
 # sandbox-driver: the sandbox provider layer. Bundled Host, Docker, and
 # Daytona providers link in-process; third-party providers run as stdio
 # plugins through sandbox-driver-protocol.
-sandbox-driver = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
-sandbox-driver-protocol = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
-sandbox-driver-host = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
-sandbox-driver-docker = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
-sandbox-driver-docker-config = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
-sandbox-driver-daytona = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
-sandbox-driver-daytona-config = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
-sandbox-driver-testing = { git = "https://github.com/lithoscomputer/sandbox-driver", branch = "main" }
+# Freeze the old sandbox API at tag v2 for this workspace and downstream users.
+# Fabro, Petri, and Pebble must all use this exact rev so Cargo has one source.
+# Lift the manifest pin and workflow safeguards together when all three move
+# to the new API; see .github/workflows/internal-deps.yml.
+sandbox-driver = { git = "https://github.com/lithoscomputer/sandbox-driver", rev = "0a073809773b0ae007b316973d8c0993ca6a5d21" }
+sandbox-driver-protocol = { git = "https://github.com/lithoscomputer/sandbox-driver", rev = "0a073809773b0ae007b316973d8c0993ca6a5d21" }
+sandbox-driver-host = { git = "https://github.com/lithoscomputer/sandbox-driver", rev = "0a073809773b0ae007b316973d8c0993ca6a5d21" }
+sandbox-driver-docker = { git = "https://github.com/lithoscomputer/sandbox-driver", rev = "0a073809773b0ae007b316973d8c0993ca6a5d21" }
+sandbox-driver-docker-config = { git = "https://github.com/lithoscomputer/sandbox-driver", rev = "0a073809773b0ae007b316973d8c0993ca6a5d21" }
+sandbox-driver-daytona = { git = "https://github.com/lithoscomputer/sandbox-driver", rev = "0a073809773b0ae007b316973d8c0993ca6a5d21" }
+sandbox-driver-daytona-config = { git = "https://github.com/lithoscomputer/sandbox-driver", rev = "0a073809773b0ae007b316973d8c0993ca6a5d21" }
+sandbox-driver-testing = { git = "https://github.com/lithoscomputer/sandbox-driver", rev = "0a073809773b0ae007b316973d8c0993ca6a5d21" }
 # pebble: the coding agent loop fabro runs its agent stages, Ask Fabro
 # sessions, hook evaluators, and `fabro exec` on. The `Environment` over a
 # sandbox-driver handle is pebble's `sandbox_driver` module (the

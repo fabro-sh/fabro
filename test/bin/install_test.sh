@@ -108,6 +108,9 @@ case "$1" in
 echo "fabro 9.9.9"
 INNER
     chmod +x "$bundle_dir/fabro"
+    # Release archives also carry the legal notices next to the binary.
+    printf 'license\n' >"$bundle_dir/LICENSE.md"
+    printf 'notices\n' >"$bundle_dir/THIRD_PARTY_NOTICES.txt"
     tar czf "$dest_dir/$asset" -C "$work_dir" "$(basename "$bundle_dir")"
     rm -rf "$work_dir"
     ;;

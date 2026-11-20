@@ -2,3 +2,5 @@
 !docker/entrypoint.sh
 !docker/settings.toml
 !tmp/docker-context/**
+!LICENSE.md
+!THIRD_PARTY_NOTICES.txt
