@@ -4303,7 +4303,7 @@ checksum = "6373607a59f0be73a39b6fe456b8192fcc3585f602af20751600e974dd455e77"
 [[package]]
 name = "lithos-llm"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/lithos-llm?branch=main#2e3d3b3ff7f72b121263651f3622e38ee34f47e4"
+source = "git+https://github.com/lithoscomputer/lithos-llm?branch=main#0f782c9d2b55f6791487d145c71f3f7db2f1a2b7"
 dependencies = [
  "async-trait",
  "aws-config",
@@ -7918,7 +7918,7 @@ dependencies = [
 [[package]]
 name = "twin-core"
 version = "0.1.5"
-source = "git+https://github.com/lithoscomputer/twins?branch=main#86329c8b24e784dc17b060983abdcaab514b906f"
+source = "git+https://github.com/lithoscomputer/twins?branch=main#86b4e0e178eaabb61d71019c878bc75f28b7eaca"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -7952,7 +7952,7 @@ dependencies = [
 [[package]]
 name = "twin-openai"
 version = "0.1.5"
-source = "git+https://github.com/lithoscomputer/twins?branch=main#86329c8b24e784dc17b060983abdcaab514b906f"
+source = "git+https://github.com/lithoscomputer/twins?branch=main#86b4e0e178eaabb61d71019c878bc75f28b7eaca"
 dependencies = [
  "anyhow",
  "async-stream",
