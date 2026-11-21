@@ -68,6 +68,7 @@ models/auth-session.ts
 models/auth-sessions-response.ts
 models/automation-api-trigger.ts
 models/automation-git-workflow-source.ts
+models/automation-jira-trigger.ts
 models/automation-list-meta.ts
 models/automation-list-response.ts
 models/automation-ref.ts
@@ -213,6 +214,7 @@ models/interrupt-run-request.ts
 models/interview-option.ts
 models/interview-provider-settings.ts
 models/interview-question-record.ts
+models/jira-integration-settings.ts
 models/link-run-pull-request-request.ts
 models/llm-error-data.ts
 models/llm-output-kind.ts

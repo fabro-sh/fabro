@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::str::FromStr as _;
 
 use fabro_db::DbPool;
@@ -8,7 +9,7 @@ use sqlx::{Row as _, Sqlite, Transaction};
 use crate::{
     ApiTrigger, Automation, AutomationDraft, AutomationGitWorkflowSource, AutomationId,
     AutomationReplace, AutomationRevision, AutomationStoreError, AutomationTrigger,
-    AutomationTriggerId, ScheduleTrigger,
+    AutomationTriggerId, JiraTrigger, ScheduleTrigger,
 };
 
 /// Shared projection for loading automations with their schedule triggers.
@@ -65,7 +66,8 @@ impl AutomationStore {
         let rows = sqlx::query(select_automations_sql!("ORDER BY a.id, t.id"))
             .fetch_all(&self.pool)
             .await?;
-        automations_from_rows(&rows)
+        let jira_triggers = load_jira_triggers(&self.pool, None).await?;
+        automations_from_rows(&rows, jira_triggers)
     }
 
     pub async fn get(&self, id: &AutomationId) -> Result<Option<Automation>, AutomationStoreError> {
@@ -73,7 +75,10 @@ impl AutomationStore {
             .bind(id.as_str())
             .fetch_all(&self.pool)
             .await?;
-        Ok(automations_from_rows(&rows)?.into_iter().next())
+        let jira_triggers = load_jira_triggers(&self.pool, Some(id)).await?;
+        Ok(automations_from_rows(&rows, jira_triggers)?
+            .into_iter()
+            .next())
     }
 
     pub async fn exists(&self, id: &AutomationId) -> Result<bool, AutomationStoreError> {
@@ -180,6 +185,11 @@ impl AutomationStore {
             .execute(&mut *transaction)
             .await?;
         insert_schedule_triggers(&mut transaction, &automation).await?;
+        sqlx::query("DELETE FROM automation_jira_triggers WHERE automation_id = ?")
+            .bind(id.as_str())
+            .execute(&mut *transaction)
+            .await?;
+        insert_jira_triggers(&mut transaction, &automation).await?;
         transaction.commit().await?;
         Ok(automation)
     }
@@ -215,6 +225,7 @@ struct StoredAutomation {
     workflow:          String,
     workflow_source:   Option<AutomationGitWorkflowSource>,
     schedule_triggers: Vec<ScheduleTrigger>,
+    jira_triggers:     Vec<JiraTrigger>,
 }
 
 impl StoredAutomation {
@@ -249,6 +260,7 @@ impl StoredAutomation {
             workflow: row.try_get("target_workflow")?,
             workflow_source,
             schedule_triggers: Vec::new(),
+            jira_triggers: Vec::new(),
         })
     }
 
@@ -285,6 +297,7 @@ impl StoredAutomation {
             .into_iter()
             .map(AutomationTrigger::Schedule)
             .collect::<Vec<_>>();
+        triggers.extend(self.jira_triggers.into_iter().map(AutomationTrigger::Jira));
         if self.api_enabled {
             triggers.push(AutomationTrigger::Api(ApiTrigger::manual()));
         }
@@ -305,7 +318,49 @@ impl StoredAutomation {
     }
 }
 
-fn automations_from_rows(rows: &[SqliteRow]) -> Result<Vec<Automation>, AutomationStoreError> {
+/// Jira triggers live in their own table, so they are loaded beside the
+/// schedule join and merged by automation id.
+async fn load_jira_triggers(
+    pool: &DbPool,
+    only: Option<&AutomationId>,
+) -> Result<HashMap<String, Vec<JiraTrigger>>, AutomationStoreError> {
+    let rows = sqlx::query(
+        "SELECT automation_id, id, enabled, jql, in_progress_status, review_status
+        FROM automation_jira_triggers
+        WHERE ?1 IS NULL OR automation_id = ?1
+        ORDER BY automation_id, id",
+    )
+    .bind(only.map(AutomationId::as_str))
+    .fetch_all(pool)
+    .await?;
+    let mut by_automation = HashMap::<String, Vec<JiraTrigger>>::new();
+    for row in &rows {
+        let automation_id = row.try_get::<String, _>("automation_id")?;
+        let id_value = row.try_get::<String, _>("id")?;
+        let id = AutomationTriggerId::new(id_value.clone()).map_err(|source| {
+            AutomationStoreError::StoredId {
+                value: id_value,
+                source,
+            }
+        })?;
+        by_automation
+            .entry(automation_id)
+            .or_default()
+            .push(JiraTrigger {
+                id,
+                enabled: row.try_get("enabled")?,
+                jql: row.try_get("jql")?,
+                in_progress_status: row.try_get("in_progress_status")?,
+                review_status: row.try_get("review_status")?,
+            });
+    }
+    Ok(by_automation)
+}
+
+fn automations_from_rows(
+    rows: &[SqliteRow],
+    mut jira_triggers: HashMap<String, Vec<JiraTrigger>>,
+) -> Result<Vec<Automation>, AutomationStoreError> {
     let mut automations = Vec::new();
     let mut current: Option<StoredAutomation> = None;
 
@@ -323,7 +378,9 @@ fn automations_from_rows(rows: &[SqliteRow]) -> Result<Vec<Automation>, Automati
             );
         }
         if current.is_none() {
-            current = Some(StoredAutomation::from_row(row)?);
+            let mut stored = StoredAutomation::from_row(row)?;
+            stored.jira_triggers = jira_triggers.remove(&row_id).unwrap_or_default();
+            current = Some(stored);
         }
         current
             .as_mut()
@@ -386,6 +443,7 @@ pub(crate) async fn insert_automation_ignoring_conflict(
         return Ok(false);
     }
     insert_schedule_triggers(transaction, automation).await?;
+    insert_jira_triggers(transaction, automation).await?;
     Ok(true)
 }
 
@@ -430,6 +488,30 @@ async fn insert_schedule_triggers(
         .bind(trigger.id.as_str())
         .bind(trigger.enabled)
         .bind(&trigger.expression)
+        .execute(&mut **transaction)
+        .await?;
+    }
+    Ok(())
+}
+
+async fn insert_jira_triggers(
+    transaction: &mut Transaction<'_, Sqlite>,
+    automation: &Automation,
+) -> Result<(), AutomationStoreError> {
+    for trigger in automation.jira_triggers() {
+        sqlx::query(
+            r"
+            INSERT INTO automation_jira_triggers (
+                automation_id, id, enabled, jql, in_progress_status, review_status
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ",
+        )
+        .bind(automation.id.as_str())
+        .bind(trigger.id.as_str())
+        .bind(trigger.enabled)
+        .bind(&trigger.jql)
+        .bind(trigger.in_progress_status.as_deref())
+        .bind(trigger.review_status.as_deref())
         .execute(&mut **transaction)
         .await?;
     }

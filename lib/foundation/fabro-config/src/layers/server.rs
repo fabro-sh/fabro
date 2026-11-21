@@ -214,6 +214,21 @@ pub struct ServerIntegrationsLayer {
     pub github: Option<GithubIntegrationLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slack:  Option<SlackIntegrationLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jira:   Option<JiraIntegrationLayer>,
+}
+
+/// `[server.integrations.jira]` — Jira Cloud site and account. The API token
+/// lives in the vault as `FABRO_JIRA_API_TOKEN`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[serde(deny_unknown_fields)]
+pub struct JiraIntegrationLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled:  Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email:    Option<String>,
 }
 
 /// `[server.integrations.github]` — GitHub App, credentials, and inbound

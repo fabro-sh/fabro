@@ -24,6 +24,8 @@ pub(crate) struct AutomationRunMaterializeInput {
     pub workflow:        String,
     pub run_id:          RunId,
     pub temp_root:       PathBuf,
+    pub title:           Option<String>,
+    pub goal:            Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -31,6 +33,8 @@ pub(crate) struct AutomationRunMaterialized {
     pub workflow_version_id: WorkflowVersionId,
     pub target:              GitRunTarget,
     pub workflow_source:     Option<Box<ResolvedAutomationGitWorkflowSource>>,
+    pub title:               Option<String>,
+    pub goal:                Option<String>,
 }
 
 impl AutomationRunMaterialized {
@@ -43,8 +47,8 @@ impl AutomationRunMaterialized {
             args:                RunIntentArgs::default(),
             environment_id:      Some(environment_id),
             parent_id:           None,
-            title:               None,
-            goal:                None,
+            title:               self.title,
+            goal:                self.goal,
         }
     }
 }
@@ -335,6 +339,8 @@ impl AutomationRunMaterializer for ProductionAutomationRunMaterializer {
             workflow_version_id: closure.root_id(),
             target:              exact_target,
             workflow_source:     resolved_workflow_source,
+            title:               input.title,
+            goal:                input.goal,
         })
     }
 }
@@ -489,6 +495,7 @@ impl AutomationRunMaterializer for TestAutomationRunMaterializer {
                 "ffffffffffffffffffffffffffffffffffffffff".to_string(),
             ))
         });
+        let (title, goal) = (input.title.clone(), input.goal.clone());
         let response = {
             let mut guard = self
                 .inner
@@ -518,6 +525,8 @@ impl AutomationRunMaterializer for TestAutomationRunMaterializer {
             workflow_version_id,
             target: materialized.target,
             workflow_source,
+            title,
+            goal,
         })
     }
 }
@@ -756,7 +765,33 @@ mod tests {
             workflow: "demo".to_string(),
             run_id: RunId::new(),
             temp_root: temp_root.to_path_buf(),
+            title: None,
+            goal: None,
         }
+    }
+
+    fn materialized(title: Option<&str>, goal: Option<&str>) -> AutomationRunMaterialized {
+        AutomationRunMaterialized {
+            workflow_version_id: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                .parse()
+                .expect("fixture version ID should be valid"),
+            target:              target("fabro-sh/fabro"),
+            workflow_source:     None,
+            title:               title.map(str::to_string),
+            goal:                goal.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn into_run_intent_carries_title_and_goal() {
+        let intent =
+            materialized(Some("ABC-1 Fix"), Some("# ABC-1")).into_run_intent("env".to_string());
+        assert_eq!(intent.title.as_deref(), Some("ABC-1 Fix"));
+        assert_eq!(intent.goal.as_deref(), Some("# ABC-1"));
+
+        let intent = materialized(None, None).into_run_intent("env".to_string());
+        assert_eq!(intent.title, None);
+        assert_eq!(intent.goal, None);
     }
 
     fn test_version_store() -> WorkflowVersionStore {

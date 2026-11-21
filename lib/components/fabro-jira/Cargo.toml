@@ -1,0 +1,23 @@
+[package]
+name = "fabro-jira"
+edition.workspace = true
+version.workspace = true
+publish = false
+license.workspace = true
+description = "Jira Cloud REST client and goal renderer for Fabro"
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+fabro-http.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+httpmock = "0.8"
+tokio = { workspace = true, features = ["macros"] }

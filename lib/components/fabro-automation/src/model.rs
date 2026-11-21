@@ -99,10 +99,23 @@ impl Automation {
             })
     }
 
+    /// Returns the first enabled Jira trigger if the automation has one.
+    #[must_use]
+    pub fn enabled_jira_trigger(&self) -> Option<&JiraTrigger> {
+        self.jira_triggers().find(|trigger| trigger.enabled)
+    }
+
     pub(crate) fn schedule_triggers(&self) -> impl Iterator<Item = &ScheduleTrigger> {
         self.triggers.iter().filter_map(|trigger| match trigger {
             AutomationTrigger::Schedule(trigger) => Some(trigger),
-            AutomationTrigger::Api(_) => None,
+            AutomationTrigger::Api(_) | AutomationTrigger::Jira(_) => None,
+        })
+    }
+
+    pub(crate) fn jira_triggers(&self) -> impl Iterator<Item = &JiraTrigger> {
+        self.triggers.iter().filter_map(|trigger| match trigger {
+            AutomationTrigger::Jira(trigger) => Some(trigger),
+            AutomationTrigger::Api(_) | AutomationTrigger::Schedule(_) => None,
         })
     }
 
@@ -176,6 +189,7 @@ pub fn validate_workflow_source(
 pub enum AutomationTrigger {
     Api(ApiTrigger),
     Schedule(ScheduleTrigger),
+    Jira(JiraTrigger),
 }
 
 impl AutomationTrigger {
@@ -184,6 +198,7 @@ impl AutomationTrigger {
         match self {
             Self::Api(trigger) => &trigger.id,
             Self::Schedule(trigger) => &trigger.id,
+            Self::Jira(trigger) => &trigger.id,
         }
     }
 
@@ -192,6 +207,7 @@ impl AutomationTrigger {
         match self {
             Self::Api(trigger) => trigger.enabled,
             Self::Schedule(trigger) => trigger.enabled,
+            Self::Jira(trigger) => trigger.enabled,
         }
     }
 }
@@ -221,6 +237,24 @@ pub struct ScheduleTrigger {
     pub id:         AutomationTriggerId,
     pub enabled:    bool,
     pub expression: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JiraTrigger {
+    pub id:                 AutomationTriggerId,
+    pub enabled:            bool,
+    pub jql:                String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_progress_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_status:      Option<String>,
+}
+
+fn trimmed_status(status: Option<String>) -> Option<String> {
+    status
+        .map(|status| status.trim().to_string())
+        .filter(|status| !status.is_empty())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -360,39 +394,52 @@ fn normalize_replace(
         .workflow_source
         .map(validate_workflow_source)
         .transpose()?;
+    for trigger in &mut value.triggers {
+        if let AutomationTrigger::Jira(jira) = trigger {
+            jira.jql = jira.jql.trim().to_string();
+            jira.in_progress_status = trimmed_status(jira.in_progress_status.take());
+            jira.review_status = trimmed_status(jira.review_status.take());
+        }
+    }
     validate_fields(&value, require_environment)?;
 
     let api_enabled = value
         .triggers
         .iter()
         .any(|trigger| matches!(trigger, AutomationTrigger::Api(trigger) if trigger.enabled));
-    let mut schedules = value
-        .triggers
-        .into_iter()
-        .filter_map(|trigger| match trigger {
-            AutomationTrigger::Schedule(trigger) => Some(trigger),
-            AutomationTrigger::Api(_) => None,
-        })
-        .collect::<Vec<_>>();
+    let mut schedules = Vec::new();
+    let mut jira_triggers = Vec::new();
+    for trigger in value.triggers {
+        match trigger {
+            AutomationTrigger::Schedule(trigger) => schedules.push(trigger),
+            AutomationTrigger::Jira(trigger) => jira_triggers.push(trigger),
+            AutomationTrigger::Api(_) => {}
+        }
+    }
     schedules.sort_by(|left, right| left.id.cmp(&right.id));
 
     // Canonicalization renames the enabled API trigger to `manual`, which can
     // collide with a schedule trigger id even when the input ids were unique.
     if api_enabled
-        && schedules
+        && (schedules
             .iter()
             .any(|schedule| schedule.id.as_str() == MANUAL_TRIGGER_ID)
+            || jira_triggers
+                .iter()
+                .any(|jira| jira.id.as_str() == MANUAL_TRIGGER_ID))
     {
         return Err(AutomationValidationError::DuplicateTriggerId {
             id: MANUAL_TRIGGER_ID.to_string(),
         });
     }
 
-    let mut triggers = Vec::with_capacity(schedules.len() + usize::from(api_enabled));
+    let mut triggers =
+        Vec::with_capacity(schedules.len() + jira_triggers.len() + usize::from(api_enabled));
     if api_enabled {
         triggers.push(AutomationTrigger::Api(ApiTrigger::manual()));
     }
     triggers.extend(schedules.into_iter().map(AutomationTrigger::Schedule));
+    triggers.extend(jira_triggers.into_iter().map(AutomationTrigger::Jira));
     value.triggers = triggers;
     Ok(value)
 }
@@ -434,6 +481,7 @@ fn validate_workflow_selector(value: &str) -> Result<(), AutomationValidationErr
 fn validate_triggers(triggers: &[AutomationTrigger]) -> Result<(), AutomationValidationError> {
     let mut seen = HashSet::new();
     let mut has_api_trigger = false;
+    let mut has_jira_trigger = false;
 
     for trigger in triggers {
         let id = trigger.id().as_str();
@@ -446,6 +494,17 @@ fn validate_triggers(triggers: &[AutomationTrigger]) -> Result<(), AutomationVal
                     return Err(AutomationValidationError::MultipleApiTriggers);
                 }
                 has_api_trigger = true;
+            }
+            AutomationTrigger::Jira(trigger) => {
+                if has_jira_trigger {
+                    return Err(AutomationValidationError::MultipleJiraTriggers);
+                }
+                has_jira_trigger = true;
+                if trigger.jql.trim().is_empty() {
+                    return Err(AutomationValidationError::EmptyJiraQuery {
+                        trigger_id: id.to_string(),
+                    });
+                }
             }
             AutomationTrigger::Schedule(trigger) => {
                 if trigger.expression.split_whitespace().count() != 5 {
@@ -477,7 +536,7 @@ mod tests {
     use crate::{
         ApiTrigger, Automation, AutomationGitWorkflowSource, AutomationId, AutomationReplace,
         AutomationStoreError, AutomationTrigger, AutomationTriggerId, AutomationValidationError,
-        ScheduleTrigger,
+        JiraTrigger, ScheduleTrigger,
     };
 
     fn target() -> RunTarget {
@@ -506,6 +565,23 @@ mod tests {
             enabled,
             expression: cron.to_string(),
         })
+    }
+
+    fn jira_trigger(id: &str, jql: &str) -> AutomationTrigger {
+        AutomationTrigger::Jira(JiraTrigger {
+            id:                 AutomationTriggerId::new(id).unwrap(),
+            enabled:            true,
+            jql:                jql.to_string(),
+            in_progress_status: None,
+            review_status:      None,
+        })
+    }
+
+    fn replace_with_triggers(triggers: Vec<AutomationTrigger>) -> AutomationReplace {
+        AutomationReplace {
+            triggers,
+            ..replace_with_source(None)
+        }
     }
 
     fn workflow_source(
@@ -877,6 +953,120 @@ enabled = true
         for case in cases {
             assert!(Automation::from_replace(AutomationId::new("test").unwrap(), case).is_err());
         }
+    }
+
+    #[test]
+    fn jira_trigger_round_trips_through_toml() {
+        let trigger = AutomationTrigger::Jira(JiraTrigger {
+            id:                 AutomationTriggerId::new("board").unwrap(),
+            enabled:            true,
+            jql:                "project = ABC".to_string(),
+            in_progress_status: Some("In Progress".to_string()),
+            review_status:      Some("In Review".to_string()),
+        });
+        let (automation, bytes) = Automation::from_replace(
+            AutomationId::new("nightly").unwrap(),
+            replace_with_triggers(vec![trigger.clone()]),
+        )
+        .unwrap();
+        assert_eq!(automation.triggers, vec![trigger.clone()]);
+
+        let decoded =
+            Automation::from_toml_bytes(AutomationId::new("nightly").unwrap(), &bytes).unwrap();
+        assert_eq!(decoded.triggers, vec![trigger]);
+    }
+
+    #[test]
+    fn normalize_rejects_second_jira_trigger() {
+        let error = Automation::from_replace(
+            AutomationId::new("nightly").unwrap(),
+            replace_with_triggers(vec![
+                jira_trigger("a", "project = A"),
+                jira_trigger("b", "project = B"),
+            ]),
+        )
+        .unwrap_err();
+        assert!(matches!(error, AutomationStoreError::Validation {
+            source: AutomationValidationError::MultipleJiraTriggers,
+        }));
+    }
+
+    #[test]
+    fn normalize_rejects_blank_jql() {
+        let error = Automation::from_replace(
+            AutomationId::new("nightly").unwrap(),
+            replace_with_triggers(vec![jira_trigger("board", "   ")]),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            AutomationStoreError::Validation {
+                source: AutomationValidationError::EmptyJiraQuery { trigger_id }
+            } if trigger_id == "board"
+        ));
+    }
+
+    #[test]
+    fn normalize_trims_jql_and_blank_statuses() {
+        let (automation, _) = Automation::from_replace(
+            AutomationId::new("nightly").unwrap(),
+            replace_with_triggers(vec![AutomationTrigger::Jira(JiraTrigger {
+                id:                 AutomationTriggerId::new("board").unwrap(),
+                enabled:            true,
+                jql:                "  project = ABC \n".to_string(),
+                in_progress_status: Some("  ".to_string()),
+                review_status:      Some(" In Review ".to_string()),
+            })]),
+        )
+        .unwrap();
+        let Some(AutomationTrigger::Jira(jira)) = automation.triggers.first() else {
+            panic!("expected a Jira trigger");
+        };
+        assert_eq!(jira.jql, "project = ABC");
+        assert_eq!(jira.in_progress_status, None);
+        assert_eq!(jira.review_status.as_deref(), Some("In Review"));
+    }
+
+    #[test]
+    fn normalize_rejects_jira_trigger_named_manual_beside_api_trigger() {
+        let error = Automation::from_replace(
+            AutomationId::new("nightly").unwrap(),
+            replace_with_triggers(vec![
+                api_trigger("api"),
+                jira_trigger("manual", "project = A"),
+            ]),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            AutomationStoreError::Validation {
+                source: AutomationValidationError::DuplicateTriggerId { id }
+            } if id == "manual"
+        ));
+    }
+
+    #[test]
+    fn normalize_keeps_jira_trigger_after_schedules() {
+        let (automation, _) = Automation::from_replace(
+            AutomationId::new("nightly").unwrap(),
+            replace_with_triggers(vec![
+                jira_trigger("board", "project = ABC"),
+                schedule_trigger("b-nightly", "0 0 * * *"),
+                api_trigger("api"),
+                schedule_trigger("a-nightly", "0 1 * * *"),
+            ]),
+        )
+        .unwrap();
+        let ids = automation
+            .triggers
+            .iter()
+            .map(|trigger| trigger.id().as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["manual", "a-nightly", "b-nightly", "board"]);
+        assert_eq!(
+            automation.enabled_jira_trigger().unwrap().jql,
+            "project = ABC"
+        );
     }
 
     fn top_level_lines(toml: &str) -> impl Iterator<Item = &str> {

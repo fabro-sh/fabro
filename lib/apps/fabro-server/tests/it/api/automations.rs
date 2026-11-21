@@ -2,14 +2,14 @@ use std::path::{Path, PathBuf};
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
-use fabro_automation::AutomationGitWorkflowSource;
+use fabro_automation::{AutomationGitWorkflowSource, AutomationId, JiraIssueRunStore};
 use fabro_config::Storage;
 use fabro_server::server::build_router;
 use fabro_server::test_support::{
     TestAppStateBuilder, TestAutomationRunMaterializer, build_test_router, test_auth_mode,
 };
 use fabro_static::EnvVars;
-use fabro_types::GitRunTarget;
+use fabro_types::{GitRunTarget, RunId};
 use serde_json::{Value, json};
 use sqlx::Row as _;
 use tower::ServiceExt;
@@ -1178,4 +1178,69 @@ async fn automation_run_listing_is_newest_first_and_paginates() {
     assert_eq!(second_page["meta"]["total"], 3);
     assert_eq!(second_page["meta"]["has_more"], false);
     assert_eq!(second_page["data"][0]["id"], oldest["id"]);
+}
+
+async fn jira_claim_store(sqlite_path: &Path) -> JiraIssueRunStore {
+    let database = fabro_db::Database::connect(sqlite_path)
+        .await
+        .expect("automation test database should open");
+    JiraIssueRunStore::new(database.pool().clone())
+}
+
+#[tokio::test]
+async fn release_jira_issue_deletes_claim_and_returns_204() {
+    let (app, _temp_dir, sqlite_path) = automation_app();
+    create_automation(&app, "nightly", "Nightly").await;
+    let claims = jira_claim_store(&sqlite_path).await;
+    let automation_id = AutomationId::new("nightly").expect("automation id should parse");
+    let run_id = RunId::new();
+    assert!(
+        claims
+            .claim(&automation_id, "ABC-1", run_id, chrono::Utc::now())
+            .await
+            .expect("claim should insert")
+    );
+
+    let response = app
+        .oneshot(empty_request(
+            Method::DELETE,
+            "/automations/nightly/jira-issues/ABC-1",
+        ))
+        .await
+        .expect("release should respond");
+    response_status(
+        response,
+        StatusCode::NO_CONTENT,
+        "DELETE /api/v1/automations/nightly/jira-issues/ABC-1",
+    )
+    .await;
+
+    assert!(
+        claims
+            .by_run(run_id)
+            .await
+            .expect("by_run should query")
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn release_jira_issue_without_claim_is_404() {
+    let (app, _temp_dir, _sqlite_path) = automation_app();
+    create_automation(&app, "nightly", "Nightly").await;
+
+    let response = app
+        .oneshot(empty_request(
+            Method::DELETE,
+            "/automations/nightly/jira-issues/ABC-1",
+        ))
+        .await
+        .expect("release should respond");
+    let error = response_json(
+        response,
+        StatusCode::NOT_FOUND,
+        "DELETE /api/v1/automations/nightly/jira-issues/ABC-1 without claim",
+    )
+    .await;
+    assert_eq!(error["errors"][0]["code"], "jira_issue_claim_not_found");
 }

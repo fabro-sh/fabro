@@ -1,0 +1,121 @@
+---
+title: "Jira"
+description: "Start Fabro runs from Jira Cloud tickets and get run updates back as comments and status transitions"
+---
+
+Fabro's Jira integration turns a Jira board column into a work queue. An [automation](/execution/automations) polls Jira with a JQL query, starts one run per matching ticket, and writes the run's progress back to the ticket as comments and status transitions.
+
+The integration polls Jira Cloud, so no public URL or webhook is required. Jira Data Center is not supported.
+
+## What it looks like
+
+A teammate moves ticket `ABC-42` into the **Ready for Fabro** column. Within a minute:
+
+1. Fabro creates a run titled `ABC-42 <summary>` with the ticket as its goal.
+2. Fabro comments `Fabro started run <link> for this issue.` and moves the ticket to **In Progress**.
+3. When the run succeeds with a pull request, Fabro comments `Fabro opened pull request <url> (<link>).` and moves the ticket to **In Review**.
+
+## Setup
+
+<Steps>
+  <Step title="Create an API token">
+    Sign in to Jira as the account Fabro should act as. Go to [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens), create an API token, and copy it. Atlassian requires an expiry of at most one year.
+  </Step>
+  <Step title="Store the token in the vault">
+    ```bash
+    fabro secret set FABRO_JIRA_API_TOKEN <token>
+    ```
+    The token is vault-only. It is never read from `settings.toml`.
+  </Step>
+  <Step title="Configure the integration">
+    Add the table to the server settings:
+
+    ```toml
+    [server.integrations.jira]
+    site_url = "https://acme.atlassian.net"
+    email = "fabro@acme.com"
+    ```
+
+    `enabled` defaults to `true` when the table is present. A trailing `/` on `site_url` is trimmed. See [Server configuration](/administration/server-configuration) for the full block.
+
+    The server reads the token and this table at startup. Restart the server after changing `FABRO_JIRA_API_TOKEN` or `[server.integrations.jira]`. Until then the Jira row shows `Error` with "server restart required to load Jira credentials".
+  </Step>
+  <Step title="Create an automation with a Jira trigger">
+    In the web UI, open an automation's form and turn on **Poll a Jira board**. Fill in **JQL query**, and optionally **In-progress status** and **Review status**. Or add the trigger in TOML, as shown in [Jira triggers](/execution/automations#jira-triggers).
+  </Step>
+  <Step title="Verify in Settings → Integrations">
+    The Jira row under **Project Management** shows one of `Disabled`, `Missing credentials`, `Configured`, or `Error`, along with the site URL and the last error.
+  </Step>
+</Steps>
+
+## How it works
+
+**Poll.** Every 60 seconds, for each enabled Jira trigger, Fabro searches with `GET /rest/api/2/search/jql` for issue keys only, then fetches the detail of each new key. Fabro starts at most 5 new runs per trigger per minute and reads at most 20 search pages per poll. If the previous poll of a trigger is still running, that trigger is skipped for the minute.
+
+**Claim.** Before creating a run, Fabro claims the pair `(automation, issue key)` in the `jira_issue_runs` table. An automation never runs the same ticket twice unless the claim is released. If run creation fails after the claim, Fabro releases the claim and retries the ticket on the next poll. A claim whose run was never created (for example after a crash) is released automatically after a minute. Claims survive automation deletion.
+
+**Goal.** The run title is `<KEY> <summary>`. The goal is a Markdown rendering of the ticket:
+
+- `# KEY summary`
+- the browse URL
+- `Status:`, `Type:`, `Priority:`, and `Labels:` lines
+- `## Description`, with the Jira wiki markup passed through verbatim
+- `## Comments`, oldest first, with author and date
+
+The run's automation reference carries the Jira trigger `id`. The agent needs no Jira access of its own.
+
+**Write-back.** Fabro comments on the ticket at each lifecycle event. `{run_link}` is the run's web URL when the web UI is enabled, otherwise the run id.
+
+| Event | Comment | Transition |
+|---|---|---|
+| Started | `Fabro started run {run_link} for this issue.` | `in_progress_status` |
+| Succeeded with a pull request | `Fabro opened pull request {pr_url} ({run_link}).` | `review_status` |
+| Succeeded without a pull request | `Fabro finished run {run_link} without a pull request.` | `review_status` |
+| Failed | `Fabro run {run_link} failed: {reason}.` | none |
+| Cancelled | `Fabro run {run_link} was cancelled.` | none |
+
+Transition names are Jira status transition names, matched case-insensitively. Fabro posts the comment first, then transitions. A transition name that does not exist still leaves the comment and is reported as the integration's last error.
+
+**Errors.** Poll, search, and run-creation failures are stored as the automation's `last_error`, shown on the automation page, and retried on the next poll. Write-back failures show on the Jira row in Settings → Integrations. Jira never fails or blocks a run.
+
+## Choosing an account
+
+Fabro acts as the Atlassian account that owns the email and token. Every comment and transition appears as that account.
+
+- Use a dedicated account for shared boards, so Fabro's activity is clearly separate from any person's.
+- A personal token makes Fabro's actions appear as that person.
+- Cloud API tokens expire. Rotate the token before it does, with `fabro secret set FABRO_JIRA_API_TOKEN <new-token>`. A `401` or `403` from Jira shows the Jira row as `Error`.
+
+## JQL pattern
+
+```text
+project = ABC AND status = "Ready for Fabro"
+```
+
+Exclude the statuses Fabro moves tickets into (your `in_progress_status` and `review_status`). Otherwise claimed tickets keep matching. This is harmless because of the claim, but it is noisy and reaches the 20-page cap sooner.
+
+<Warning>
+Anyone who can move a ticket into the matching column starts an unattended run with that ticket's text as the goal. Consider narrowing the query by `assignee` or `labels`.
+</Warning>
+
+## Releasing a claim
+
+To let an automation pick a ticket up again, release its claim:
+
+```bash
+curl -X DELETE \
+  -H "Authorization: Bearer $FABRO_TOKEN" \
+  "$FABRO_URL/api/v1/automations/$AUTOMATION_ID/jira-issues/ABC-42"
+```
+
+The endpoint returns `204` on success, or `404` with code `jira_issue_claim_not_found` when there is no claim. It needs the normal API authentication. The next poll hands the ticket to Fabro again if it still matches the JQL. See the [API reference](/api-reference/automations/release-a-jira-issue-claim).
+
+## Limitations
+
+- Jira Cloud only.
+- Polling only; there are no webhooks.
+- The agent has no Jira access of its own. You can add a Jira MCP server to the workflow yourself.
+- Fabro does nothing after the pull request is opened. Merge, review, and moving to "Done" are human steps.
+- There is no release button in the UI yet; releasing a claim is API only.
+- Write-back is best effort, like Slack lifecycle notifications. A server restart between start and finish can lose the finish comment.
+- Retried or forked runs get no Jira write-back; only the original run of a claimed ticket does.

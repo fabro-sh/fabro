@@ -502,6 +502,26 @@ fabro secret set FABRO_SLACK_APP_TOKEN xapp-...
 | `FABRO_SLACK_APP_TOKEN` | Slack App-level token |
 | `FABRO_SLACK_BOT_TOKEN` | Slack Bot token |
 
+### Jira integration (optional)
+
+Add `[server.integrations.jira]` to connect one Jira Cloud site. `site_url` (for example `https://acme.atlassian.net`; a trailing `/` is trimmed) and `email` are literal settings; `enabled` defaults to `true` when the table is present. The API token is vault-only.
+
+When the table is present and the site, email, and token are all set, startup logs `Jira integration enabled`. If the table is absent or `enabled = false`, startup logs `Jira integration disabled by server configuration`. If an input is missing, startup logs `Jira integration disabled; missing credentials` with the missing names.
+
+```toml
+[server.integrations.jira]
+site_url = "https://acme.atlassian.net"
+email = "fabro@acme.com"
+```
+
+```bash
+fabro secret set FABRO_JIRA_API_TOKEN ...
+```
+
+| Variable | Description |
+|---|---|
+| `FABRO_JIRA_API_TOKEN` | Jira Cloud API token for the configured email |
+
 ### Logging
 
 | Variable | Default | Description |

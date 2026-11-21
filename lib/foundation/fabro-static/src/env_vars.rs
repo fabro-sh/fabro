@@ -18,6 +18,7 @@ impl EnvVars {
     pub const FABRO_GIT_SHA: &'static str = "FABRO_GIT_SHA";
     pub const FABRO_HOME: &'static str = "FABRO_HOME";
     pub const FABRO_HTTP_PROXY_POLICY: &'static str = "FABRO_HTTP_PROXY_POLICY";
+    pub const FABRO_JIRA_API_TOKEN: &'static str = "FABRO_JIRA_API_TOKEN";
     pub const FABRO_JSON: &'static str = "FABRO_JSON";
     pub const FABRO_LOG: &'static str = "FABRO_LOG";
     pub const FABRO_LOG_DESTINATION: &'static str = "FABRO_LOG_DESTINATION";
@@ -221,6 +222,7 @@ mod tests {
             EnvVars::FABRO_GIT_SHA,
             EnvVars::FABRO_HOME,
             EnvVars::FABRO_HTTP_PROXY_POLICY,
+            EnvVars::FABRO_JIRA_API_TOKEN,
             EnvVars::FABRO_JSON,
             EnvVars::FABRO_LOG,
             EnvVars::FABRO_LOG_DESTINATION,

@@ -29,6 +29,10 @@ export function findScheduleTrigger(
   return automation.triggers.find((t): t is TriggerOfType<"schedule"> => t.type === "schedule");
 }
 
+export function findJiraTrigger(automation: Automation): TriggerOfType<"jira"> | undefined {
+  return automation.triggers.find((t): t is TriggerOfType<"jira"> => t.type === "jira");
+}
+
 export function findScheduleTriggers(automation: Automation): TriggerOfType<"schedule">[] {
   return automation.triggers.filter((t): t is TriggerOfType<"schedule"> => t.type === "schedule");
 }

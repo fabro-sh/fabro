@@ -8,7 +8,7 @@ use std::path::Path;
 use fabro_automation::{
     ApiTrigger, AutomationDraft, AutomationGitWorkflowSource, AutomationId, AutomationReplace,
     AutomationRevision, AutomationStore, AutomationStoreError, AutomationTrigger,
-    AutomationTriggerId, ScheduleTrigger,
+    AutomationTriggerId, JiraTrigger, ScheduleTrigger,
 };
 use fabro_db::Database;
 use fabro_types::{GitRunTarget, RunTarget};
@@ -39,6 +39,16 @@ fn schedule(id: &str, expression: &str, enabled: bool) -> AutomationTrigger {
         id: AutomationTriggerId::new(id).unwrap(),
         enabled,
         expression: expression.to_string(),
+    })
+}
+
+fn jira(id: &str, jql: &str, in_progress: Option<&str>) -> AutomationTrigger {
+    AutomationTrigger::Jira(JiraTrigger {
+        id:                 AutomationTriggerId::new(id).unwrap(),
+        enabled:            true,
+        jql:                jql.to_string(),
+        in_progress_status: in_progress.map(str::to_string),
+        review_status:      None,
     })
 }
 
@@ -693,4 +703,54 @@ expression = "0 3 * * *"
 "#
     )
     .into_bytes()
+}
+
+#[tokio::test]
+async fn jira_trigger_persists_and_loads() {
+    let (_dir, database) = test_database().await;
+    let store = AutomationStore::new(database.clone_pool());
+    let mut draft = draft("board", true);
+    draft
+        .triggers
+        .push(jira("jira", "project = ABC", Some("In Progress")));
+
+    let created = store.create(draft).await.unwrap();
+    assert_eq!(trigger_ids(&created), vec![
+        "manual", "a-first", "z-last", "jira"
+    ]);
+    let fetched = store.get(&created.id).await.unwrap().unwrap();
+    assert_eq!(fetched, created);
+    assert_eq!(store.list().await.unwrap(), vec![created.clone()]);
+    let trigger = fetched.enabled_jira_trigger().unwrap();
+    assert_eq!(trigger.jql, "project = ABC");
+    assert_eq!(trigger.in_progress_status.as_deref(), Some("In Progress"));
+    assert_eq!(trigger.review_status, None);
+}
+
+#[tokio::test]
+async fn replace_swaps_jira_trigger() {
+    let (_dir, database) = test_database().await;
+    let store = AutomationStore::new(database.clone_pool());
+    let mut first = draft("board", false);
+    first.triggers.push(jira("jira", "project = ABC", None));
+    let created = store.create(first).await.unwrap();
+
+    let mut next = replacement("Updated", "30 4 * * *");
+    next.triggers
+        .push(jira("other", "project = XYZ", Some("Doing")));
+    let replaced = store
+        .replace(&created.id, &created.revision, next)
+        .await
+        .unwrap();
+    assert_eq!(store.get(&created.id).await.unwrap().unwrap(), replaced);
+    assert_eq!(trigger_ids(&replaced), vec!["manual", "nightly", "other"]);
+
+    let mut without = replacement("Updated", "30 4 * * *");
+    without.triggers.truncate(1);
+    let cleared = store
+        .replace(&replaced.id, &replaced.revision, without)
+        .await
+        .unwrap();
+    let fetched = store.get(&cleared.id).await.unwrap().unwrap();
+    assert!(fetched.enabled_jira_trigger().is_none());
 }

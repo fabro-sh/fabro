@@ -39,6 +39,7 @@ use crate::jwt_auth::{AuthMode, ConfiguredAuth};
 #[cfg(test)]
 use crate::principal_middleware::{AuthContextSlot, RequestAuthContext};
 use crate::sandbox_access::SandboxInventory;
+use crate::server::jira::JiraService;
 use crate::server::{
     self, AppState, AppStateConfig, EnvLookup, ResolvedAppStateSettings, RouterOptions,
     build_app_state,
@@ -102,6 +103,7 @@ pub struct TestAppStateBuilder {
     env_lookup:                   EnvLookup,
     llm_overlay:                  LlmLayer,
     automation_materializer:      Option<TestAutomationRunMaterializer>,
+    jira_service:                 Option<JiraService>,
     #[cfg(test)]
     worker_runtime:               Option<Arc<dyn WorkerRuntime>>,
 }
@@ -124,6 +126,7 @@ impl Default for TestAppStateBuilder {
             env_lookup:                   default_env_lookup(),
             llm_overlay:                  LlmLayer::default(),
             automation_materializer:      None,
+            jira_service:                 None,
             #[cfg(test)]
             worker_runtime:               None,
         }
@@ -252,6 +255,11 @@ impl TestAppStateBuilder {
         self
     }
 
+    pub fn jira_service(mut self, service: JiraService) -> Self {
+        self.jira_service = Some(service);
+        self
+    }
+
     pub fn build(self) -> Arc<AppState> {
         self.try_build().expect("test app state should build")
     }
@@ -314,6 +322,7 @@ impl TestAppStateBuilder {
             #[cfg(test)]
             worker_runtime: self.worker_runtime,
             automation_materializer_override,
+            jira_service_override: self.jira_service,
         })
     }
 }

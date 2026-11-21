@@ -30,6 +30,7 @@ fabro-environment.workspace = true
 fabro-dot = { path = "../../components/fabro-dot" }
 fabro-graphviz = { path = "../../components/fabro-graphviz" }
 fabro-interview = { path = "../../components/fabro-interview" }
+fabro-jira = { path = "../../components/fabro-jira" }
 fabro-slack = { path = "../../components/fabro-slack" }
 fabro-workflow = { path = "../../components/fabro-workflow" }
 fabro-workflow-version = { path = "../../components/fabro-workflow-version" }

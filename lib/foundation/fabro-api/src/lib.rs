@@ -25,11 +25,12 @@ pub mod types {
     };
     pub use fabro_types::settings::server::{
         GithubIntegrationSettings, GithubIntegrationStrategy, IntegrationWebhooksSettings,
-        LogDestination, ObjectStoreSettings, ServerApiSettings, ServerArtifactsSettings,
-        ServerAuthGithubSettings, ServerAuthMethod, ServerAuthSettings, ServerIntegrationsSettings,
-        ServerListenSettings, ServerLoggingSettings, ServerSandboxProviderSettings,
-        ServerSandboxProvidersSettings, ServerSandboxSettings, ServerSchedulerSettings,
-        ServerStorageSettings, ServerWebSettings, SlackIntegrationSettings, WebhookStrategy,
+        JiraIntegrationSettings, LogDestination, ObjectStoreSettings, ServerApiSettings,
+        ServerArtifactsSettings, ServerAuthGithubSettings, ServerAuthMethod, ServerAuthSettings,
+        ServerIntegrationsSettings, ServerListenSettings, ServerLoggingSettings,
+        ServerSandboxProviderSettings, ServerSandboxProvidersSettings, ServerSandboxSettings,
+        ServerSchedulerSettings, ServerStorageSettings, ServerWebSettings,
+        SlackIntegrationSettings, WebhookStrategy,
     };
     pub use fabro_types::settings::{McpTransport, ServerNamespace};
     pub use fabro_types::status::{

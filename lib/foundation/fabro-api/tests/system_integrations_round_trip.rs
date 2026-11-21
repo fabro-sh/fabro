@@ -56,12 +56,24 @@ fn system_integrations_round_trips_representative_json() {
                 "metadata": {
                     "strategy": "token"
                 }
+            },
+            {
+                "provider": "jira",
+                "enabled": true,
+                "configured": true,
+                "status": "configured",
+                "missing_credentials": [],
+                "connection": null,
+                "metadata": {
+                    "site_url": "https://acme.atlassian.net",
+                    "email": "bot@acme.com"
+                }
             }
         ]
     });
 
     let response: SystemIntegrationsResponse = serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(response.data.len(), 2);
+    assert_eq!(response.data.len(), 3);
     assert_eq!(response.data[0].provider, IntegrationProvider::Slack);
     assert_eq!(response.data[0].status, IntegrationStatus::Connected);
     assert_eq!(

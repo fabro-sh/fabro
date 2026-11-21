@@ -13,10 +13,11 @@ use fabro_util::error as error_util;
 use tokio::time::sleep;
 use tracing::{Instrument, error, info, info_span, warn};
 
+use super::jira_poller::{JiraPlanner, poll_jira_trigger};
 use super::{AppState, handler};
 use crate::automation_materializer::AutomationRunMaterializeInput;
 
-const AUTOMATION_SCHEDULER_MAX_SLEEP: Duration = Duration::from_secs(30);
+pub(super) const AUTOMATION_SCHEDULER_MAX_SLEEP: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct ScheduleTriggerKey {
@@ -174,6 +175,7 @@ impl AutomationSchedulePlanner {
 pub(crate) fn spawn_automation_scheduler(state: Arc<AppState>) {
     tokio::spawn(async move {
         let mut planner = AutomationSchedulePlanner::default();
+        let mut jira = JiraPlanner::default();
         let shutdown = state.shutdown_token();
 
         loop {
@@ -212,7 +214,23 @@ pub(crate) fn spawn_automation_scheduler(state: Arc<AppState>) {
                 );
             }
 
-            let sleep_duration = planner.sleep_duration(now);
+            for due in jira.tick(&automations, now) {
+                let span = info_span!(
+                    "jira_poll",
+                    automation_id = %due.automation.id,
+                    trigger_id = %due.trigger.id,
+                );
+                let state = Arc::clone(&state);
+                tokio::spawn(
+                    async move {
+                        let _guard = due.guard;
+                        poll_jira_trigger(state, due.automation, due.trigger).await;
+                    }
+                    .instrument(span),
+                );
+            }
+
+            let sleep_duration = planner.sleep_duration(now).min(jira.sleep_duration(now));
             tokio::select! {
                 () = shutdown.cancelled() => break,
                 () = state.automation_scheduler_notified() => {},
@@ -267,6 +285,8 @@ async fn fire_scheduled_automation_run(
             workflow: automation.workflow,
             run_id,
             temp_root: state.automation_temp_root(),
+            title: None,
+            goal: None,
         })
         .await
     {
@@ -348,11 +368,15 @@ async fn fire_scheduled_automation_run(
     );
 }
 
-async fn record_scheduler_error(state: &AppState, id: &AutomationId, message: &str) {
+pub(super) async fn record_scheduler_error(state: &AppState, id: &AutomationId, message: &str) {
     set_scheduler_error(state, id, Some(message)).await;
 }
 
-async fn set_scheduler_error(state: &AppState, id: &AutomationId, message: Option<&str>) {
+pub(super) async fn set_scheduler_error(
+    state: &AppState,
+    id: &AutomationId,
+    message: Option<&str>,
+) {
     if let Err(err) = state.automation_store().set_last_error(id, message).await {
         error!(
             automation_id = %id,
@@ -389,9 +413,10 @@ fn run_due_schedules_once<'a>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use fabro_automation::{
-        AutomationDraft, AutomationGitWorkflowSource, AutomationTrigger, ScheduleTrigger,
+        AutomationDraft, AutomationGitWorkflowSource, AutomationTrigger, JiraTrigger,
+        ScheduleTrigger,
     };
     use fabro_static::EnvVars;
     use fabro_types::{GitRunTarget, ResolvedAutomationGitWorkflowSource, RunStatus, RunTarget};
@@ -426,7 +451,21 @@ mod tests {
         })
     }
 
-    fn automation(id: &str, name: &str, triggers: Vec<AutomationTrigger>) -> Automation {
+    pub(in crate::server) fn jira_trigger(id: &str, jql: &str, enabled: bool) -> AutomationTrigger {
+        AutomationTrigger::Jira(JiraTrigger {
+            id: AutomationTriggerId::new(id).expect("test trigger id should be valid"),
+            enabled,
+            jql: jql.to_string(),
+            in_progress_status: None,
+            review_status: None,
+        })
+    }
+
+    pub(in crate::server) fn automation(
+        id: &str,
+        name: &str,
+        triggers: Vec<AutomationTrigger>,
+    ) -> Automation {
         Automation {
             id: AutomationId::new(id).expect("test automation id should be valid"),
             revision: AutomationRevision::from_bytes(format!("{id}:{name}").as_bytes()),
@@ -441,7 +480,7 @@ mod tests {
         }
     }
 
-    async fn create_automation(
+    pub(in crate::server) async fn create_automation(
         state: &AppState,
         id: &str,
         name: &str,
@@ -473,13 +512,15 @@ mod tests {
             .expect("test automation should be created")
     }
 
-    fn succeeding_materializer() -> TestAutomationRunMaterializer {
+    pub(in crate::server) fn succeeding_materializer() -> TestAutomationRunMaterializer {
         let mut exact_target = git_target();
         exact_target.sha = Some("0123456789abcdef0123456789abcdef01234567".to_string());
         TestAutomationRunMaterializer::succeed(exact_target)
     }
 
-    fn test_state_with_materializer(materializer: TestAutomationRunMaterializer) -> Arc<AppState> {
+    pub(in crate::server) fn test_state_with_materializer(
+        materializer: TestAutomationRunMaterializer,
+    ) -> Arc<AppState> {
         TestAppStateBuilder::new()
             .env_lookup(|_| None)
             .vault_entries([(EnvVars::OPENAI_API_KEY, "test-openai-api-key")])
@@ -487,7 +528,7 @@ mod tests {
             .build()
     }
 
-    async fn stored_runs(state: &AppState) -> Vec<fabro_types::Run> {
+    pub(in crate::server) async fn stored_runs(state: &AppState) -> Vec<fabro_types::Run> {
         state
             .stores
             .run_summaries

@@ -20,7 +20,8 @@
 
 export const IntegrationProvider = {
     GITHUB: 'github',
-    SLACK: 'slack'
+    SLACK: 'slack',
+    JIRA: 'jira'
 } as const;
 
 export type IntegrationProvider = typeof IntegrationProvider[keyof typeof IntegrationProvider];

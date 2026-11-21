@@ -5,6 +5,7 @@ import {
   automationFormValuesFromRun,
   automationToFormValues,
   isFormValid,
+  triggersFromFormValues,
   workflowSourceFromFormValues,
 } from "./automation-form";
 
@@ -94,5 +95,56 @@ describe("automation workflow source form values", () => {
       ...values,
       usesRemoteWorkflow: false,
     })).toBeUndefined();
+  });
+});
+
+describe("automation jira trigger form values", () => {
+  test("triggersFromFormValues emits a jira trigger with nullable statuses", () => {
+    const filled = triggersFromFormValues({
+      ...EMPTY_AUTOMATION_FORM,
+      manualEnabled:         false,
+      jiraEnabled:           true,
+      jiraJql:               " project = FAB ",
+      jiraInProgressStatus:  " In Progress ",
+      jiraReviewStatus:      " In Review ",
+    });
+    expect(filled).toEqual([{
+      id: "jira", type: "jira", enabled: true,
+      jql: "project = FAB", in_progress_status: "In Progress", review_status: "In Review",
+    }]);
+
+    const blank = triggersFromFormValues({
+      ...EMPTY_AUTOMATION_FORM,
+      manualEnabled: false,
+      jiraEnabled:   true,
+      jiraJql:       "project = FAB",
+    });
+    expect(blank).toHaveLength(1);
+    expect((blank[0] as any).in_progress_status).toBeUndefined();
+    expect((blank[0] as any).review_status).toBeUndefined();
+  });
+
+  test("automationToFormValues reads a jira trigger", () => {
+    const values = automationToFormValues({
+      id: "a", name: "A", workflow: "w", target: null,
+      triggers: [{
+        id: "jira", type: "jira", enabled: true,
+        jql: "project = FAB", in_progress_status: "Doing",
+      }],
+    } as any);
+    expect(values.jiraEnabled).toBe(true);
+    expect(values.jiraJql).toBe("project = FAB");
+    expect(values.jiraInProgressStatus).toBe("Doing");
+    expect(values.jiraReviewStatus).toBe("");
+  });
+
+  test("isFormValid rejects an enabled jira trigger with blank JQL", () => {
+    const valid = {
+      ...EMPTY_AUTOMATION_FORM,
+      id: "a", name: "A", environmentId: "e", targetRepository: "o/r", workflow: "w",
+    };
+    expect(isFormValid({ ...valid, jiraEnabled: true, jiraJql: "  " })).toBe(false);
+    expect(isFormValid({ ...valid, jiraEnabled: true, jiraJql: "project = FAB" })).toBe(true);
+    expect(isFormValid({ ...valid, jiraEnabled: false, jiraJql: "" })).toBe(true);
   });
 });

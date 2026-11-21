@@ -68,6 +68,12 @@ function sampleIntegrations(
         metadata: { default_channel: "#fabro" },
         ...slack,
       }),
+      sampleStatus({
+        provider:   "jira",
+        status:     "configured",
+        connection: null,
+        metadata:   { site_url: "https://acme.atlassian.net" },
+      }),
     ],
   };
 }
@@ -98,6 +104,16 @@ describe("SettingsIntegrations route", () => {
     expect(text).toContain("Connected");
     expect(text).toContain("channel: #fabro");
     expect(text).not.toContain("Disabled");
+  });
+
+  test("renders the Jira site", () => {
+    systemIntegrations = sampleIntegrations();
+
+    const renderer = renderSettingsIntegrations();
+    const text = textContent(renderer.toJSON());
+
+    expect(text).toContain("Jira");
+    expect(text).toContain("site: https://acme.atlassian.net");
   });
 
   test("renders missing Slack credential names", () => {
