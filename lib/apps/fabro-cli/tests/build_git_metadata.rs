@@ -42,9 +42,11 @@ fn packed_refs_are_not_tracked() {
 
     let metadata = fabro_build_support::collect_from(repo.path());
 
+    // A packed ref has no loose file, and Cargo reruns on every build for a
+    // missing path, so the directory its next loose ref is written to is watched.
     assert_eq!(metadata.rerun_paths, vec![
         PathBuf::from(".git/HEAD"),
-        PathBuf::from(".git/refs/heads/main"),
+        PathBuf::from(".git/refs/heads"),
     ]);
     assert!(
         !metadata
@@ -52,6 +54,16 @@ fn packed_refs_are_not_tracked() {
             .iter()
             .any(|path| path.ends_with("packed-refs"))
     );
+
+    git(repo.path(), ["checkout", "-b", "codex/foo"]);
+    git(repo.path(), ["pack-refs", "--all", "--prune"]);
+
+    let metadata = fabro_build_support::collect_from(repo.path());
+
+    assert_eq!(metadata.rerun_paths, vec![
+        PathBuf::from(".git/HEAD"),
+        PathBuf::from(".git/refs/heads"),
+    ]);
 }
 
 #[expect(
