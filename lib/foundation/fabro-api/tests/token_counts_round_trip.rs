@@ -12,11 +12,12 @@ fn token_counts_reuses_canonical_type() {
 #[test]
 fn token_counts_json_matches_openapi_shape() {
     let tokens = TokenCounts {
-        input:       10,
-        output:      20,
-        reasoning:   3,
-        cache_read:  4,
-        cache_write: 5,
+        input:            10,
+        output:           20,
+        reasoning:        3,
+        cache_read:       4,
+        cache_write:      5,
+        long_cache_write: 0,
     };
 
     let json = serde_json::to_value(tokens).unwrap();
@@ -34,6 +35,22 @@ fn token_counts_json_matches_openapi_shape() {
 
     let round_trip: ApiTokenCounts = serde_json::from_value(json).unwrap();
     assert_eq!(round_trip, tokens);
+}
+
+#[test]
+fn token_counts_preserve_long_cache_writes_without_double_counting() {
+    let tokens = TokenCounts {
+        input: 10,
+        cache_write: 5,
+        long_cache_write: 3,
+        ..TokenCounts::default()
+    };
+    let value = serde_json::to_value(tokens).unwrap();
+    assert_eq!(value["long_cache_write"], json!(3));
+    assert_valid("TokenCounts", &value);
+    let round_trip: ApiTokenCounts = serde_json::from_value(value).unwrap();
+    assert_eq!(round_trip, tokens);
+    assert_eq!(round_trip.total(), 15);
 }
 
 #[test]

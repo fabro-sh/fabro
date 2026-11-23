@@ -1074,11 +1074,12 @@ mod tests {
             stages:               Vec::new(),
             usage:                Some(Usage {
                 tokens: TokenCounts {
-                    input:       100,
-                    output:      20,
-                    reasoning:   5,
-                    cache_read:  10,
-                    cache_write: 0,
+                    input:            100,
+                    output:           20,
+                    reasoning:        5,
+                    cache_read:       10,
+                    cache_write:      0,
+                    long_cache_write: 0,
                 },
                 cost:   Some(Cost {
                     usd_micros: 21_000_000,
