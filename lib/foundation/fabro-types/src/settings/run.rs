@@ -998,10 +998,37 @@ impl Default for EnvironmentNetworkSettings {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EnvironmentLifecycleSettings {
+    /// Application deletion policy; this does not keep a workload running.
     pub preserve:         bool,
     #[serde(default = "default_stop_on_terminal")]
     pub stop_on_terminal: bool,
     pub auto_stop:        Option<Duration>,
+}
+
+/// Fabro's run policy, independent of the provider's idle timer.
+///
+/// During migration the persisted/API shape remains
+/// `run.environment.lifecycle`. Read this view from the admitted run's
+/// settings, never from the current environment catalog. Moving the input
+/// location must not change these defaults or imply a retention policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunLifecyclePolicy {
+    /// Skip sandbox pruning when deleting the run. This does not promise
+    /// that a provider-owned workspace survives loss of its owner process.
+    pub preserve:         bool,
+    /// Ask the supervisor to stop durable sandboxes after worker exit.
+    /// Independent of preservation; stopping retains their workspace.
+    pub stop_on_terminal: bool,
+}
+
+impl EnvironmentLifecycleSettings {
+    #[must_use]
+    pub const fn run_policy(&self) -> RunLifecyclePolicy {
+        RunLifecyclePolicy {
+            preserve:         self.preserve,
+            stop_on_terminal: self.stop_on_terminal,
+        }
+    }
 }
 
 fn default_stop_on_terminal() -> bool {

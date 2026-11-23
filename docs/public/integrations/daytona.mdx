@@ -178,16 +178,17 @@ fabro sandbox ssh <run-id>
 This creates temporary SSH credentials (valid for 60 minutes) and connects directly. Use `--print` to print the SSH command instead of connecting, or `--ttl` to set the credential expiry.
 
 <Note>
-To keep the sandbox alive after the run completes, pass `--preserve-sandbox` to `fabro run`.
+`--preserve-sandbox` skips sandbox pruning when deleting the run. It does not disable terminal stop or provider idle timers.
 </Note>
 
 ## Sandbox lifecycle
 
-Each sandbox gets a unique timestamped name (e.g. `fabro-20260307-143022-a3f2`) and is created as ephemeral. By default, sandboxes are destroyed when the run finishes.
+Run completion retains the sandbox workspace. Run deletion normally prunes the
+sandbox through the workflow engine's lease ledger.
 
 ### Preservation
 
-To keep a sandbox alive for debugging:
+To retain the sandbox when deleting its run:
 
 ```bash
 fabro run workflow.fabro --environment cloud --preserve-sandbox
@@ -206,7 +207,10 @@ provider = "daytona"
 preserve = true
 ```
 
-When preserved, Fabro prints the sandbox name so you can find it in the [Daytona dashboard](https://app.daytona.io/dashboard/sandboxes).
+Preservation is independent of `stop_on_terminal`, which defaults to `true` and
+controls the supervisor's terminal cleanup after worker failure. Provider idle
+timers are independent as well. Preservation does not guarantee a running
+sandbox.
 
 ### Auto-stop
 
