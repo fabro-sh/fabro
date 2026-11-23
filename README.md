@@ -154,6 +154,7 @@ Fabro runs as a server. You choose where it runs:
 One-click managed alternative for the same Docker image:
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/UcEy5m?referralCode=E5TucU&utm_medium=integration&utm_source=template&utm_campaign=generic)
+[![Deploy to Light Cloud](https://light-cloud.com/button.svg)](https://console.light-cloud.com/new?repo=https://github.com/fabro-sh/fabro)
 
 See the [deployment overview](https://docs.fabro.sh/administration/deployment) for the full picture.
 
