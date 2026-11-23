@@ -7,6 +7,7 @@ use tokio::task;
 
 use super::remote_workflow::{Interruption, NativeGit};
 use super::selection::{TargetSelection, WorkflowSelection};
+use crate::user_config;
 
 /// Owns the canonical collector result without copying its contents. Local
 /// location metadata remains available for settings warnings and target
@@ -55,7 +56,7 @@ pub(super) async fn workflow(
             selector,
             revision,
         } => {
-            let git = NativeGit::new();
+            let git = NativeGit::new(user_config::github_host()?);
             let (repository, selector, revision) =
                 (repository.clone(), selector.clone(), revision.clone());
             let closure = interruption
@@ -84,7 +85,7 @@ pub(super) async fn target(
             if !provider.clones_workspace() {
                 bail!("Git targets require a clone-enabled environment");
             }
-            let git = NativeGit::new();
+            let git = NativeGit::new(user_config::github_host()?);
             let (repository, branch) = (repository.clone(), branch.clone());
             let target = interruption
                 .owned(move |cancel| async move {
@@ -101,9 +102,11 @@ pub(super) async fn target(
     // The existing observer can push/query Git synchronously. Preserve its
     // behavior without blocking a Tokio worker or promising a new timeout.
     let provider = provider.clone();
+    let host = user_config::github_host()?;
     let configured_repo_origin_url = configured_repo_origin_url.map(str::to_owned);
     let derived = task::spawn_blocking(move || {
         fabro_manifest::derive_run_target_for_provider(
+            &host,
             &provider,
             &path,
             configured_repo_origin_url.as_deref(),

@@ -2,11 +2,12 @@
 //!
 //! A run's commits carry the identity of the credential the run uses:
 //! the App's bot account (`<slug>[bot]`) or the authenticated user of a
-//! personal access token. Both resolve to a stable GitHub.com noreply
-//! address, `{id}+{login}@users.noreply.github.com`, so GitHub attributes
+//! personal access token. Both resolve to a stable noreply
+//! address, `{id}+{login}@users.noreply.<host>`, so GitHub attributes
 //! the commits to that account without a private email.
 
 use anyhow::{Context as _, bail};
+use fabro_types::GitHubHost;
 use serde::Deserialize;
 
 use crate::{GitHubAppCredentials, HttpClient, HttpMethod, github_headers, sign_app_jwt};
@@ -21,10 +22,10 @@ pub struct GitHubAccountIdentity {
 }
 
 impl GitHubAccountIdentity {
-    /// The GitHub.com noreply address GitHub attributes to this account.
+    /// The noreply address `host` attributes to this account.
     #[must_use]
-    pub fn noreply_email(&self) -> String {
-        format!("{}+{}@users.noreply.github.com", self.id, self.login)
+    pub fn noreply_email(&self, host: &GitHubHost) -> String {
+        format!("{}+{}@{}", self.id, self.login, host.noreply_email_domain())
     }
 }
 
@@ -154,13 +155,31 @@ mod tests {
     }
 
     #[test]
+    fn noreply_email_uses_the_hosts_domain() {
+        let identity = GitHubAccountIdentity {
+            login: "octo".to_string(),
+            id:    7,
+        };
+        let ghes = GitHubHost::new("https://ghe.example.com", None).unwrap();
+        assert_eq!(
+            identity.noreply_email(&ghes),
+            "7+octo@users.noreply.ghe.example.com"
+        );
+        let ghec = GitHubHost::new("https://octocorp.ghe.com", None).unwrap();
+        assert_eq!(
+            identity.noreply_email(&ghec),
+            "7+octo@users.noreply.octocorp.ghe.com"
+        );
+    }
+
+    #[test]
     fn noreply_email_uses_id_plus_login() {
         let identity = GitHubAccountIdentity {
             login: "fabro-sh[bot]".to_string(),
             id:    281_434_857,
         };
         assert_eq!(
-            identity.noreply_email(),
+            identity.noreply_email(&GitHubHost::default()),
             "281434857+fabro-sh[bot]@users.noreply.github.com"
         );
     }
@@ -251,7 +270,7 @@ mod tests {
         assert_eq!(identity.login, "my-app[bot]");
         assert_eq!(identity.id, 4242);
         assert_eq!(
-            identity.noreply_email(),
+            identity.noreply_email(&GitHubHost::default()),
             "4242+my-app[bot]@users.noreply.github.com"
         );
         // The configured slug skips the `/app` lookup entirely.

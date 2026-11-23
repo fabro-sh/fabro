@@ -1148,6 +1148,7 @@ function GithubStep({
   runStepSubmit: RunStepSubmit;
   dispatchInstall: (action: InstallAction) => void;
 }) {
+  const tokensUrl = `${session.prefill.github_web_url}/settings/tokens`;
   return (
     <StepPanel
       title="Connect GitHub"
@@ -1267,8 +1268,8 @@ function GithubStep({
                 Create a fine-grained or classic token with{" "}
                 <code className="font-mono text-fg-2">repo</code> scope.
               </p>
-              <ExternalLink href="https://github.com/settings/tokens">
-                github.com/settings/tokens
+              <ExternalLink href={tokensUrl}>
+                {tokensUrl.replace(/^https?:\/\//, "")}
               </ExternalLink>
             </HelpDisclosure>
           </div>

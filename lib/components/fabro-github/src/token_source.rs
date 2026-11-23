@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use anyhow::{Context as _, bail};
 use chrono::{DateTime, Utc};
+use fabro_types::GitHubHost;
 use tokio::sync::Mutex;
 
 use crate::{GitHubAppCredentials, GitHubCredentials, InstallationToken};
@@ -162,10 +163,10 @@ enum AppTokenScope {
 
 /// Real minter backed by GitHub App credentials.
 struct AppTokenMinter {
-    creds:    GitHubAppCredentials,
-    http:     fabro_http::HttpClient,
-    base_url: String,
-    scope:    AppTokenScope,
+    creds: GitHubAppCredentials,
+    http:  fabro_http::HttpClient,
+    host:  GitHubHost,
+    scope: AppTokenScope,
 }
 
 #[async_trait::async_trait]
@@ -182,7 +183,7 @@ impl InstallationTokenMinter for AppTokenMinter {
                         &self.http,
                         owner,
                         repo,
-                        &self.base_url,
+                        &self.host,
                         permissions.clone(),
                         None,
                     )
@@ -190,7 +191,7 @@ impl InstallationTokenMinter for AppTokenMinter {
             }
             AppTokenScope::Access(access) => {
                 access
-                    .mint_installation_token(&self.creds, &self.http, &self.base_url)
+                    .mint_installation_token(&self.creds, &self.http, self.host.api_url())
                     .await
             }
         }
@@ -263,24 +264,26 @@ impl InstallationTokenSource {
     /// pass through and ignore it.
     pub fn for_origin(
         creds: &GitHubCredentials,
+        host: &GitHubHost,
         origin_url: &str,
         permissions: serde_json::Value,
     ) -> anyhow::Result<Arc<Self>> {
         let normalized = crate::normalize_repo_origin_url(origin_url);
-        let (owner, repo) = crate::parse_github_owner_repo(&normalized)
+        let (owner, repo) = crate::parse_github_owner_repo(host, &normalized)
             .context("parsing GitHub origin for token source")?;
-        Self::for_repository(creds, owner, repo, permissions)
+        Self::for_repository(creds, host, owner, repo, permissions)
     }
 
     /// Build a source for an already parsed GitHub repository.
     pub fn for_repository(
         creds: &GitHubCredentials,
+        host: &GitHubHost,
         owner: String,
         repo: String,
         permissions: serde_json::Value,
     ) -> anyhow::Result<Arc<Self>> {
         let repo_display = format!("{owner}/{repo}");
-        Self::with_app_scope(creds, repo_display, AppTokenScope::Repository {
+        Self::with_app_scope(creds, host, repo_display, AppTokenScope::Repository {
             owner,
             repo,
             permissions,
@@ -294,15 +297,22 @@ impl InstallationTokenSource {
     /// single-flight behavior are identical to the single-repository source.
     pub fn for_access(
         creds: &GitHubCredentials,
+        host: &GitHubHost,
         access: &crate::GitHubRepositoryAccess,
     ) -> anyhow::Result<Arc<Self>> {
         let repository_names = access.repository_names();
         let repo_display = repository_set_display(access.owner(), &repository_names)?;
-        Self::with_app_scope(creds, repo_display, AppTokenScope::Access(access.clone()))
+        Self::with_app_scope(
+            creds,
+            host,
+            repo_display,
+            AppTokenScope::Access(access.clone()),
+        )
     }
 
     fn with_app_scope(
         creds: &GitHubCredentials,
+        host: &GitHubHost,
         repo_display: String,
         scope: AppTokenScope,
     ) -> anyhow::Result<Arc<Self>> {
@@ -317,7 +327,7 @@ impl InstallationTokenSource {
                     minter: Box::new(AppTokenMinter {
                         creds: app.clone(),
                         http,
-                        base_url: crate::github_api_base_url(),
+                        host: host.clone(),
                         scope,
                     }),
                     cache:  Mutex::new(None),
@@ -550,6 +560,7 @@ mod tests {
     async fn pat_resolves_as_static_generation_zero() {
         let source = InstallationTokenSource::for_origin(
             &GitHubCredentials::Pat("ghp_pat".to_string()),
+            &GitHubHost::default(),
             "https://github.com/owner/repo.git",
             serde_json::json!({ "contents": "write" }),
         )
@@ -569,6 +580,7 @@ mod tests {
     #[tokio::test]
     async fn for_access_source_resolves_like_the_single_repository_source() {
         let access = crate::GitHubRepositoryAccess::new(
+            &GitHubHost::default(),
             Some("https://github.com/owner/repo.git"),
             &["owner/keystone".parse().unwrap()].into_iter().collect(),
             std::collections::HashMap::from([("contents".to_string(), "read".to_string())]),
@@ -578,6 +590,7 @@ mod tests {
 
         let source = InstallationTokenSource::for_access(
             &GitHubCredentials::Pat("ghp_pat".to_string()),
+            &GitHubHost::default(),
             &access,
         )
         .unwrap();
@@ -594,6 +607,7 @@ mod tests {
                 token:      "ghs_static".to_string(),
                 expires_at: Utc::now() + chrono::Duration::minutes(30),
             }),
+            &GitHubHost::default(),
             "https://github.com/owner/repo.git",
             serde_json::json!({}),
         )
@@ -607,6 +621,7 @@ mod tests {
                 token:      "ghs_expired".to_string(),
                 expires_at: Utc::now() - chrono::Duration::seconds(1),
             }),
+            &GitHubHost::default(),
             "https://github.com/owner/repo.git",
             serde_json::json!({}),
         )

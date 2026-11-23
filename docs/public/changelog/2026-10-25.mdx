@@ -1,0 +1,22 @@
+---
+title: "GitHub Enterprise Server and Enterprise Cloud hosts"
+date: "2026-10-25"
+---
+
+Fabro can now target a GitHub Enterprise Server instance or a GitHub
+Enterprise Cloud tenant with data residency (`https://<subdomain>.ghe.com`)
+instead of github.com. Set the deployment's web origin once and Fabro derives
+the REST, GraphQL and OAuth URLs, clone URLs, pull request links, Git
+credential scoping and the sandbox `gh` configuration from it:
+
+```toml
+[server.integrations.github]
+web_url = "https://ghe.example.com"
+```
+
+`GITHUB_WEB_URL` overrides the setting, and the existing `GITHUB_BASE_URL`
+still overrides the REST API base. Without the new setting, github.com
+behavior is unchanged.
+
+See [GitHub Enterprise Server and GitHub Enterprise Cloud](/integrations/github#github-enterprise-server-and-github-enterprise-cloud)
+for setup, custom certificate authorities and known limitations.

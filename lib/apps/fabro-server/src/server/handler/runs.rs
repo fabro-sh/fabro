@@ -556,7 +556,7 @@ pub(crate) async fn create_run_from_intent(
     let explicit_title_supplied = intent.title.is_some();
     // Validate the pure, in-memory request facts before paying for
     // blob-store reads and closure lowering.
-    let ValidatedRunTarget { target, git } = match intent.target.validate() {
+    let ValidatedRunTarget { target, git } = match intent.target.validate(&state.github_host) {
         Ok(validated) => validated,
         Err(error) => return run_intent_admission_error(error.into()),
     };

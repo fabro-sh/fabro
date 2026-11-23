@@ -27,6 +27,7 @@ use fabro_config::bind::Bind;
 use fabro_config::daemon::ServerDaemon;
 use fabro_config::user::{SETTINGS_CONFIG_FILENAME, default_storage_dir};
 use fabro_config::{Storage, UserSettingsBuilder, envfile};
+use fabro_github::GitHubHost;
 use fabro_install::{
     GITHUB_APP_VAULT_KEYS, GITHUB_INSTALL_SECRET_KEYS, InstallListenConfig, InstallPersistencePlan,
     PendingDevTokenWrite, PendingSettingsWrite, SecretStoreWrite,
@@ -498,7 +499,8 @@ impl InstallInputSource for InteractiveInstallInputSource {
         s: &Styles,
         _printer: Printer,
     ) -> Result<GitHubInstallSelection> {
-        let gh_available = GhCli::detect().await.is_some();
+        let github_host = user_config::github_host()?;
+        let gh_available = GhCli::detect(&github_host).await.is_some();
 
         let token_label = if gh_available {
             "Personal Access Token — use your existing `gh` login"
@@ -518,7 +520,7 @@ impl InstallInputSource for InteractiveInstallInputSource {
         match strategy {
             0 => {
                 let token = if gh_available {
-                    fabro_github::gh_auth_token()
+                    fabro_github::gh_auth_token(&github_host)
                         .await
                         .context("Run `gh auth login` and rerun `fabro install`.")?
                 } else {
@@ -528,7 +530,7 @@ impl InstallInputSource for InteractiveInstallInputSource {
                 Ok(GitHubInstallSelection::Token { token })
             }
             1 => {
-                let (owner, username) = prompt_github_app_owner(s).await?;
+                let (owner, username) = prompt_github_app_owner(s, &github_host).await?;
                 Ok(GitHubInstallSelection::App { owner, username })
             }
             _ => unreachable!("prompt_select returned an out-of-range index"),
@@ -694,9 +696,10 @@ impl InstallInputSource for NonInteractiveInstallInputSource {
         _s: &Styles,
         _printer: Printer,
     ) -> Result<GitHubInstallSelection> {
+        let github_host = user_config::github_host()?;
         match self.args.github_strategy {
             Some(InstallGitHubStrategyArg::Token) => {
-                let token = fabro_github::gh_auth_token()
+                let token = fabro_github::gh_auth_token(&github_host)
                     .await
                     .context("Run `gh auth login` and rerun `fabro install`.")?;
                 fabro_github::validate_static_github_token(&token)?;
@@ -708,7 +711,7 @@ impl InstallInputSource for NonInteractiveInstallInputSource {
                         "non-interactive install requires --github-owner for --github-strategy app",
                     )?,
                 )?,
-                username: best_effort_github_username().await,
+                username: best_effort_github_username(&github_host).await,
             }),
             None => bail!("non-interactive install requires --github-strategy"),
         }
@@ -780,9 +783,10 @@ async fn choose_install_github_selection(
         return input.choose_github_install(s, printer).await;
     }
 
+    let github_host = user_config::github_host()?;
     match github_args.strategy {
         Some(InstallGitHubStrategyArg::Token) => {
-            let token = fabro_github::gh_auth_token()
+            let token = fabro_github::gh_auth_token(&github_host)
                 .await
                 .context("Run `gh auth login` and rerun `fabro install github`.")?;
             fabro_github::validate_static_github_token(&token)?;
@@ -792,7 +796,7 @@ async fn choose_install_github_selection(
             owner:    GitHubAppOwner::parse_scripted(github_args.owner.as_deref().context(
                 "install github --non-interactive requires --owner for --strategy app",
             )?)?,
-            username: best_effort_github_username().await,
+            username: best_effort_github_username(&github_host).await,
         }),
         None => bail!("install github --non-interactive requires --strategy"),
     }
@@ -824,11 +828,12 @@ impl GitHubAppOwner {
         Ok(Self::Organization(org.to_string()))
     }
 
-    fn manifest_form_action(&self) -> String {
+    fn manifest_form_action(&self, github_host: &GitHubHost) -> String {
+        let web_url = github_host.web_url();
         match self {
-            Self::Personal => "https://github.com/settings/apps/new".to_string(),
+            Self::Personal => format!("{web_url}/settings/apps/new"),
             Self::Organization(org) => {
-                format!("https://github.com/organizations/{org}/settings/apps/new")
+                format!("{web_url}/organizations/{org}/settings/apps/new")
             }
         }
     }
@@ -860,8 +865,8 @@ impl GitHubAppOwner {
     }
 }
 
-async fn best_effort_github_username() -> Option<String> {
-    let gh = GhCli::detect().await?;
+async fn best_effort_github_username(github_host: &GitHubHost) -> Option<String> {
+    let gh = GhCli::detect(github_host).await?;
     gh.authenticated_user().await
 }
 
@@ -872,10 +877,13 @@ async fn best_effort_github_username() -> Option<String> {
 /// Always offers a manual "Other" option so org app managers can enter a slug.
 ///
 /// Returns `(owner, username)`.
-async fn prompt_github_app_owner(_s: &Styles) -> Result<(GitHubAppOwner, Option<String>)> {
+async fn prompt_github_app_owner(
+    _s: &Styles,
+    github_host: &GitHubHost,
+) -> Result<(GitHubAppOwner, Option<String>)> {
     let spinner = cyan_spinner("Checking GitHub CLI...");
 
-    let Some(gh) = GhCli::detect().await else {
+    let Some(gh) = GhCli::detect(github_host).await else {
         spinner.finish_and_clear();
         return Ok((GitHubAppOwner::Personal, None));
     };
@@ -974,6 +982,7 @@ async fn setup_github_app(
     printer: Printer,
 ) -> Result<GitHubAppRegistration> {
     let app_name = owner.app_name(username);
+    let github_host = user_config::github_host()?;
 
     // Bind to random port
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -999,7 +1008,7 @@ async fn setup_github_app(
     let code_tx = std::sync::Arc::new(std::sync::Mutex::new(Some(code_tx)));
     let shutdown_tx = std::sync::Arc::new(std::sync::Mutex::new(Some(shutdown_tx)));
 
-    let form_action = owner.manifest_form_action();
+    let form_action = owner.manifest_form_action(&github_host);
     let index_html = format!(
         r#"<!DOCTYPE html>
 <html>
@@ -1117,7 +1126,8 @@ async fn setup_github_app(
     let client = fabro_http::http_client()?;
     let resp = client
         .post(format!(
-            "https://api.github.com/app-manifests/{code}/conversions"
+            "{}/app-manifests/{code}/conversions",
+            github_host.api_url()
         ))
         .header("Accept", "application/vnd.github+json")
         .header("User-Agent", "fabro-cli")
@@ -1159,7 +1169,7 @@ async fn setup_github_app(
         printer,
         "  {}",
         s.dim
-            .apply_to(format!("App: https://github.com/apps/{slug}"))
+            .apply_to(format!("App: {}", github_host.app_page_url(&slug)))
     );
 
     // Return secret pairs
@@ -2569,8 +2579,21 @@ client_id = "client-id"
     fn github_app_owner_personal_url() {
         let owner = GitHubAppOwner::Personal;
         assert_eq!(
-            owner.manifest_form_action(),
+            owner.manifest_form_action(&GitHubHost::default()),
             "https://github.com/settings/apps/new"
+        );
+    }
+
+    #[test]
+    fn github_app_owner_urls_follow_the_enterprise_host() {
+        let host = GitHubHost::new("https://ghe.example.com", None).unwrap();
+        assert_eq!(
+            GitHubAppOwner::Personal.manifest_form_action(&host),
+            "https://ghe.example.com/settings/apps/new"
+        );
+        assert_eq!(
+            GitHubAppOwner::Organization("my-org".to_string()).manifest_form_action(&host),
+            "https://ghe.example.com/organizations/my-org/settings/apps/new"
         );
     }
 
@@ -2578,7 +2601,7 @@ client_id = "client-id"
     fn github_app_owner_org_url() {
         let owner = GitHubAppOwner::Organization("my-org".to_string());
         assert_eq!(
-            owner.manifest_form_action(),
+            owner.manifest_form_action(&GitHubHost::default()),
             "https://github.com/organizations/my-org/settings/apps/new"
         );
     }

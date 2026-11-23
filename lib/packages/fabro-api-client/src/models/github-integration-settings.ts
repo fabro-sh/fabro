@@ -21,6 +21,14 @@ import type { GithubIntegrationStrategy } from './github-integration-strategy';
 import type { IntegrationWebhooksSettings } from './integration-webhooks-settings';
 
 export interface GithubIntegrationSettings {
+    /**
+     * Web origin of the GitHub deployment, without a trailing slash.
+     */
+    'web_url': string;
+    /**
+     * REST API base URL of the GitHub deployment, without a trailing slash.
+     */
+    'api_url': string;
     'enabled': boolean;
     'strategy': GithubIntegrationStrategy;
     'app_id': string | null;

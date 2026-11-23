@@ -71,7 +71,7 @@ impl FabroRunCreateParams {
             if let Some(target) = &spec.target {
                 target
                     .clone()
-                    .validate()
+                    .canonical()
                     .map_err(|error| ToolError::from_anyhow(&error.into()))?;
             }
             for (key, value) in &spec.args.inputs {

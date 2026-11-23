@@ -762,12 +762,12 @@ async fn callback_github(
         v:           2,
         login:       profile.login.clone(),
         auth_method: AuthMethod::Github,
-        identity:    IdpIdentity::new("https://github.com", profile.id.to_string())
+        identity:    IdpIdentity::new(state.github_host.web_url(), profile.id.to_string())
             .expect("GitHub profile id should produce a valid identity"),
         name:        profile.name.unwrap_or_else(|| profile.login.clone()),
         email:       primary_email,
         avatar_url:  profile.avatar_url,
-        user_url:    format!("https://github.com/{}", profile.login),
+        user_url:    format!("{}/{}", state.github_host.web_url(), profile.login),
         iat:         now.timestamp(),
         exp:         (now + chrono::Duration::days(30)).timestamp(),
     };
@@ -997,7 +997,7 @@ mod tests {
     use fabro_config::{RunLayer, ServerSettingsBuilder};
     use fabro_static::EnvVars;
     use fabro_types::settings::server::ServerAuthMethod;
-    use fabro_types::{AuthMethod, IdpIdentity, Principal};
+    use fabro_types::{AuthMethod, GitHubHost, IdpIdentity, Principal};
     use fabro_vault::SecretType;
     use serde_json::json;
     use tower::ServiceExt;
@@ -1109,7 +1109,9 @@ client_id = "github-client-id"
                 translation_state,
                 crate::auth::auth_translation_middleware,
             ))
-            .layer(Extension(Arc::new(GithubEndpoints::production_defaults())))
+            .layer(Extension(Arc::new(GithubEndpoints::from_host(
+                &GitHubHost::default(),
+            ))))
             .layer(Extension(auth_mode))
             .with_state(state)
     }
@@ -1130,7 +1132,9 @@ client_id = "github-client-id"
                 Arc::clone(&captured),
                 crate::test_support::capture_auth_context,
             ))
-            .layer(Extension(Arc::new(GithubEndpoints::production_defaults())))
+            .layer(Extension(Arc::new(GithubEndpoints::from_host(
+                &GitHubHost::default(),
+            ))))
             .layer(Extension(auth_mode))
             .with_state(state);
         (app, captured)

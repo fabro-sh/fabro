@@ -11,7 +11,7 @@ use std::net::SocketAddr;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::SandboxProviderKind;
+use crate::{GitHubHost, SandboxProviderKind};
 
 /// A structurally resolved `[server]` view for consumers.
 ///
@@ -297,6 +297,9 @@ pub struct GithubIntegrationSettings {
     pub client_id: Option<String>,
     pub slug:      Option<String>,
     pub webhooks:  Option<IntegrationWebhooksSettings>,
+    /// The GitHub deployment (`web_url`/`api_url` on the wire).
+    #[serde(flatten)]
+    pub host:      GitHubHost,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

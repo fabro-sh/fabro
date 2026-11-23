@@ -6,7 +6,13 @@ import type { Environment } from "@qltysh/fabro-api-client";
 
 import { ApiError, apiData, automationsApi } from "../lib/api-client";
 import { queryKeys } from "../lib/query-keys";
-import { useEnvironments, useRun, useRunSettings, useRunState } from "../lib/queries";
+import {
+  useEnvironments,
+  useRun,
+  useRunSettings,
+  useRunState,
+  useServerSettings,
+} from "../lib/queries";
 import {
   AutomationFormFields,
   EMPTY_AUTOMATION_FORM,
@@ -37,6 +43,7 @@ export default function AutomationsNew() {
   const runStateQuery = useRunState(fromRunId);
   const settingsQuery = useRunSettings(fromRunId);
   const environmentsQuery = useEnvironments();
+  const serverSettingsQuery = useServerSettings();
   const environments = environmentsQuery.data?.data;
   const environmentsPending = environmentsQuery.isLoading && !environmentsQuery.data;
   const environmentsError = Boolean(environmentsQuery.error);
@@ -86,6 +93,7 @@ export default function AutomationsNew() {
     runStateQuery.data ?? null,
     settingsQuery.data ?? null,
     environments,
+    serverSettingsQuery.data?.server.integrations.github.web_url,
   );
 
   return (

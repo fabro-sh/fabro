@@ -4,6 +4,7 @@
 )]
 
 use fabro_http::Url;
+use fabro_types::GitHubHost;
 
 #[doc(hidden)]
 #[derive(Debug, Clone)]
@@ -13,11 +14,12 @@ pub struct GithubEndpoints {
 }
 
 impl GithubEndpoints {
-    pub fn production_defaults() -> Self {
+    pub fn from_host(host: &GitHubHost) -> Self {
         Self {
-            oauth_base: Url::parse("https://github.com/").expect("github oauth base should parse"),
-            api_base:   Url::parse("https://api.github.com/")
-                .expect("github api base should parse"),
+            oauth_base: Url::parse(&format!("{}/", host.web_url()))
+                .expect("GitHubHost web_url should parse as a URL"),
+            api_base:   Url::parse(&format!("{}/", host.api_url()))
+                .expect("GitHubHost api_url should parse as a URL"),
         }
     }
 
@@ -32,14 +34,40 @@ impl GithubEndpoints {
 
 #[cfg(test)]
 mod tests {
+    use fabro_types::GitHubHost;
+
     use super::GithubEndpoints;
 
     #[test]
-    fn production_defaults_match_current_github_urls() {
-        let endpoints = GithubEndpoints::production_defaults();
+    fn default_host_matches_current_github_urls() {
+        let endpoints = GithubEndpoints::from_host(&GitHubHost::default());
 
         assert_eq!(endpoints.oauth_base.as_str(), "https://github.com/");
         assert_eq!(endpoints.api_base.as_str(), "https://api.github.com/");
+    }
+
+    #[test]
+    fn enterprise_host_uses_its_web_origin_and_api_url() {
+        let host = GitHubHost::new("https://ghe.example.com", None).unwrap();
+        let endpoints = GithubEndpoints::from_host(&host);
+
+        assert_eq!(endpoints.oauth_base.as_str(), "https://ghe.example.com/");
+        assert_eq!(
+            endpoints.api_base.as_str(),
+            "https://ghe.example.com/api/v3/"
+        );
+        assert_eq!(
+            endpoints
+                .oauth_base
+                .join("login/oauth/authorize")
+                .unwrap()
+                .as_str(),
+            "https://ghe.example.com/login/oauth/authorize"
+        );
+        assert_eq!(
+            endpoints.api_base.join("user").unwrap().as_str(),
+            "https://ghe.example.com/api/v3/user"
+        );
     }
 
     #[test]

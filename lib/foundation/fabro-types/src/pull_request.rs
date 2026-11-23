@@ -3,6 +3,7 @@ use serde::de::Error as DeError;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::GitHubHost;
 use crate::id::ulid_id;
 
 ulid_id!(PullRequestCreationId);
@@ -60,18 +61,18 @@ impl PullRequestCreation {
 /// Minimal GitHub pull request reference stored on a workflow run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullRequestLink {
-    pub owner:  String,
-    pub repo:   String,
-    pub number: u64,
+    pub owner:    String,
+    pub repo:     String,
+    pub number:   u64,
+    /// The URL GitHub serves the pull request at, on whichever host the
+    /// server is configured for.
+    pub html_url: String,
 }
 
 impl PullRequestLink {
     #[must_use]
     pub fn html_url(&self) -> String {
-        format!(
-            "https://github.com/{}/{}/pull/{}",
-            self.owner, self.repo, self.number
-        )
+        self.html_url.clone()
     }
 
     pub fn from_github_url(url: &str) -> Result<Self, String> {
@@ -88,7 +89,7 @@ impl Serialize for PullRequestLink {
         state.serialize_field("owner", &self.owner)?;
         state.serialize_field("repo", &self.repo)?;
         state.serialize_field("number", &self.number)?;
-        state.serialize_field("html_url", &self.html_url())?;
+        state.serialize_field("html_url", &self.html_url)?;
         state.end()
     }
 }
@@ -115,34 +116,33 @@ impl<'de> Deserialize<'de> for PullRequestLink {
         let (Some(owner), Some(repo), Some(number)) = (wire.owner, wire.repo, wire.number) else {
             return Err(D::Error::custom("missing pull request owner/repo/number"));
         };
-        let link = Self {
-            owner,
-            repo,
-            number,
-        };
-
-        if let Some(html_url) = wire.html_url {
-            let url_link =
-                github_pull_request_link_from_url(&html_url).map_err(D::Error::custom)?;
-            if url_link != link {
-                return Err(D::Error::custom(
-                    "pull request html_url does not match owner/repo/number",
-                ));
-            }
+        // Records written before the link stored its URL are all github.com.
+        let html_url = wire
+            .html_url
+            .unwrap_or_else(|| GitHubHost::default().pull_request_url(&owner, &repo, number));
+        let url_link = github_pull_request_link_from_url(&html_url).map_err(D::Error::custom)?;
+        // GitHub owner and repository names are case-insensitive.
+        if !url_link.owner.eq_ignore_ascii_case(&owner)
+            || !url_link.repo.eq_ignore_ascii_case(&repo)
+            || url_link.number != number
+        {
+            return Err(D::Error::custom(
+                "pull request html_url does not match owner/repo/number",
+            ));
         }
 
-        Ok(link)
+        Ok(url_link)
     }
 }
 
 #[expect(
     clippy::disallowed_types,
-    reason = "Pull request links are public github.com URLs stored for display and coordinate inference."
+    reason = "Pull request links are public GitHub URLs stored for display and coordinate inference."
 )]
 fn github_pull_request_link_from_url(raw_url: &str) -> Result<PullRequestLink, String> {
     let parsed =
         url::Url::parse(raw_url).map_err(|err| format!("Invalid pull request URL: {err}"))?;
-    if parsed.scheme() != "https" || parsed.host_str() != Some("github.com") {
+    if parsed.scheme() != "https" || parsed.host_str().is_none() {
         return Err(
             "Pull request link must be a GitHub pull request URL like https://github.com/owner/repo/pull/123."
                 .to_string(),
@@ -168,6 +168,7 @@ fn github_pull_request_link_from_url(raw_url: &str) -> Result<PullRequestLink, S
         owner: (*owner).to_string(),
         repo: (*repo).to_string(),
         number,
+        html_url: raw_url.to_string(),
     })
 }
 
@@ -325,11 +326,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pull_request_link_serializes_computed_html_url() {
+    fn pull_request_link_serializes_its_html_url() {
         let link = PullRequestLink {
-            owner:  "fabro-sh".to_string(),
-            repo:   "fabro".to_string(),
-            number: 270,
+            owner:    "fabro-sh".to_string(),
+            repo:     "fabro".to_string(),
+            number:   270,
+            html_url: "https://github.com/fabro-sh/fabro/pull/270".to_string(),
         };
 
         assert_eq!(
@@ -344,6 +346,27 @@ mod tests {
     }
 
     #[test]
+    fn pull_request_link_owner_and_repo_match_html_url_case_insensitively() {
+        let link = serde_json::from_value::<PullRequestLink>(json!({
+            "owner": "Acme",
+            "repo": "Widgets",
+            "number": 7,
+            "html_url": "https://github.com/acme/widgets/pull/7"
+        }))
+        .unwrap();
+        assert_eq!(link.number, 7);
+        assert!(
+            serde_json::from_value::<PullRequestLink>(json!({
+                "owner": "Acme",
+                "repo": "Other",
+                "number": 7,
+                "html_url": "https://github.com/acme/widgets/pull/7"
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
     fn pull_request_link_rejects_extra_legacy_record_fields() {
         let result = serde_json::from_value::<PullRequestLink>(json!({
             "provider": "github",
@@ -352,6 +375,53 @@ mod tests {
             "owner": "fabro-sh",
             "repo": "fabro",
             "title": "ignored live metadata"
+        }));
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn pull_request_link_without_html_url_is_a_github_com_link() {
+        let link = serde_json::from_value::<PullRequestLink>(json!({
+            "owner": "fabro-sh",
+            "repo": "fabro",
+            "number": 270
+        }))
+        .unwrap();
+
+        assert_eq!(link.html_url, "https://github.com/fabro-sh/fabro/pull/270");
+    }
+
+    #[test]
+    fn pull_request_link_keeps_the_enterprise_url_it_was_given() {
+        let value = json!({
+            "owner": "acme",
+            "repo": "widgets",
+            "number": 7,
+            "html_url": "https://ghe.example.com/acme/widgets/pull/7"
+        });
+        let link = serde_json::from_value::<PullRequestLink>(value.clone()).unwrap();
+
+        assert_eq!(
+            link.html_url(),
+            "https://ghe.example.com/acme/widgets/pull/7"
+        );
+        assert_eq!(serde_json::to_value(&link).unwrap(), value);
+        assert_eq!(
+            PullRequestLink::from_github_url("https://octocorp.ghe.com/acme/widgets/pull/7")
+                .unwrap()
+                .owner,
+            "acme"
+        );
+    }
+
+    #[test]
+    fn pull_request_link_rejects_a_url_that_disagrees_with_its_coordinates() {
+        let result = serde_json::from_value::<PullRequestLink>(json!({
+            "owner": "acme",
+            "repo": "widgets",
+            "number": 8,
+            "html_url": "https://ghe.example.com/acme/widgets/pull/7"
         }));
 
         assert!(result.is_err());

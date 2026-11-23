@@ -3,11 +3,11 @@
     reason = "sync test fixture setup and raw template source assertions; not on a Tokio path"
 )]
 
-use fabro_types::SandboxProviderKind;
 use fabro_types::settings::server::{
     GithubIntegrationStrategy, LogDestination, ObjectStoreSettings, ServerAuthMethod,
     ServerListenSettings, ServerNamespace,
 };
+use fabro_types::{GitHubHost, SandboxProviderKind};
 use fabro_util::Home;
 use temp_env::with_var;
 
@@ -108,6 +108,8 @@ fn resolved_server_integrations_disable_slack_when_config_is_absent() {
                 "client_id": null,
                 "slug": null,
                 "webhooks": null,
+                "web_url": "https://github.com",
+                "api_url": "https://api.github.com",
             },
             "slack": {
                 "enabled": false,
@@ -524,6 +526,72 @@ enabled = true
     assert_eq!(
         settings.integrations.github.strategy,
         GithubIntegrationStrategy::Token
+    );
+}
+
+#[test]
+fn github_host_defaults_to_github_com() {
+    let settings = resolve_server(&parse("_version = 1\n"));
+    assert_eq!(settings.integrations.github.host, GitHubHost::default());
+
+    let settings = resolve_server(&parse(
+        "_version = 1\n\n[server.integrations.github]\nenabled = true\n",
+    ));
+    assert_eq!(settings.integrations.github.host, GitHubHost::default());
+}
+
+#[test]
+fn github_host_derives_api_url_from_web_url() {
+    let settings = resolve_server(&parse(
+        r#"
+_version = 1
+
+[server.integrations.github]
+web_url = "https://ghe.example.com"
+"#,
+    ));
+    let host = &settings.integrations.github.host;
+    assert_eq!(host.web_url(), "https://ghe.example.com");
+    assert_eq!(host.api_url(), "https://ghe.example.com/api/v3");
+}
+
+#[test]
+fn github_host_honours_explicit_api_url() {
+    let settings = resolve_server(&parse(
+        r#"
+_version = 1
+
+[server.integrations.github]
+web_url = "https://ghe.example.com"
+api_url = "https://api.ghe.example.com"
+"#,
+    ));
+    assert_eq!(
+        settings.integrations.github.host.api_url(),
+        "https://api.ghe.example.com"
+    );
+}
+
+#[test]
+fn github_host_rejects_invalid_web_url() {
+    let file = parse(
+        r#"
+_version = 1
+
+[server.integrations.github]
+web_url = "http://ghe.example.com"
+"#,
+    );
+    let error =
+        ServerSettingsBuilder::from_layer(&file).expect_err("plain http should be rejected");
+    let errors = resolve_errors(error);
+    assert!(
+        errors.iter().any(|err| {
+            err.to_string()
+                .contains("server.integrations.github.web_url")
+                && err.to_string().contains("must use https")
+        }),
+        "unexpected errors: {errors:?}"
     );
 }
 

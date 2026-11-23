@@ -233,6 +233,10 @@ pub struct GithubIntegrationLayer {
     pub slug:      Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webhooks:  Option<IntegrationWebhooksLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_url:   Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_url:   Option<String>,
 }
 
 /// `[server.integrations.slack]` — Slack workspace credentials and defaults.

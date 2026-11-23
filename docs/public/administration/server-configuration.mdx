@@ -303,8 +303,8 @@ When a field is not set, Fabro derives it from the run's GitHub credential:
 
 | Credential | Name | Email |
 |---|---|---|
-| GitHub App (`strategy = "app"`) | `<slug>[bot]` | `<id>+<slug>[bot]@users.noreply.github.com` |
-| Token (`strategy = "token"`) | the token's user login | `<id>+<login>@users.noreply.github.com` |
+| GitHub App (`strategy = "app"`) | `<slug>[bot]` | `<id>+<slug>[bot]@users.noreply.github.com` (`users.noreply.<host>` on an enterprise host) |
+| Token (`strategy = "token"`) | the token's user login | `<id>+<login>@users.noreply.github.com` (`users.noreply.<host>` on an enterprise host) |
 | None | `Fabro` | `noreply@fabro.sh` |
 
 Setting both `name` and `email` skips the credential lookup. Setting one field overlays it on the derived identity. A lookup failure for the selected credential fails the run at setup; Fabro never silently switches to another author. The resolved identity is recorded in the run's event stream as `git.identity.resolved` and in the run state as `git_identity`.
@@ -322,6 +322,15 @@ Configure GitHub integration auth. `strategy = "token"` is the default and uses 
 [server.integrations.github]
 strategy = "token"
 ```
+
+| Key | Description | Default |
+|---|---|---|
+| `strategy` | `token` or `app` | `token` |
+| `app_id`, `client_id`, `slug` | GitHub App identity (App mode) | none |
+| `web_url` | Web origin of the GitHub deployment, such as `https://ghe.example.com`; must be `https` (`http` only for loopback). Override with `GITHUB_WEB_URL`. Read at server startup: changing it needs a restart | `https://github.com` |
+| `api_url` | REST API base URL; may be plain `http` (for a proxy or mock). Override with `GITHUB_BASE_URL` | derived from `web_url` (`https://api.github.com`, `https://api.<host>` for `*.ghe.com`, `<web_url>/api/v3` otherwise) |
+
+For GitHub Enterprise Server or GitHub Enterprise Cloud, set `web_url` (see [GitHub Enterprise Server and GitHub Enterprise Cloud](/integrations/github#github-enterprise-server-and-github-enterprise-cloud)). The CLI and the run worker read the host from the local `settings.toml` or `GITHUB_WEB_URL`. Put `web_url` in `settings.toml` before `fabro install`; the installer does not persist it from the environment.
 
 For GitHub App mode, set `strategy = "app"` and include `app_id`, `client_id`, and `slug`. Webhook delivery is configured under `[server.integrations.github.webhooks]`:
 
