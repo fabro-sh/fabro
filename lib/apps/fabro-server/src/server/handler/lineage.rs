@@ -34,7 +34,8 @@ use fabro_workflow::operations::{self, ForkTarget, ResolvedForkTarget, RunTimeli
 use tracing::{error, warn};
 
 use super::super::{
-    ApiError, AppState, RequireRunManagementTarget, RequiredUser, parse_run_id_path, run_records,
+    ApiError, AppState, RequireRunManagementTarget, RequiredUser, main_event_mirror,
+    parse_run_id_path, run_records,
 };
 use super::lifecycle::{ArchiveAction, queue_run, run_archive_operation, run_response};
 use super::runs::run_provenance;
@@ -179,6 +180,7 @@ async fn retry_run(
         ))
         .await
         .map_err(workflow_operation_error)?;
+        mirror_created(state.as_ref(), new_run_id).await?;
         let projection = run_records::require_projection(state.as_ref(), new_run_id).await?;
         queue_run(state.as_ref(), new_run_id, &projection, false, actor).await?;
         Ok::<_, ApiError>(new_run_id)
@@ -308,6 +310,7 @@ async fn fork_at(
     .await
     .map_err(workflow_operation_error)?;
 
+    mirror_created(state, new_run_id).await?;
     let seeded = petri_fork::fork(ForkRequest {
         source: id,
         fork: new_run_id,
@@ -348,6 +351,18 @@ async fn fork_at(
         target: resolved,
         rerun_last: false,
     })
+}
+
+async fn mirror_created(state: &AppState, run_id: RunId) -> Result<(), ApiError> {
+    main_event_mirror::mirror_created(state, run_id)
+        .await
+        .map_err(|error| {
+            error!(%run_id, error = %error, "Failed to mirror persisted run creation");
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to persist run lifecycle event",
+            )
+        })
 }
 
 /// A refused position is the caller's mistake; anything else is the

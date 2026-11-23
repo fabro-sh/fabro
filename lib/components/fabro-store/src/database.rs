@@ -3,19 +3,21 @@
 //!
 //! A run's history is Petri's records (`petri_records`) and Fabro's
 //! platform records; its view is the projection the projector commits.
-//! This handle carries the two stores every reader of a run reaches, and
-//! the run-level operations that span them.
+//! This handle carries the stores every reader of a run reaches, the
+//! independent main lifecycle stream, and the run-level operations that
+//! span them.
 
 use std::sync::Arc;
 
 use fabro_types::{RunId, RunProjection};
 
-use crate::{BlobStore, PlatformRecordHook, Result, RunSummaryStore};
+use crate::{BlobStore, MainEventStore, PlatformRecordHook, Result, RunSummaryStore};
 
 #[derive(Clone)]
 pub struct Database {
     blobs:             Arc<BlobStore>,
     run_summary_store: Arc<RunSummaryStore>,
+    main_events:       Arc<MainEventStore>,
 }
 
 impl std::fmt::Debug for Database {
@@ -28,6 +30,7 @@ impl Database {
     #[must_use]
     pub fn new(blobs: Arc<BlobStore>, run_summary_store: Arc<RunSummaryStore>) -> Self {
         Self {
+            main_events: Arc::new(MainEventStore::new(run_summary_store.pool())),
             blobs,
             run_summary_store,
         }
@@ -41,6 +44,11 @@ impl Database {
     #[must_use]
     pub fn blobs(&self) -> Arc<BlobStore> {
         Arc::clone(&self.blobs)
+    }
+
+    #[must_use]
+    pub fn main_events(&self) -> Arc<MainEventStore> {
+        Arc::clone(&self.main_events)
     }
 
     /// The run's projection: the one its projector last committed over
