@@ -30,9 +30,10 @@ pub(super) enum ProgressEvent {
         base_sha:     Option<String>,
     },
     StageStarted {
-        node_id: String,
-        name:    String,
-        script:  Option<String>,
+        node_id:   String,
+        name:      String,
+        script:    Option<String>,
+        route_key: Option<String>,
     },
     StageCompleted {
         node_id: String,
@@ -132,14 +133,17 @@ pub(super) enum ProgressEvent {
         turns_used:    u64,
     },
     EdgeSelected {
+        route_key: Option<String>,
         from_node: String,
         to_node:   String,
         label:     Option<String>,
         condition: Option<String>,
     },
     LoopRestart {
+        route_key: Option<String>,
         from_node: String,
         to_node:   String,
+        label:     Option<String>,
     },
     RunNotice {
         level:   RunNoticeLevel,
