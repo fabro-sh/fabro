@@ -21,11 +21,12 @@ fn usage_types_reuse_canonical_types() {
 fn usage_json_matches_openapi_shape() {
     let usage = Usage {
         tokens: TokenCounts {
-            input:       10,
-            output:      20,
-            reasoning:   3,
-            cache_read:  1,
-            cache_write: 1,
+            input:            10,
+            output:           20,
+            reasoning:        3,
+            cache_read:       1,
+            cache_write:      1,
+            long_cache_write: 0,
         },
         cost:   Some(Cost {
             usd_micros: 42,

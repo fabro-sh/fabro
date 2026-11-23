@@ -143,11 +143,12 @@ mod tests {
 
     fn tokens() -> TokenCounts {
         TokenCounts {
-            input:       100,
-            output:      20,
-            reasoning:   5,
-            cache_read:  7,
-            cache_write: 3,
+            input:            100,
+            output:           20,
+            reasoning:        5,
+            cache_read:       7,
+            cache_write:      3,
+            long_cache_write: 2,
         }
     }
 
@@ -170,6 +171,8 @@ mod tests {
         let total = sum_usage([priced, priced, Usage::default()]);
         assert_eq!(total.tokens.input, 200);
         assert_eq!(total.tokens.cache_write, 6);
+        assert_eq!(total.tokens.long_cache_write, 4);
+        assert_eq!(total.tokens.total(), 270);
         assert_eq!(
             total.cost,
             Some(Cost {
@@ -233,6 +236,7 @@ mod tests {
                         "reasoning": 5,
                         "cache_read": 7,
                         "cache_write": 3,
+                        "long_cache_write": 2,
                     },
                     "cost": { "usd_micros": 42, "source": "provider" },
                 },

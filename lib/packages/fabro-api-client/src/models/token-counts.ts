@@ -15,7 +15,7 @@
 
 
 /**
- * lithos `TokenCounts`: five disjoint token buckets. Every token is counted in exactly one, so their plain sum is the total. `input` excludes cache reads and writes, while `output` excludes reasoning tokens when the provider reports them separately. A bucket that is absent reads as zero.
+ * lithos `TokenCounts`: five disjoint token buckets. Every token is counted in exactly one, so their plain sum is the total. `input` excludes cache reads and writes, while `output` excludes reasoning tokens when the provider reports them separately. A bucket that is absent reads as zero. `long_cache_write` is a subset of `cache_write`, not an additional bucket, and is omitted when zero.
  */
 export interface TokenCounts {
     /**
@@ -38,4 +38,8 @@ export interface TokenCounts {
      * Prompt tokens written into a provider cache.
      */
     'cache_write'?: number;
+    /**
+     * Of cache_write, tokens written with the provider\'s longer cache lifetime. Does not add to the total. Zero when no split is reported.
+     */
+    'long_cache_write'?: number;
 }
