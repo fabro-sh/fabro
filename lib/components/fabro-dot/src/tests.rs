@@ -65,9 +65,16 @@ fn reads_the_shape_with_defaults_applied_and_chains_expanded() {
 
     assert_eq!(graph.name(), "Branch");
     assert_eq!(graph.goal(), Some("Implement and validate a feature"));
+    assert_eq!(graph.rankdir(), Some("LR"));
     assert_eq!(graph.model_stylesheet(), None);
     assert_eq!(graph.node_count(), 6);
     assert_eq!(graph.edge_count(), 6);
+}
+
+#[test]
+fn rankdir_is_read_when_quoted() {
+    let graph = parse(r#"digraph Quoted { graph [rankdir="LR"] start -> exit }"#);
+    assert_eq!(graph.rankdir(), Some("LR"));
 }
 
 #[test]

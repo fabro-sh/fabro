@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use fabro_dot::{GraphPosition, GraphReferenceKind, WorkflowGraph};
+
 use super::super::{
     ApiError, AppState, AsyncWriteExt, Command, EnvVars, IntoResponse, Json, LazyLock, Path,
     PathBuf, Query, RenderWorkflowGraphDirection, RenderWorkflowGraphRequest, RequiredUser,
@@ -270,6 +272,38 @@ async fn load_run_dot_source(state: &AppState, id: &RunId) -> Result<String, Res
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "Graph not found.").into_response())
 }
 
+/// The admitted graph contains expanded imported nodes, but it is a reduced
+/// projection without edge labels or clusters. For workflows with `import=`,
+/// rendering it is the only way to show and highlight those nodes; other
+/// workflows keep their authored DOT unchanged.
+fn authored_imports(authored: &str) -> Option<WorkflowGraph> {
+    let parsed = WorkflowGraph::parse("workflow.fabro", authored).ok()?;
+    let has_imports = parsed
+        .references(GraphPosition::Entrypoint)
+        .ok()?
+        .iter()
+        .any(|reference| matches!(reference.kind, GraphReferenceKind::Import { .. }));
+    has_imports.then_some(parsed)
+}
+
+async fn load_run_graph_dot(state: &AppState, id: &RunId) -> Result<String, Response> {
+    let authored = load_run_dot_source(state, id).await?;
+    let Some(parsed) = authored_imports(&authored) else {
+        return Ok(authored);
+    };
+    // Only pay for the projection when an import actually needs the admitted
+    // graph; runs without imports keep the authored DOT and its exact behavior.
+    let projection = state
+        .load_run_projection(id)
+        .await
+        .map_err(IntoResponse::into_response)?;
+    let admitted = &projection.spec.graph;
+    if admitted.nodes.is_empty() {
+        return Ok(authored);
+    }
+    Ok(admitted.to_dot(parsed.rankdir()))
+}
+
 async fn get_graph(
     _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
@@ -281,7 +315,7 @@ async fn get_graph(
         Err(response) => return response,
     };
 
-    let dot = match load_run_dot_source(&state, &id).await {
+    let dot = match load_run_graph_dot(&state, &id).await {
         Ok(dot) => dot,
         Err(response) => return response,
     };
