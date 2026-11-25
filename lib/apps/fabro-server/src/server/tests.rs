@@ -8870,6 +8870,127 @@ async fn get_graph_source_returns_dot() {
 }
 
 #[tokio::test]
+async fn get_graph_renders_expanded_imported_nodes() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+
+    let parent_dot = r#"digraph Parent {
+    rankdir=LR
+    graph [goal="Check rankdir=LR"]
+    start [shape=Mdiamond]
+    exit  [shape=Msquare]
+    child [import="./child.fabro"]
+    start -> child -> exit
+}"#;
+    let child_dot = r#"digraph Child {
+    start [shape=Mdiamond]
+    exit  [shape=Msquare]
+    a [shape=parallelogram, script="echo a"]
+    b [shape=parallelogram, script="echo b"]
+    start -> a -> b -> exit
+}"#;
+
+    let entrypoint = fabro_types::WorkflowPath::new("parent.fabro").unwrap();
+    let child_path = entrypoint.resolve_reference("./child.fabro").unwrap();
+    let files = std::collections::BTreeMap::from([
+        (entrypoint.clone(), parent_dot.to_string()),
+        (child_path, child_dot.to_string()),
+    ]);
+    let version =
+        fabro_types::WorkflowVersion::new(entrypoint, files, std::collections::BTreeMap::new())
+            .unwrap();
+    let workflow_version_id = test_register_workflow_version(&app, &version, None).await;
+    let intent = serde_json::json!({
+        "workflow_version_id": workflow_version_id,
+        "target": {"kind": "none"},
+        "args": {}
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api("/runs"))
+        .header("content-type", "application/json")
+        .body(Body::from(intent.to_string()))
+        .unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    let body = body_json(response.into_body()).await;
+    let run_id = body["id"]
+        .as_str()
+        .expect("run should be created")
+        .parse::<RunId>()
+        .unwrap();
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(api(&format!("/runs/{run_id}/graph")))
+        .body(Body::empty())
+        .unwrap();
+    let response = checked_response!(app.clone().oneshot(req).await.unwrap(), StatusCode::OK).await;
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let svg = String::from_utf8_lossy(&bytes);
+    let view_box_dimensions = |svg: &str| {
+        let (_, rest) = svg
+            .split_once("viewBox=\"")
+            .expect("SVG should have a viewBox");
+        let (view_box, _) = rest.split_once('"').unwrap();
+        let mut values = view_box.split_ascii_whitespace().skip(2);
+        let width = values.next().unwrap().parse::<f64>().unwrap();
+        let height = values.next().unwrap().parse::<f64>().unwrap();
+        (width, height)
+    };
+    let (width, height) = view_box_dimensions(&svg);
+    assert!(
+        width > height,
+        "authored LR should render horizontally: {width} × {height}"
+    );
+    assert!(
+        svg.contains("<title>child.a</title>"),
+        "expected expanded node child.a in SVG: {}",
+        &svg[..svg.len().min(500)]
+    );
+    assert!(
+        svg.contains("<title>child.b</title>"),
+        "expected expanded node child.b in SVG"
+    );
+    assert!(
+        !svg.contains("<title>child</title>"),
+        "the import placeholder should not be rendered"
+    );
+
+    // The goal also mentions rankdir; only the real layout setting should change.
+    let req = Request::builder()
+        .method("GET")
+        .uri(api(&format!("/runs/{run_id}/graph?direction=TB")))
+        .body(Body::empty())
+        .unwrap();
+    let response = checked_response!(app.clone().oneshot(req).await.unwrap(), StatusCode::OK).await;
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let svg = String::from_utf8_lossy(&bytes);
+    let (width, height) = view_box_dimensions(&svg);
+    assert!(
+        height > width,
+        "TB override should render vertically: {width} × {height}"
+    );
+    assert!(
+        svg.contains("<title>child.a</title>"),
+        "direction override must keep the expanded nodes"
+    );
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(api(&format!("/runs/{run_id}/graph/source")))
+        .body(Body::empty())
+        .unwrap();
+    let response = checked_response!(app.clone().oneshot(req).await.unwrap(), StatusCode::OK).await;
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let source = String::from_utf8(bytes.to_vec()).unwrap();
+    assert_eq!(
+        source, parent_dot,
+        "graph source must remain the authored DOT"
+    );
+}
+
+#[tokio::test]
 async fn render_graph_from_manifest_returns_svg() {
     let app = test_app_with();
 

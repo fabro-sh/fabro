@@ -172,6 +172,12 @@ impl WorkflowGraph {
         self.graph_str("model_stylesheet")
     }
 
+    /// The graph `rankdir` attribute, written bare or quoted.
+    #[must_use]
+    pub fn rankdir(&self) -> Option<&str> {
+        self.graph_str("rankdir")
+    }
+
     /// Every node, declared or named only by an edge.
     #[must_use]
     pub fn node_count(&self) -> usize {

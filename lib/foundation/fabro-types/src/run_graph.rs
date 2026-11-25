@@ -10,6 +10,7 @@
 //! as `RunSpec::graph_source`.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 
 use serde::{Deserialize, Serialize};
 
@@ -75,6 +76,80 @@ impl RunGraph {
         self.node(id)
             .is_some_and(|node| matches!(node.kind, StageHandler::Start | StageHandler::Exit))
     }
+
+    /// Render the admitted graph as Graphviz DOT for read-side diagrams.
+    ///
+    /// Node ids are quoted, so imported ids such as `child.a` stay intact as
+    /// Graphviz titles and can be matched to run stages. An absent or unknown
+    /// `rankdir` falls back to Graphviz's top-to-bottom default.
+    #[must_use]
+    pub fn to_dot(&self, rankdir: Option<&str>) -> String {
+        let name = if self.name.is_empty() {
+            "workflow"
+        } else {
+            &self.name
+        };
+        let mut out = format!("digraph {} {{\n", dot_quote(name));
+        if !self.goal.is_empty() {
+            let _ = writeln!(out, "    graph [goal={}]", dot_quote(&self.goal));
+        }
+        let direction = rankdir.filter(|d| matches!(*d, "LR" | "TB" | "BT" | "RL"));
+        let _ = writeln!(out, "    rankdir={}", direction.unwrap_or("TB"));
+        for (id, node) in &self.nodes {
+            let _ = writeln!(
+                out,
+                "    {} [shape={}, label={}];",
+                dot_quote(id),
+                dot_shape(node.kind),
+                dot_quote(&node.label)
+            );
+        }
+        for edge in &self.edges {
+            let _ = writeln!(
+                out,
+                "    {} -> {};",
+                dot_quote(&edge.from),
+                dot_quote(&edge.to)
+            );
+        }
+        out.push_str("}\n");
+        out
+    }
+}
+
+/// Keep in step with `fabro_dot`'s DOT string quoting: both escaper paths run
+/// on the SVG response, and an id that changes spelling breaks stage matching.
+fn dot_quote(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            _ => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn dot_shape(kind: StageHandler) -> &'static str {
+    match kind {
+        StageHandler::Start => "Mdiamond",
+        StageHandler::Exit => "Msquare",
+        StageHandler::Agent => "box",
+        StageHandler::Prompt => "tab",
+        StageHandler::Command => "parallelogram",
+        StageHandler::Human => "hexagon",
+        StageHandler::Conditional => "diamond",
+        StageHandler::Parallel => "component",
+        StageHandler::ParallelFanIn => "tripleoctagon",
+        StageHandler::StackManagerLoop => "house",
+        StageHandler::Wait => "insulator",
+    }
 }
 
 #[cfg(test)]
@@ -120,5 +195,37 @@ mod tests {
 
         let bare: RunGraph = serde_json::from_value(serde_json::json!({ "name": "Bare" })).unwrap();
         assert_eq!(bare, RunGraph::new("Bare"));
+    }
+
+    #[test]
+    fn dot_keeps_imported_ids_and_a_bare_rankdir() {
+        let mut graph = graph();
+        graph.nodes.insert("child.a".to_string(), RunGraphNode {
+            label: "Say \"hi\"".to_string(),
+            kind:  StageHandler::Command,
+        });
+        graph.edges.push(RunGraphEdge {
+            from: "plan".to_string(),
+            to:   "child.a".to_string(),
+        });
+        let dot = graph.to_dot(Some("LR"));
+
+        assert!(dot.contains("rankdir=LR\n"));
+        assert!(dot.contains("\"child.a\" [shape=parallelogram, label=\"Say \\\"hi\\\"\"];"));
+        assert!(dot.contains("\"plan\" -> \"child.a\";"));
+    }
+
+    #[test]
+    fn dot_defaults_unknown_directions_to_tb() {
+        assert!(graph().to_dot(Some("diagonal")).contains("rankdir=TB\n"));
+        assert!(graph().to_dot(None).contains("rankdir=TB\n"));
+    }
+
+    #[test]
+    fn dot_escapes_control_characters_in_labels() {
+        let mut graph = graph();
+        graph.nodes.get_mut("plan").unwrap().label = "a\tb\nc\rd".to_string();
+        let dot = graph.to_dot(Some("TB"));
+        assert!(dot.contains("label=\"a\\tb\\nc\\rd\""));
     }
 }
