@@ -8875,7 +8875,8 @@ async fn get_graph_renders_expanded_imported_nodes() {
     let app = crate::test_support::build_test_router(Arc::clone(&state));
 
     let parent_dot = r#"digraph Parent {
-    graph [goal="Imported graph"]
+    rankdir=LR
+    graph [goal="Check rankdir=LR"]
     start [shape=Mdiamond]
     exit  [shape=Msquare]
     child [import="./child.fabro"]
@@ -8927,6 +8928,21 @@ async fn get_graph_renders_expanded_imported_nodes() {
     let response = checked_response!(app.clone().oneshot(req).await.unwrap(), StatusCode::OK).await;
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let svg = String::from_utf8_lossy(&bytes);
+    let view_box_dimensions = |svg: &str| {
+        let (_, rest) = svg
+            .split_once("viewBox=\"")
+            .expect("SVG should have a viewBox");
+        let (view_box, _) = rest.split_once('"').unwrap();
+        let mut values = view_box.split_ascii_whitespace().skip(2);
+        let width = values.next().unwrap().parse::<f64>().unwrap();
+        let height = values.next().unwrap().parse::<f64>().unwrap();
+        (width, height)
+    };
+    let (width, height) = view_box_dimensions(&svg);
+    assert!(
+        width > height,
+        "authored LR should render horizontally: {width} × {height}"
+    );
     assert!(
         svg.contains("<title>child.a</title>"),
         "expected expanded node child.a in SVG: {}",
@@ -8941,8 +8957,7 @@ async fn get_graph_renders_expanded_imported_nodes() {
         "the import placeholder should not be rendered"
     );
 
-    // The generated DOT keeps a bare rankdir so an explicit direction still
-    // applies to the expanded graph.
+    // The goal also mentions rankdir; only the real layout setting should change.
     let req = Request::builder()
         .method("GET")
         .uri(api(&format!("/runs/{run_id}/graph?direction=TB")))
@@ -8951,6 +8966,11 @@ async fn get_graph_renders_expanded_imported_nodes() {
     let response = checked_response!(app.clone().oneshot(req).await.unwrap(), StatusCode::OK).await;
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let svg = String::from_utf8_lossy(&bytes);
+    let (width, height) = view_box_dimensions(&svg);
+    assert!(
+        height > width,
+        "TB override should render vertically: {width} × {height}"
+    );
     assert!(
         svg.contains("<title>child.a</title>"),
         "direction override must keep the expanded nodes"

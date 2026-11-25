@@ -80,9 +80,8 @@ impl RunGraph {
     /// Render the admitted graph as Graphviz DOT for read-side diagrams.
     ///
     /// Node ids are quoted, so imported ids such as `child.a` stay intact as
-    /// Graphviz titles and can be matched to run stages. `rankdir` is emitted
-    /// bare and only when it is one of Graphviz's directions, so a caller can
-    /// still rewrite it.
+    /// Graphviz titles and can be matched to run stages. An absent or unknown
+    /// `rankdir` falls back to Graphviz's top-to-bottom default.
     #[must_use]
     pub fn to_dot(&self, rankdir: Option<&str>) -> String {
         let name = if self.name.is_empty() {
@@ -94,8 +93,6 @@ impl RunGraph {
         if !self.goal.is_empty() {
             let _ = writeln!(out, "    graph [goal={}]", dot_quote(&self.goal));
         }
-        // Always emit a bare rankdir so a caller can rewrite it with
-        // `apply_direction`, including when the authored graph omitted it.
         let direction = rankdir.filter(|d| matches!(*d, "LR" | "TB" | "BT" | "RL"));
         let _ = writeln!(out, "    rankdir={}", direction.unwrap_or("TB"));
         for (id, node) in &self.nodes {

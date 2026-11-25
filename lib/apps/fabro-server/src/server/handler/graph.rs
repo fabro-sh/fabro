@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use fabro_dot::{GraphPosition, GraphReferenceKind, WorkflowGraph};
+use fabro_graphviz::render;
 
 use super::super::{
     ApiError, AppState, AsyncWriteExt, Command, EnvVars, IntoResponse, Json, LazyLock, Path,
@@ -249,14 +250,19 @@ struct GraphParams {
     direction: Option<String>,
 }
 
-async fn load_run_dot_source(state: &AppState, id: &RunId) -> Result<String, Response> {
-    let live_dot_source = {
-        let runs = state.runs.lock().expect("runs lock poisoned");
-        runs.get(id)
-            .map(|managed_run| managed_run.dot_source.clone())
-    };
+fn live_run_dot_source(state: &AppState, id: &RunId) -> Option<String> {
+    let runs = state.runs.lock().expect("runs lock poisoned");
+    runs.get(id)
+        .filter(|run| !run.dot_source.is_empty())
+        .map(|run| run.dot_source.clone())
+}
 
-    let dot_source = if let Some(dot) = live_dot_source.filter(|d| !d.is_empty()) {
+fn graph_not_found() -> ApiError {
+    ApiError::new(StatusCode::NOT_FOUND, "Graph not found.")
+}
+
+async fn load_run_dot_source(state: &AppState, id: &RunId) -> Result<String, Response> {
+    let dot_source = if let Some(dot) = live_run_dot_source(state, id) {
         Some(dot)
     } else {
         state
@@ -268,8 +274,7 @@ async fn load_run_dot_source(state: &AppState, id: &RunId) -> Result<String, Res
             .clone()
     };
 
-    dot_source
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "Graph not found.").into_response())
+    dot_source.ok_or_else(|| graph_not_found().into_response())
 }
 
 /// The admitted graph contains expanded imported nodes, but it is a reduced
@@ -286,22 +291,37 @@ fn authored_imports(authored: &str) -> Option<WorkflowGraph> {
     has_imports.then_some(parsed)
 }
 
-async fn load_run_graph_dot(state: &AppState, id: &RunId) -> Result<String, Response> {
-    let authored = load_run_dot_source(state, id).await?;
-    let Some(parsed) = authored_imports(&authored) else {
-        return Ok(authored);
+async fn load_run_graph_dot(
+    state: &AppState,
+    id: &RunId,
+    direction: Option<&str>,
+) -> Result<String, ApiError> {
+    let live = live_run_dot_source(state, id);
+    let projection = if live.is_none() {
+        Some(state.load_run_projection(id).await?)
+    } else {
+        None
     };
-    // Only pay for the projection when an import actually needs the admitted
-    // graph; runs without imports keep the authored DOT and its exact behavior.
-    let projection = state
-        .load_run_projection(id)
-        .await
-        .map_err(IntoResponse::into_response)?;
-    let admitted = &projection.spec.graph;
-    if admitted.nodes.is_empty() {
-        return Ok(authored);
+    let authored = live
+        .or_else(|| projection.as_ref()?.spec.graph_source.clone())
+        .ok_or_else(graph_not_found)?;
+
+    if let Some(parsed) = authored_imports(&authored) {
+        let projection = match projection {
+            Some(projection) => projection,
+            None => state.load_run_projection(id).await?,
+        };
+        let admitted = &projection.spec.graph;
+        if !admitted.nodes.is_empty() {
+            // Set the layout attribute directly; labels and goals can contain rankdir text.
+            return Ok(admitted.to_dot(direction.or_else(|| parsed.rankdir())));
+        }
     }
-    Ok(admitted.to_dot(parsed.rankdir()))
+
+    Ok(match direction {
+        Some(dir) => render::apply_direction(&authored, dir).into_owned(),
+        None => authored,
+    })
 }
 
 async fn get_graph(
@@ -315,17 +335,13 @@ async fn get_graph(
         Err(response) => return response,
     };
 
-    let dot = match load_run_graph_dot(&state, &id).await {
+    let direction = params
+        .direction
+        .as_deref()
+        .filter(|dir| matches!(*dir, "LR" | "TB" | "BT" | "RL"));
+    let dot = match load_run_graph_dot(&state, &id, direction).await {
         Ok(dot) => dot,
-        Err(response) => return response,
-    };
-
-    let dot = match params.direction.as_deref() {
-        Some(dir @ ("LR" | "TB" | "BT" | "RL")) => {
-            use fabro_graphviz::render;
-            render::apply_direction(&dot, dir).into_owned()
-        }
-        _ => dot,
+        Err(error) => return error.into_response(),
     };
 
     render_graph_bytes(&dot).await
